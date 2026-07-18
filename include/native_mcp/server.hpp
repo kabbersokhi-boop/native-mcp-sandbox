@@ -1,6 +1,7 @@
 #pragma once
 
 #include "native_mcp/foundation.hpp"
+#include "native_mcp/log_tools.hpp"
 
 #include <iosfwd>
 #include <optional>
@@ -22,7 +23,8 @@ struct ProcessResult final {
 
 class Server final {
  public:
-  explicit Server(ResourceBudget budget = conservative_budget());
+  explicit Server(ResourceBudget budget = conservative_budget(),
+                  std::optional<LogToolService> tools = std::nullopt);
 
   [[nodiscard]] ProcessResult process_line(std::string_view line);
   [[nodiscard]] ProcessResult request_too_large() const;
@@ -31,11 +33,12 @@ class Server final {
  private:
   ResourceBudget budget_;
   LifecycleState state_{LifecycleState::kUninitialized};
+  std::optional<LogToolService> tools_;
 };
 
-[[nodiscard]] int run_stdio(std::istream& input,
-                            std::ostream& output,
-                            std::ostream& diagnostics,
-                            ResourceBudget budget = conservative_budget());
+[[nodiscard]] int run_stdio(
+    std::istream& input, std::ostream& output, std::ostream& diagnostics,
+    ResourceBudget budget = conservative_budget(),
+    std::optional<LogToolService> tools = std::nullopt);
 
 }  // namespace native_mcp

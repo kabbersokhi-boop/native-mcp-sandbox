@@ -1,53 +1,51 @@
 # Threat Model
 
-## Protected assets
+## Assets
 
-- files outside explicitly configured roots;
-- files reached through symbolic, magic-link, traversal, or mount escapes;
-- device nodes, sockets, FIFOs, directories, and other special targets;
-- host memory and CPU availability;
-- protocol framing and stdout integrity; and
-- configuration and diagnostic privacy.
+- confidentiality of files outside configured roots;
+- confidentiality of denied files and unreturned log bytes;
+- integrity of the host filesystem and processes;
+- availability of the MCP server and development machine;
+- correctness and framing of protocol responses.
 
-## Adversary capabilities
+## Adversary
 
-An untrusted client may provide malformed JSON-RPC, invalid lifecycle sequences,
-oversized lines, hostile root names or relative paths to future tools, repeated
-requests, and paths that race with filesystem changes. A local untrusted user may
-rename entries, replace them with symlinks, grow files, or create special files under
-an otherwise approved directory.
+The MCP client, tool arguments, root names, paths, query text, file contents, file
+growth, and request timing are untrusted. The local operator, installed binary, startup
+policy configuration, kernel, and compiler toolchain are trusted for this phase.
 
-## Phase 2 controls
+## Controls
 
-- Host access is still unreachable through MCP.
-- Configuration parsing uses a closed schema and bounded input.
-- Roots are named, explicit, read-only, and opened as descriptors.
-- Relative paths reject absolute, empty, dot, parent, and repeated-separator forms.
-- Strict target resolution stays beneath the root and denies symlinks, magic links,
-  and mount crossings.
-- Descriptor checks accept only regular files within a configured size limit.
-- The checked inode is pinned before obtaining the readable descriptor.
-- The compatibility backend is opt-in and documented as weaker for bind mounts.
-- Protocol request and response limits remain enforced.
+- bounded closed-schema policy configuration;
+- named roots opened as owned descriptors;
+- strict `openat2` containment with no symlinks, magic links, or mount crossing;
+- explicit weaker legacy mode, disabled by default;
+- regular-file and size enforcement with inode revalidation;
+- strict relative-path validation;
+- fixed observed-size read budget;
+- 16 MiB synchronous scan ceiling;
+- bounded queries, chunks, matches, tail lines, and previews;
+- escaping of binary and non-printable output bytes;
+- closed MCP input schemas and stable tool names;
+- tool-call burst limiting;
+- 1 MiB protocol message limits;
+- stdout isolation and non-echoing stderr diagnostics.
 
-## Residual risks and explicit limitations
+## Denied attacks
 
-- Phase 2 does not expose an MCP analysis tool, so it does not yet prove end-to-end
-  agent authorization.
-- A regular file can grow after opening; future readers must enforce the stored maximum
-  byte budget rather than trust a stale size.
-- Strict mode depends on Linux `openat2`; old kernels fail closed unless compatibility
-  mode is explicitly enabled.
-- Reopening a pinned descriptor depends on procfs and normal read permissions.
-- The project does not yet use namespaces, Landlock, seccomp, privilege dropping, or a
-  separate broker process.
-- Hard links inside an approved root refer to the linked inode and are considered part
-  of the root's approved namespace.
-- Denial-of-service from many sequential valid requests remains bounded by the current
-  synchronous server but deadlines and cancellation arrive in later phases.
+Tests cover traversal, absolute paths, root and target symlinks, mount crossing,
+directories, FIFOs, sockets, devices, missing and oversized files, malformed numeric
+configuration, file growth after opening, chunk-boundary matches, long lines, binary
+content, extra tool fields, invalid limits, and rapid repeated calls.
 
-## Security non-goals
+## Residual risks and limitations
 
-This project does not claim to contain arbitrary code execution, safely run untrusted
-binaries, prevent a privileged local administrator from interfering, or provide a
-complete operating-system sandbox.
+- Legacy descriptor walking cannot detect every bind mount.
+- A privileged process can modify an already-open file; growth is excluded from the
+  read budget, but same-size content changes are not prevented.
+- Reading up to 16 MiB is synchronous and has no hard deadline or cancellation.
+- The rate limiter is per process and is not an identity-based multi-tenant quota.
+- Logs may contain secrets. Operators must configure roots narrowly and clients should
+  show tool invocations to users.
+- This phase does not add namespaces, Landlock, seccomp, privilege dropping, or a
+  network authentication boundary.

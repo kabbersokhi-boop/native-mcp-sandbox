@@ -1,61 +1,65 @@
 # Architecture
 
-## Current system boundary
+## Current boundary
 
-Phase 2 contains two deliberately separate paths:
+Phase 3 connects the reviewed filesystem policy gate to two narrow MCP tools. Host
+access is available only when the operator supplies a policy configuration at startup.
+Unconfigured mode still advertises an empty tool list.
 
-1. the Phase 1 MCP protocol server, which exposes no host-access tools; and
-2. a filesystem policy library used only by unit tests and future native tools.
+## Data path
 
-The MCP dispatcher is not connected to the policy library. This prevents a partially
-reviewed policy from becoming an agent capability merely because the code exists.
+1. Read one bounded JSON-RPC line from stdin.
+2. Validate the MCP lifecycle and closed tool-call envelope.
+3. Apply the bounded per-process tool-call rate limiter.
+4. Validate arguments and select a configured symbolic root.
+5. Resolve the relative path through the descriptor-based policy.
+6. Pin and revalidate a bounded regular-file descriptor.
+7. Stream at most the captured read budget in 8 KiB chunks.
+8. Produce bounded escaped previews and structured metadata.
+9. Serialize at most one response through the single stdout writer.
 
-## Protocol path
+## Components
 
-1. Read one bounded line from stdin.
-2. Parse one JSON value.
-3. Validate JSON-RPC envelope, ID, parameters, and MCP lifecycle.
-4. Serialize one bounded response.
-5. Write protocol output to stdout and diagnostics to stderr.
+| Component | Responsibility | Must not do |
+| --- | --- | --- |
+| Stdio server | Frame JSON-RPC and enforce lifecycle | Write diagnostics to stdout |
+| Tool dispatcher | Validate calls and rate-limit bursts | Accept undeclared tools or fields |
+| Filesystem policy | Resolve named-root relative paths | Follow symlinks or return special files |
+| Log analyzer | Literal search and bounded tail | Load the whole file or execute contents |
+| Result serializer | Return compact MCP evidence | Exceed the response budget |
 
-## Filesystem policy path
+## Streaming search
 
-1. Parse a bounded, closed-schema JSON configuration.
-2. Validate unique symbolic root names and absolute normalized root paths.
-3. Open each root as an owned directory descriptor without following symlinks.
-4. Validate an untrusted relative path component by component.
-5. Open the target under the selected root with kernel path-resolution restrictions.
-6. Inspect the opened descriptor and accept only a bounded regular file.
-7. Reopen the pinned inode read-only through `/proc/self/fd` and compare metadata.
-8. Return an owned descriptor plus observed and maximum read sizes.
+`logs.search` uses a Knuth–Morris–Pratt failure table and carries matcher state between
+read chunks. Memory use depends on query, chunk, preview, and match limits—not file
+length. Only the first bounded matches are retained.
 
-## Strict Linux backend
+## Streaming tail
 
-The strict backend requires `openat2`. Root creation uses no-symlink and no-magic-link
-resolution. Target opening additionally uses beneath-root and no-cross-mount
-resolution. All fields in `open_how` are zero-initialized before use.
-
-## Compatibility backend
-
-The optional compatibility backend is disabled by default. It walks each path
-component using a pinned directory descriptor and `O_PATH | O_NOFOLLOW`. This prevents
-textual traversal, symlink following, and rename-based substitution of previously
-opened parents. Old kernels do not expose a reliable equivalent of `RESOLVE_NO_XDEV`
-for every bind-mount case, so compatibility mode does not claim identical mount
-containment.
+`logs.tail` scans forward while retaining a bounded deque of the requested final lines.
+Each line preview is independently bounded. Reverse-seek optimization is deferred
+until reproducible benchmarks justify the extra complexity.
 
 ## Resource invariants
 
-- Configuration text is capped before JSON parsing.
-- Root count, root names, path bytes, and per-root file size are bounded.
-- Root and target descriptors use RAII and close on every return path.
-- Only regular files become readable descriptors.
-- The path used for agent-controlled lookup is never passed to a shell.
-- File growth after opening does not expand the future read budget.
-- stdout remains protocol-only in server mode.
+- Files larger than 16 MiB are rejected by the synchronous analyzer.
+- The analyzer reads no bytes added after the policy captured the file size.
+- At most 50 matches or tail lines are returned.
+- Preview source data is capped at 512 bytes per returned line.
+- Tool calls are limited to a burst of 16 per one-second window.
+- Protocol requests and responses remain capped at 1 MiB.
+- stdout has one logical writer.
 
-## Planned Phase 3 connection
+## Error model
 
-Phase 3 may introduce a log-analysis tool that receives a root name and relative path,
-uses this policy library, and streams at most the returned read budget. It must not
-accept raw absolute paths or bypass the policy with conventional `open()` calls.
+Malformed MCP calls and unknown tool names are JSON-RPC errors. Expected policy,
+argument, read, and rate-limit failures are MCP tool execution errors with `isError`.
+Successful structured results conform to advertised output schemas. Execution errors
+omit `structuredContent` because those schemas describe successful output.
+
+## Concurrency
+
+Phase 3 is synchronous. There is no worker pool, coroutine scheduling, cancellation,
+or enforced operation deadline. The small file cap limits individual work, while the
+burst limiter reduces rapid repeated calls. Full scheduling and backpressure remain a
+later phase.

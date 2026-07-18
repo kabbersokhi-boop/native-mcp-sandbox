@@ -1,17 +1,16 @@
 #include "native_mcp/file_policy.hpp"
 
+#include <cerrno>
+#include <cctype>
+#include <cstring>
 #include <fcntl.h>
+#include <limits>
 #include <linux/openat2.h>
+#include <nlohmann/json.hpp>
+#include <string>
 #include <sys/stat.h>
 #include <sys/syscall.h>
 #include <unistd.h>
-
-#include <cctype>
-#include <cerrno>
-#include <cstring>
-#include <limits>
-#include <nlohmann/json.hpp>
-#include <string>
 #include <unordered_set>
 #include <utility>
 
@@ -20,7 +19,8 @@ namespace {
 
 using Json = nlohmann::json;
 
-[[nodiscard]] PolicyError error(const PolicyErrorCode code, std::string message) {
+[[nodiscard]] PolicyError error(const PolicyErrorCode code,
+                                std::string message) {
   return PolicyError{.code = code, .message = std::move(message)};
 }
 
@@ -37,7 +37,8 @@ using Json = nlohmann::json;
   return true;
 }
 
-[[nodiscard]] bool valid_root_path(const std::string_view path, const std::size_t max_path_bytes) {
+[[nodiscard]] bool valid_root_path(const std::string_view path,
+                                   const std::size_t max_path_bytes) {
   if (path.empty() || path.front() != '/' || path.size() > max_path_bytes ||
       path.find('\0') != std::string_view::npos) {
     return false;
@@ -64,15 +65,16 @@ using Json = nlohmann::json;
   return true;
 }
 
-[[nodiscard]] std::optional<PolicyError> validate_relative_path(const std::string_view path,
-                                                                const std::size_t max_path_bytes) {
+[[nodiscard]] std::optional<PolicyError> validate_relative_path(
+    const std::string_view path, const std::size_t max_path_bytes) {
   if (path.empty() || path.front() == '/' || path.back() == '/' ||
       path.find('\0') != std::string_view::npos) {
     return error(PolicyErrorCode::kInvalidRelativePath,
                  "path must be a nonempty relative file path");
   }
   if (path.size() > max_path_bytes) {
-    return error(PolicyErrorCode::kPathTooLong, "path exceeds the configured byte limit");
+    return error(PolicyErrorCode::kPathTooLong,
+                 "path exceeds the configured byte limit");
   }
 
   std::size_t start = 0U;
@@ -92,12 +94,15 @@ using Json = nlohmann::json;
   return std::nullopt;
 }
 
-[[nodiscard]] int openat2_path(const int directory_fd, const std::string& path,
+[[nodiscard]] int openat2_path(const int directory_fd,
+                               const std::string& path,
                                const std::uint64_t flags) {
   open_how how{};
   how.flags = flags;
-  how.resolve = RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS | RESOLVE_NO_MAGICLINKS | RESOLVE_NO_XDEV;
-  return static_cast<int>(::syscall(SYS_openat2, directory_fd, path.c_str(), &how, sizeof(how)));
+  how.resolve = RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS |
+                RESOLVE_NO_MAGICLINKS | RESOLVE_NO_XDEV;
+  return static_cast<int>(::syscall(SYS_openat2, directory_fd, path.c_str(),
+                                    &how, sizeof(how)));
 }
 
 [[nodiscard]] PolicyError map_open_error(const int number) {
@@ -109,20 +114,25 @@ using Json = nlohmann::json;
                    "required openat2 containment is unavailable");
     case ELOOP:
     case EXDEV:
-      return error(PolicyErrorCode::kResolutionDenied, "path resolution crossed a denied boundary");
+      return error(PolicyErrorCode::kResolutionDenied,
+                   "path resolution crossed a denied boundary");
     case ENOENT:
     case ENOTDIR:
       return error(PolicyErrorCode::kTargetMissing,
                    "target does not exist beneath the selected root");
     case EACCES:
     case EPERM:
-      return error(PolicyErrorCode::kPermissionDenied, "permission denied while opening target");
+      return error(PolicyErrorCode::kPermissionDenied,
+                   "permission denied while opening target");
     default:
-      return error(PolicyErrorCode::kIoError, std::string{"open failed: "} + std::strerror(number));
+      return error(PolicyErrorCode::kIoError,
+                   std::string{"open failed: "} + std::strerror(number));
   }
 }
 
-[[nodiscard]] int open_legacy_path(const int root_fd, const std::string_view path,
+
+[[nodiscard]] int open_legacy_path(const int root_fd,
+                                   const std::string_view path,
                                    PolicyError& failure) {
   UniqueFd current{::fcntl(root_fd, F_DUPFD_CLOEXEC, 0)};
   if (!current.valid()) {
@@ -136,13 +146,25 @@ using Json = nlohmann::json;
     const bool final = slash == std::string_view::npos;
     const std::size_t end = final ? path.size() : slash;
     const std::string component{path.substr(start, end - start)};
-    const int flags = O_PATH | O_CLOEXEC | O_NOFOLLOW | (final ? 0 : O_DIRECTORY);
+    const int flags = O_PATH | O_CLOEXEC | O_NOFOLLOW |
+                      (final ? 0 : O_DIRECTORY);
     UniqueFd next{::openat(current.get(), component.c_str(), flags)};
     if (!next.valid()) {
-      failure = map_open_error(errno);
+      const int number = errno;
+      if (number == ELOOP || number == ENOTDIR) {
+        struct stat link_metadata {};
+        if (::fstatat(current.get(), component.c_str(), &link_metadata,
+                      AT_SYMLINK_NOFOLLOW) == 0 &&
+            S_ISLNK(link_metadata.st_mode)) {
+          failure = error(PolicyErrorCode::kResolutionDenied,
+                          "legacy descriptor walk rejected a symbolic link");
+          return -1;
+        }
+      }
+      failure = map_open_error(number);
       return -1;
     }
-    struct stat metadata{};
+    struct stat metadata {};
     if (::fstat(next.get(), &metadata) != 0) {
       failure = error(PolicyErrorCode::kIoError, "failed to inspect path component");
       return -1;
@@ -153,7 +175,8 @@ using Json = nlohmann::json;
       return -1;
     }
     if (!final && !S_ISDIR(metadata.st_mode)) {
-      failure = error(PolicyErrorCode::kTargetMissing, "path component is not a directory");
+      failure = error(PolicyErrorCode::kTargetMissing,
+                      "path component is not a directory");
       return -1;
     }
     current = std::move(next);
@@ -166,10 +189,12 @@ using Json = nlohmann::json;
   return -1;
 }
 
-[[nodiscard]] int open_root_legacy(const std::string_view path, PolicyError& failure) {
+[[nodiscard]] int open_root_legacy(const std::string_view path,
+                                   PolicyError& failure) {
   UniqueFd current{::open("/", O_PATH | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW)};
   if (!current.valid()) {
-    failure = error(PolicyErrorCode::kOpenRootFailed, "could not open filesystem root");
+    failure = error(PolicyErrorCode::kOpenRootFailed,
+                    "could not open filesystem root");
     return -1;
   }
   if (path == "/") {
@@ -181,17 +206,18 @@ using Json = nlohmann::json;
     const bool final = slash == std::string_view::npos;
     const std::size_t end = final ? path.size() : slash;
     const std::string component{path.substr(start, end - start)};
-    UniqueFd next{
-        ::openat(current.get(), component.c_str(), O_PATH | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW)};
+    UniqueFd next{::openat(current.get(), component.c_str(),
+                           O_PATH | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW)};
     if (!next.valid()) {
       failure = error(PolicyErrorCode::kOpenRootFailed,
                       "configured root contains a missing, non-directory, or symlink component");
       return -1;
     }
-    struct stat metadata{};
+    struct stat metadata {};
     if (::fstat(next.get(), &metadata) != 0 || !S_ISDIR(metadata.st_mode) ||
         S_ISLNK(metadata.st_mode)) {
-      failure = error(PolicyErrorCode::kOpenRootFailed, "configured root could not be validated");
+      failure = error(PolicyErrorCode::kOpenRootFailed,
+                      "configured root could not be validated");
       return -1;
     }
     current = std::move(next);
@@ -204,13 +230,14 @@ using Json = nlohmann::json;
   return -1;
 }
 
-[[nodiscard]] int open_root_strict(const std::string& path, const bool allow_legacy,
+[[nodiscard]] int open_root_strict(const std::string& path,
+                                   const bool allow_legacy,
                                    PolicyError& failure) {
   open_how how{};
   how.flags = O_PATH | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW;
   how.resolve = RESOLVE_NO_SYMLINKS | RESOLVE_NO_MAGICLINKS;
-  const int fd =
-      static_cast<int>(::syscall(SYS_openat2, AT_FDCWD, path.c_str(), &how, sizeof(how)));
+  const int fd = static_cast<int>(
+      ::syscall(SYS_openat2, AT_FDCWD, path.c_str(), &how, sizeof(how)));
   if (fd >= 0) {
     return fd;
   }
@@ -229,7 +256,8 @@ using Json = nlohmann::json;
   return -1;
 }
 
-[[nodiscard]] bool same_object(const struct stat& left, const struct stat& right) noexcept {
+[[nodiscard]] bool same_object(const struct stat& left,
+                               const struct stat& right) noexcept {
   return left.st_dev == right.st_dev && left.st_ino == right.st_ino &&
          left.st_mode == right.st_mode;
 }
@@ -261,7 +289,9 @@ void UniqueFd::reset(const int fd) noexcept {
 
 ReadOnlyFile::ReadOnlyFile(UniqueFd fd, const std::uint64_t observed_size,
                            const std::uint64_t max_read_bytes) noexcept
-    : fd_(std::move(fd)), observed_size_(observed_size), max_read_bytes_(max_read_bytes) {}
+    : fd_(std::move(fd)),
+      observed_size_(observed_size),
+      max_read_bytes_(max_read_bytes) {}
 int ReadOnlyFile::fd() const noexcept { return fd_.get(); }
 std::uint64_t ReadOnlyFile::observed_size() const noexcept { return observed_size_; }
 std::uint64_t ReadOnlyFile::max_read_bytes() const noexcept { return max_read_bytes_; }
@@ -269,8 +299,8 @@ std::uint64_t ReadOnlyFile::max_read_bytes() const noexcept { return max_read_by
 FilesystemPolicy::FilesystemPolicy(const FilesystemPolicyLimits limits) noexcept
     : limits_(limits) {}
 
-FilesystemPolicy::CreateResult FilesystemPolicy::create(const FilesystemPolicyConfig& config,
-                                                        const FilesystemPolicyLimits limits) {
+FilesystemPolicy::CreateResult FilesystemPolicy::create(
+    const FilesystemPolicyConfig& config, const FilesystemPolicyLimits limits) {
   if (config.roots.empty() || config.roots.size() > limits.max_roots) {
     return {.policy = std::nullopt,
             .error = error(PolicyErrorCode::kTooManyRoots,
@@ -297,21 +327,22 @@ FilesystemPolicy::CreateResult FilesystemPolicy::create(const FilesystemPolicyCo
     }
     if (!names.insert(root.name).second) {
       return {.policy = std::nullopt,
-              .error = error(PolicyErrorCode::kDuplicateRoot, "root names must be unique")};
+              .error = error(PolicyErrorCode::kDuplicateRoot,
+                             "root names must be unique")};
     }
 
-    PolicyError root_error =
-        error(PolicyErrorCode::kOpenRootFailed, "configured root could not be opened safely");
-    UniqueFd directory{
-        open_root_strict(root.path, limits.allow_legacy_descriptor_walk, root_error)};
+    PolicyError root_error = error(PolicyErrorCode::kOpenRootFailed,
+                                   "configured root could not be opened safely");
+    UniqueFd directory{open_root_strict(
+        root.path, limits.allow_legacy_descriptor_walk, root_error)};
     if (!directory.valid()) {
       return {.policy = std::nullopt, .error = std::move(root_error)};
     }
-    struct stat metadata{};
+    struct stat metadata {};
     if (::fstat(directory.get(), &metadata) != 0 || !S_ISDIR(metadata.st_mode)) {
-      return {
-          .policy = std::nullopt,
-          .error = error(PolicyErrorCode::kOpenRootFailed, "configured root is not a directory")};
+      return {.policy = std::nullopt,
+              .error = error(PolicyErrorCode::kOpenRootFailed,
+                             "configured root is not a directory")};
     }
     policy.roots_.push_back(RootHandle{.name = root.name,
                                        .directory = std::move(directory),
@@ -321,8 +352,8 @@ FilesystemPolicy::CreateResult FilesystemPolicy::create(const FilesystemPolicyCo
   return {.policy = std::move(policy), .error = std::nullopt};
 }
 
-OpenFileResult FilesystemPolicy::open_regular_file(const std::string_view root_name,
-                                                   const std::string_view relative_path) const {
+OpenFileResult FilesystemPolicy::open_regular_file(
+    const std::string_view root_name, const std::string_view relative_path) const {
   const RootHandle* root = nullptr;
   for (const RootHandle& candidate : roots_) {
     if (candidate.name == root_name) {
@@ -332,18 +363,21 @@ OpenFileResult FilesystemPolicy::open_regular_file(const std::string_view root_n
   }
   if (root == nullptr) {
     return {.file = std::nullopt,
-            .error = error(PolicyErrorCode::kUnknownRoot, "requested root is not configured")};
+            .error = error(PolicyErrorCode::kUnknownRoot,
+                           "requested root is not configured")};
   }
-  if (const auto path_error = validate_relative_path(relative_path, limits_.max_path_bytes)) {
+  if (const auto path_error =
+          validate_relative_path(relative_path, limits_.max_path_bytes)) {
     return {.file = std::nullopt, .error = path_error};
   }
 
   const std::string path{relative_path};
-  UniqueFd path_fd{openat2_path(root->directory.get(), path, O_PATH | O_CLOEXEC | O_NOFOLLOW)};
+  UniqueFd path_fd{openat2_path(root->directory.get(), path,
+                                O_PATH | O_CLOEXEC | O_NOFOLLOW)};
   if (!path_fd.valid()) {
     const int openat2_error = errno;
-    const bool unsupported =
-        openat2_error == ENOSYS || openat2_error == E2BIG || openat2_error == EINVAL;
+    const bool unsupported = openat2_error == ENOSYS || openat2_error == E2BIG ||
+                             openat2_error == EINVAL;
     if (!unsupported || !limits_.allow_legacy_descriptor_walk) {
       return {.file = std::nullopt, .error = map_open_error(openat2_error)};
     }
@@ -354,30 +388,35 @@ OpenFileResult FilesystemPolicy::open_regular_file(const std::string_view root_n
     }
   }
 
-  struct stat metadata{};
+  struct stat metadata {};
   if (::fstat(path_fd.get(), &metadata) != 0) {
     return {.file = std::nullopt,
-            .error = error(PolicyErrorCode::kIoError, "failed to inspect opened target")};
+            .error = error(PolicyErrorCode::kIoError,
+                           "failed to inspect opened target")};
   }
-  // With O_PATH | O_NOFOLLOW, openat2 deliberately returns a descriptor for a
+  // With O_PATH | O_NOFOLLOW, openat2 may return a descriptor for a
   // trailing symlink even when RESOLVE_NO_SYMLINKS is set. Reject it explicitly.
   if (S_ISLNK(metadata.st_mode)) {
-    return {
-        .file = std::nullopt,
-        .error = error(PolicyErrorCode::kResolutionDenied, "target is a symbolic or magic link")};
+    return {.file = std::nullopt,
+            .error = error(PolicyErrorCode::kResolutionDenied,
+                           "target is a symbolic or magic link")};
   }
   if (!S_ISREG(metadata.st_mode)) {
     return {.file = std::nullopt,
-            .error = error(PolicyErrorCode::kNotRegularFile, "target is not a regular file")};
+            .error = error(PolicyErrorCode::kNotRegularFile,
+                           "target is not a regular file")};
   }
-  if (metadata.st_size < 0 || static_cast<std::uint64_t>(metadata.st_size) > root->max_file_bytes) {
-    return {
-        .file = std::nullopt,
-        .error = error(PolicyErrorCode::kFileTooLarge, "target exceeds the configured file limit")};
+  if (metadata.st_size < 0 ||
+      static_cast<std::uint64_t>(metadata.st_size) > root->max_file_bytes) {
+    return {.file = std::nullopt,
+            .error = error(PolicyErrorCode::kFileTooLarge,
+                           "target exceeds the configured file limit")};
   }
 
-  const std::string descriptor_path = "/proc/self/fd/" + std::to_string(path_fd.get());
-  UniqueFd readable{::open(descriptor_path.c_str(), O_RDONLY | O_CLOEXEC | O_NONBLOCK)};
+  const std::string descriptor_path =
+      "/proc/self/fd/" + std::to_string(path_fd.get());
+  UniqueFd readable{::open(descriptor_path.c_str(),
+                           O_RDONLY | O_CLOEXEC | O_NONBLOCK)};
   if (!readable.valid()) {
     if (errno == EACCES || errno == EPERM) {
       return {.file = std::nullopt,
@@ -389,9 +428,10 @@ OpenFileResult FilesystemPolicy::open_regular_file(const std::string_view root_n
                            "could not reopen the pinned regular file through /proc/self/fd")};
   }
 
-  struct stat readable_metadata{};
+  struct stat readable_metadata {};
   if (::fstat(readable.get(), &readable_metadata) != 0 ||
-      !same_object(metadata, readable_metadata) || !S_ISREG(readable_metadata.st_mode)) {
+      !same_object(metadata, readable_metadata) ||
+      !S_ISREG(readable_metadata.st_mode)) {
     return {.file = std::nullopt,
             .error = error(PolicyErrorCode::kIoError,
                            "reopened descriptor did not match the pinned target")};
@@ -411,12 +451,12 @@ OpenFileResult FilesystemPolicy::open_regular_file(const std::string_view root_n
 
 std::size_t FilesystemPolicy::root_count() const noexcept { return roots_.size(); }
 
-ConfigParseResult parse_filesystem_policy_config(const std::string_view text,
-                                                 const FilesystemPolicyLimits limits) {
+ConfigParseResult parse_filesystem_policy_config(
+    const std::string_view text, const FilesystemPolicyLimits limits) {
   if (text.size() > limits.max_config_bytes) {
-    return {
-        .config = std::nullopt,
-        .error = error(PolicyErrorCode::kConfigTooLarge, "configuration exceeds the byte limit")};
+    return {.config = std::nullopt,
+            .error = error(PolicyErrorCode::kConfigTooLarge,
+                           "configuration exceeds the byte limit")};
   }
 
   Json document = Json::parse(text, nullptr, false);
@@ -437,8 +477,9 @@ ConfigParseResult parse_filesystem_policy_config(const std::string_view text,
   FilesystemPolicyConfig config;
   for (const Json& value : document["roots"]) {
     if (!value.is_object() || value.size() != 3U || !value.contains("name") ||
-        !value.contains("path") || !value.contains("maxFileBytes") || !value["name"].is_string() ||
-        !value["path"].is_string() || !value["maxFileBytes"].is_number_unsigned()) {
+        !value.contains("path") || !value.contains("maxFileBytes") ||
+        !value["name"].is_string() || !value["path"].is_string() ||
+        !value["maxFileBytes"].is_number_unsigned()) {
       return {.config = std::nullopt,
               .error = error(PolicyErrorCode::kInvalidConfig,
                              "root entry contains missing, extra, or invalid fields")};
@@ -456,42 +497,24 @@ ConfigParseResult parse_filesystem_policy_config(const std::string_view text,
 
 std::string_view policy_error_name(const PolicyErrorCode code) noexcept {
   switch (code) {
-    case PolicyErrorCode::kInvalidConfig:
-      return "invalid_config";
-    case PolicyErrorCode::kConfigTooLarge:
-      return "config_too_large";
-    case PolicyErrorCode::kTooManyRoots:
-      return "root_count_invalid";
-    case PolicyErrorCode::kInvalidRootName:
-      return "invalid_root_name";
-    case PolicyErrorCode::kInvalidRootPath:
-      return "invalid_root_path";
-    case PolicyErrorCode::kDuplicateRoot:
-      return "duplicate_root";
-    case PolicyErrorCode::kOpenRootFailed:
-      return "open_root_failed";
-    case PolicyErrorCode::kKernelUnsupported:
-      return "kernel_unsupported";
-    case PolicyErrorCode::kUnknownRoot:
-      return "unknown_root";
-    case PolicyErrorCode::kInvalidRelativePath:
-      return "invalid_relative_path";
-    case PolicyErrorCode::kPathTooLong:
-      return "path_too_long";
-    case PolicyErrorCode::kResolutionDenied:
-      return "resolution_denied";
-    case PolicyErrorCode::kTargetMissing:
-      return "target_missing";
-    case PolicyErrorCode::kPermissionDenied:
-      return "permission_denied";
-    case PolicyErrorCode::kNotRegularFile:
-      return "not_regular_file";
-    case PolicyErrorCode::kFileTooLarge:
-      return "file_too_large";
-    case PolicyErrorCode::kProcUnavailable:
-      return "proc_unavailable";
-    case PolicyErrorCode::kIoError:
-      return "io_error";
+    case PolicyErrorCode::kInvalidConfig: return "invalid_config";
+    case PolicyErrorCode::kConfigTooLarge: return "config_too_large";
+    case PolicyErrorCode::kTooManyRoots: return "root_count_invalid";
+    case PolicyErrorCode::kInvalidRootName: return "invalid_root_name";
+    case PolicyErrorCode::kInvalidRootPath: return "invalid_root_path";
+    case PolicyErrorCode::kDuplicateRoot: return "duplicate_root";
+    case PolicyErrorCode::kOpenRootFailed: return "open_root_failed";
+    case PolicyErrorCode::kKernelUnsupported: return "kernel_unsupported";
+    case PolicyErrorCode::kUnknownRoot: return "unknown_root";
+    case PolicyErrorCode::kInvalidRelativePath: return "invalid_relative_path";
+    case PolicyErrorCode::kPathTooLong: return "path_too_long";
+    case PolicyErrorCode::kResolutionDenied: return "resolution_denied";
+    case PolicyErrorCode::kTargetMissing: return "target_missing";
+    case PolicyErrorCode::kPermissionDenied: return "permission_denied";
+    case PolicyErrorCode::kNotRegularFile: return "not_regular_file";
+    case PolicyErrorCode::kFileTooLarge: return "file_too_large";
+    case PolicyErrorCode::kProcUnavailable: return "proc_unavailable";
+    case PolicyErrorCode::kIoError: return "io_error";
   }
   return "unknown";
 }

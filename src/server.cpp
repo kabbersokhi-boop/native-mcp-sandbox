@@ -108,9 +108,9 @@ struct HandlerResult final {
   };
 }
 
-[[nodiscard]] HandlerResult handle_tools_list(const Json& message,
-                                              const Json& id,
-                                              const LifecycleState state) {
+[[nodiscard]] HandlerResult handle_tools_list(
+    const Json& message, const Json& id, const LifecycleState state,
+    LogToolService* tools) {
   if (state != LifecycleState::kReady) {
     return request_error(id, json_rpc::kLifecycleError,
                          "Server is not ready for tool discovery");
@@ -127,17 +127,69 @@ struct HandlerResult final {
                            "tools/list cursor must be a string");
     }
   }
+  Json definitions = tools == nullptr ? Json::array() : tools->tool_definitions();
   return HandlerResult{
-      .response = json_rpc::make_result(id, Json{{"tools", Json::array()}}),
+      .response =
+          json_rpc::make_result(id, Json{{"tools", std::move(definitions)}}),
       .diagnostic = std::nullopt,
       .next_state = std::nullopt,
   };
 }
 
-[[nodiscard]] HandlerResult dispatch(const Json& message,
-                                     const Json& id,
+[[nodiscard]] HandlerResult handle_tools_call(
+    const Json& message, const Json& id, const LifecycleState state,
+    LogToolService* tools) {
+  if (state != LifecycleState::kReady) {
+    return request_error(id, json_rpc::kLifecycleError,
+                         "Server is not ready for tool calls");
+  }
+  const auto params = message.find("params");
+  if (params == message.end() || !params->is_object()) {
+    return request_error(id, json_rpc::kInvalidParams,
+                         "tools/call requires object params");
+  }
+  if (params->contains("task")) {
+    return request_error(id, json_rpc::kInvalidParams,
+                         "Task-augmented tool execution is not supported");
+  }
+  const auto name = params->find("name");
+  if (name == params->end() || !name->is_string() ||
+      name->get_ref<const std::string&>().empty()) {
+    return request_error(id, json_rpc::kInvalidParams,
+                         "tools/call requires a nonempty tool name");
+  }
+  const auto arguments = params->find("arguments");
+  if (arguments != params->end() && !arguments->is_object()) {
+    return request_error(id, json_rpc::kInvalidParams,
+                         "tools/call arguments must be an object");
+  }
+
+  const auto& tool_name = name->get_ref<const std::string&>();
+  if (tools == nullptr || !tools->knows_tool(tool_name)) {
+    return request_error(id, json_rpc::kInvalidParams, "Unknown tool");
+  }
+  const Json empty_arguments = Json::object();
+  const Json& tool_arguments =
+      arguments == params->end() ? empty_arguments : *arguments;
+  ToolExecutionResult execution = tools->execute(tool_name, tool_arguments);
+  const std::string text = execution.structured_content.dump();
+  Json result{{"content", Json::array({Json{{"type", "text"},
+                                             {"text", text}}})},
+              {"isError", execution.is_error}};
+  if (!execution.is_error) {
+    result["structuredContent"] = std::move(execution.structured_content);
+  }
+  return HandlerResult{
+      .response = json_rpc::make_result(id, std::move(result)),
+      .diagnostic = std::nullopt,
+      .next_state = std::nullopt,
+  };
+}
+
+[[nodiscard]] HandlerResult dispatch(const Json& message, const Json& id,
                                      const bool notification,
-                                     const LifecycleState state) {
+                                     const LifecycleState state,
+                                     LogToolService* tools) {
   const auto& method = message.at("method").get_ref<const std::string&>();
 
   if (method == "ping") {
@@ -190,7 +242,14 @@ struct HandlerResult final {
     if (notification) {
       return notification_diagnostic("ignored tools/list notification");
     }
-    return handle_tools_list(message, id, state);
+    return handle_tools_list(message, id, state, tools);
+  }
+
+  if (method == "tools/call") {
+    if (notification) {
+      return notification_diagnostic("ignored tools/call notification");
+    }
+    return handle_tools_call(message, id, state, tools);
   }
 
   if (notification) {
@@ -200,10 +259,8 @@ struct HandlerResult final {
 }
 
 [[nodiscard]] ProcessResult serialize_bounded(
-    Json response,
-    const ResourceBudget& budget,
-    const std::optional<LifecycleState> next_state,
-    LifecycleState& state) {
+    Json response, const ResourceBudget& budget,
+    const std::optional<LifecycleState> next_state, LifecycleState& state) {
   std::string serialized = response.dump();
   if (serialized.size() <= budget.max_response_bytes) {
     if (next_state.has_value()) {
@@ -236,7 +293,8 @@ struct HandlerResult final {
   if (serialized.size() <= budget.max_response_bytes) {
     return ProcessResult{
         .response = std::move(serialized),
-        .diagnostic = "replaced oversized response with uncorrelated bounded error",
+        .diagnostic =
+            "replaced oversized response with uncorrelated bounded error",
     };
   }
 
@@ -253,8 +311,8 @@ void write_diagnostic(std::ostream& diagnostics,
   }
 }
 
-[[nodiscard]] bool write_response(std::ostream& output,
-                                  const std::optional<std::string>& response) {
+[[nodiscard]] bool write_response(
+    std::ostream& output, const std::optional<std::string>& response) {
   if (!response.has_value()) {
     return true;
   }
@@ -265,7 +323,9 @@ void write_diagnostic(std::ostream& diagnostics,
 
 }  // namespace
 
-Server::Server(const ResourceBudget budget) : budget_(budget) {
+Server::Server(const ResourceBudget budget,
+               std::optional<LogToolService> tools)
+    : budget_(budget), tools_(std::move(tools)) {
   if (!is_budget_valid(budget_)) {
     budget_ = conservative_budget();
   }
@@ -316,7 +376,9 @@ ProcessResult Server::process_line(const std::string_view line) {
   }
 
   const Json request_id = has_id ? *id : null_id();
-  HandlerResult handled = dispatch(message, request_id, notification, state_);
+  HandlerResult handled =
+      dispatch(message, request_id, notification, state_,
+               tools_.has_value() ? &*tools_ : nullptr);
   if (!handled.response.has_value()) {
     if (handled.next_state.has_value()) {
       state_ = *handled.next_state;
@@ -343,16 +405,15 @@ ProcessResult Server::request_too_large() const {
 
 LifecycleState Server::state() const noexcept { return state_; }
 
-int run_stdio(std::istream& input,
-              std::ostream& output,
-              std::ostream& diagnostics,
-              const ResourceBudget budget) {
+int run_stdio(std::istream& input, std::ostream& output,
+              std::ostream& diagnostics, const ResourceBudget budget,
+              std::optional<LogToolService> tools) {
   if (!is_budget_valid(budget)) {
     diagnostics << "native-mcp-sandbox: invalid resource budget\n";
     return 78;
   }
 
-  Server server{budget};
+  Server server{budget, std::move(tools)};
   std::string line;
   line.reserve(std::min<std::size_t>(budget.max_request_bytes, 4U * 1024U));
   bool oversized = false;
@@ -378,7 +439,8 @@ int run_stdio(std::istream& input,
   while (input.get(character)) {
     if (character == '\n') {
       if (!process_current_line()) {
-        diagnostics << "native-mcp-sandbox: failed to write protocol response\n";
+        diagnostics <<
+            "native-mcp-sandbox: failed to write protocol response\n";
         return 74;
       }
       continue;
