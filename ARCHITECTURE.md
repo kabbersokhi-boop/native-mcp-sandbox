@@ -2,80 +2,95 @@
 
 ## Purpose
 
-Native MCP Sandbox will mediate between a local MCP client and a small collection
-of read-only Linux analysis tools. It is designed around explicit trust boundaries,
-bounded resource use, deterministic protocol output, and compact context returned to
-an AI model.
+Native MCP Sandbox mediates between a local MCP client and, in later phases, a small
+collection of read-only Linux analysis tools. The design prioritizes explicit trust
+boundaries, bounded resource use, deterministic protocol output, and compact evidence
+suitable for an AI model's context.
 
-Phase 0 contains only the foundation types and executable self-check. Sections that
-describe future components are marked **planned**.
+Phase 1 implements the local protocol edge. It does not access the filesystem, process
+table, network, or analysis data.
 
-## System boundaries
+## Current Phase 1 data path
 
-### Trusted for the initial model
+1. The executable reads stdin one byte at a time into a bounded line buffer.
+2. A line longer than the request limit is drained and replaced with a size error.
+3. nlohmann/json parses one JSON value from the complete line.
+4. The dispatcher validates the JSON-RPC envelope, request ID, method, parameters,
+   and MCP lifecycle state.
+5. A bounded serializer creates at most one response for a request.
+6. Complete response lines are written to stdout; diagnostics use stderr.
 
-- the locally installed server executable and its configuration;
-- the operating system and compiler toolchain;
-- the human-selected analysis roots; and
+The implementation is synchronous. This gives Phase 1 one logical reader and writer
+without prematurely introducing scheduling races.
+
+## Trust boundaries
+
+### Trusted for the current model
+
+- the installed executable and resource configuration;
+- the operating system and compiler toolchain; and
 - the MCP host that launches the process.
 
 ### Untrusted
 
-- every byte received through standard input;
-- file names and tool arguments supplied by an agent;
-- contents of inspected logs and binaries;
-- process identifiers supplied in requests; and
-- client behavior, including cancellation and abrupt disconnection.
+- every byte received through stdin;
+- JSON structure, IDs, methods, and parameters;
+- request order and lifecycle behavior;
+- line length and connection termination; and
+- future file contents and tool arguments.
 
-## Planned components
+## Current components
 
-| Component | Responsibility | Must not do |
+| Component | Current responsibility | Must not do |
 | --- | --- | --- |
-| Standard-I/O transport | Frame and emit protocol messages | Write diagnostics to stdout |
-| JSON-RPC dispatcher | Validate envelopes and route methods | Perform filesystem work directly |
-| MCP lifecycle | Initialize, list tools, call tools, shut down | Advertise unavailable capabilities |
-| Policy gate | Authorize paths, operations, sizes, and PIDs | Infer permission from user intent |
-| Resource governor | Bound queues, outputs, workers, and time | Allocate without configured limits |
-| Analysis tools | Stream and reduce approved evidence | Execute inspected data |
-| Response serializer | Produce one complete response at a time | Interleave output from workers |
-| Diagnostic logger | Record operational events to stderr | Include secrets or arbitrary file contents |
+| Bounded stdio reader | Frame one line and drain oversized lines | Accumulate beyond the request budget |
+| JSON-RPC validation | Parse and validate envelopes and IDs | Echo payloads in diagnostics |
+| MCP lifecycle dispatcher | Handle initialize, initialized, ping, and tools/list | Advertise unavailable tools |
+| Bounded serializer | Keep output within its byte budget | Partially write or interleave messages |
+| Diagnostic path | Emit generic information to stderr | Write non-protocol text to stdout |
 
-## Concurrency model
+## Lifecycle state machine
 
-The planned server will have one protocol reader, one serialized protocol writer,
-and a small bounded worker pool. C++20 coroutines will express operations that wait
-for input, timers, or worker completion. Expensive file analysis will not run on the
-protocol thread.
+```mermaid
+stateDiagram-v2
+    [*] --> Uninitialized
+    Uninitialized --> AwaitingInitialized: valid initialize response
+    AwaitingInitialized --> Ready: notifications/initialized
+    Ready --> Ready: ping or tools/list
+```
 
-The worker pool is limited to two threads by default. A bounded queue provides
-backpressure. Cancellation is cooperative and every long-running tool must check a
-cancellation signal at defined intervals.
+`ping` is accepted in every state. `tools/list` is accepted only in `Ready` and
+returns an empty array. Initialization cannot be repeated. An initialize response
+that exceeds the response limit does not advance state.
 
 ## Resource invariants
 
-The following properties are established as design invariants:
+1. Request buffering stops at a configured byte limit.
+2. Oversized input is drained to the next newline before framing resumes.
+3. A response cannot exceed its configured byte limit.
+4. Stdout contains only complete protocol messages in server mode.
+5. Notifications do not receive JSON-RPC responses.
+6. Large host data will be processed incrementally in later phases.
+7. Host-facing tools remain read-only unless the threat model is revised.
 
-1. A request is rejected before unbounded buffering.
-2. A response cannot exceed its configured byte budget.
-3. The pending-work queue has a fixed maximum capacity.
-4. Worker count is fixed during normal operation.
-5. Every analysis operation has a deadline.
-6. Large files are processed incrementally.
-7. Standard output has exactly one logical writer.
-8. Tools are read-only unless a future threat-model revision explicitly says otherwise.
-
-Phase 0 implements and tests validation for the default resource-budget object. It
-does not yet enforce these invariants against protocol traffic.
+Phase 1 enforces the first five. Queue capacity, workers, deadlines, and cancellation
+remain reserved for phases that introduce concurrent work.
 
 ## Dependency policy
 
-Dependencies will be introduced only with a written architecture decision that
-explains why the standard library is insufficient, how the dependency is pinned,
-and how security updates will be handled. The expected Phase 1 candidates are a
-maintained JSON library and Boost.Asio. Neither is a Phase 0 dependency.
+Phase 1 uses system-provided nlohmann/json 3.11 or newer. CMake does not fetch it from
+the network. The host distribution manages the package, and a compile-time assertion
+checks the minimum version. See ADR 0004 and `THIRD_PARTY_NOTICES.md`.
+
+## Planned boundary before tools
+
+Phase 2 must add a fail-closed filesystem policy gate before any log tool exists. It
+will need descriptor-aware containment, regular-file and size checks, denial of
+special files, and adversarial traversal, symlink, and race tests. The MCP dispatcher
+must not perform filesystem work directly.
 
 ## Portability
 
-The transport and policy layers should remain portable where practical, but log,
-ELF, `/proc`, namespace, and seccomp functionality is Linux-specific. Linux is the
-only promised target until automated tests prove otherwise.
+Phase 1 protocol code uses standard C++20. The process integration test and future
+log, ELF, `/proc`, namespace, and seccomp features are Linux-specific. Linux is the
+only promised target until automated evidence supports a broader claim.

@@ -32,7 +32,7 @@ machines.
 - Use C++20 and RAII for resource ownership.
 - Prefer bounded data structures and streaming algorithms.
 - Treat protocol input, paths, file contents, and process IDs as untrusted.
-- Keep stdout exclusively for protocol messages once transport exists.
+- Keep stdout exclusively for protocol messages in server mode.
 - Never add arbitrary shell execution as an MCP tool.
 - Add tests for invalid inputs and denied operations, not only happy paths.
 - Document security assumptions and limitations precisely.

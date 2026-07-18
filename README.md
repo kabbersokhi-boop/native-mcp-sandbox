@@ -2,102 +2,84 @@
 
 > A security-first, resource-bounded C++20 foundation for local AI-agent analysis tools.
 
-Native MCP Sandbox is an educational, production-minded project exploring how an AI
-agent can inspect local evidence without receiving unrestricted access to the host.
-The planned server will expose narrowly scoped, read-only tools for streaming log
-analysis, Linux ELF inspection, and process-memory observation through the Model
-Context Protocol (MCP).
+Native MCP Sandbox explores how an AI agent can inspect selected local Linux evidence
+without receiving unrestricted host access. The project is being built in narrow,
+auditable phases: protocol handling first, policy enforcement before host access, and
+analysis tools only after their security boundaries are testable.
 
 ## Project status
 
-**Phase 0 — Foundation (`v0.1.0`)**
+**Phase 1 — Minimal MCP lifecycle and stdio transport (`v0.2.0`)**
 
-This release establishes the build system, resource-budget model, test harness,
-architecture, threat model, contribution policy, and continuous integration. It is
-intentionally **not yet an MCP server**. Protocol transport begins in Phase 1 after
-the security and engineering constraints have been made explicit.
+The executable now runs a small Model Context Protocol (MCP) server over standard
+input and standard output. It implements initialization, ping, and tool discovery for
+protocol revision `2025-11-25`. Tool discovery intentionally returns an empty list:
+no filesystem, log, ELF, process, shell, or network capability is reachable.
 
-| Available now | Planned and not yet available |
+| Available now | Deliberately not available yet |
 | --- | --- |
-| C++20 buildable executable | MCP initialization and tool discovery |
-| Conservative resource-budget defaults | JSON-RPC transport over standard I/O |
-| Unit and command-level smoke tests | Log, ELF, and memory-analysis tools |
-| GCC and Clang CI configuration | C++20 coroutine-based task orchestration |
-| Sanitizer-ready build preset | OS-level sandbox hardening |
-| Architecture and threat-model documents | Benchmarks and agent investigation demo |
+| Newline-delimited JSON-RPC 2.0 over stdio | `tools/call` |
+| MCP `initialize` and version negotiation | Filesystem or process access |
+| `notifications/initialized` lifecycle transition | Log or ELF analysis |
+| `ping` before and after initialization | Network listening or HTTP transport |
+| `tools/list` returning `[]` after initialization | Coroutines, workers, or cancellation |
+| 1 MiB bounded request and response handling | Benchmarks or performance claims |
+| Unit and real-process stdio integration tests | OS-level sandboxing |
 
-The distinction above is deliberate. Security-sensitive software should make
-verifiable claims about current behavior rather than advertise roadmap items as
-finished features.
+A protocol server is not yet an analysis sandbox merely because it can speak MCP.
 
-## Why this project exists
+## Implemented protocol behavior
 
-Many agent prototypes focus on tool selection while treating the tool runtime as a
-trusted black box. This project focuses on that missing systems layer: validating
-requests, limiting resources, reducing large local data into useful model context,
-and refusing operations outside an explicit policy.
+The Phase 1 server:
 
-The project is designed to demonstrate the intersection of:
+- reads one UTF-8 JSON-RPC message per input line;
+- writes only complete JSON-RPC response lines to stdout;
+- sends diagnostics to stderr without echoing request contents;
+- rejects malformed JSON, invalid envelopes, fractional IDs, and top-level arrays;
+- accepts string, signed integer, unsigned integer, and null request IDs;
+- validates initialization protocol version, capabilities, and client information;
+- permits `ping` before and after initialization;
+- requires `notifications/initialized` before `tools/list`;
+- ignores unsupported notifications without sending protocol responses;
+- returns method-not-found for unsupported requests;
+- drains oversized lines without continuing to grow the request buffer; and
+- exits successfully when stdin reaches EOF.
 
-- agent tool and context design;
-- modern native C++ engineering;
-- bounded concurrency and streaming data processing;
-- Linux systems observability; and
-- practical security controls with documented limitations.
-
-C++ is used where it has a defensible role: predictable resource ownership,
-efficient streaming, direct operating-system integration, and a small native
-runtime. The project will measure those properties instead of assuming that a
-native implementation is automatically superior.
-
-## Intended user experience
-
-When the tool-bearing phases are complete, an MCP-compatible client should be able
-to ask questions such as:
-
-```text
-Investigate why the permitted sample service exhausted its memory. Do not modify
-files or execute binaries.
-```
-
-The agent will be able to search approved logs, inspect an approved ELF file without
-running it, sample permitted process-memory information, and correlate the bounded
-results. Attempts to escape the configured roots or exceed resource limits should
-produce structured denials.
+The server targets stable MCP revision `2025-11-25`. It does not silently claim
+compatibility with other revisions.
 
 ## Security posture
 
-The long-term goal is a **security-conscious local analysis service**, not an
-unbreakable security boundary. The design starts with these rules:
+Current Phase 1 controls include:
 
-- read-only analysis tools;
 - no arbitrary command or binary execution;
-- explicit filesystem roots and canonical path handling;
-- bounded request, response, queue, worker, and execution-time budgets;
-- streaming instead of whole-file loading;
-- protocol output isolated from diagnostics; and
-- testable denials for malicious or accidental misuse.
+- no file, process, or network access;
+- bounded request and response sizes;
+- lifecycle and parameter validation;
+- one synchronous logical response writer;
+- stdout isolated from diagnostics; and
+- deterministic malformed-input and process-level tests.
 
-Application-level validation cannot replace an operating-system sandbox. Linux
-namespaces, seccomp, privilege separation, and similar controls are candidates for
-later hardening phases and will not be claimed until implemented and tested. See
-[`THREAT_MODEL.md`](THREAT_MODEL.md) and [`SECURITY.md`](SECURITY.md).
+Application validation cannot replace an operating-system sandbox. Filesystem policy,
+descriptor-based containment, privilege reduction, namespaces, and seccomp are later
+work and are not claimed here. See [`THREAT_MODEL.md`](THREAT_MODEL.md) and
+[`SECURITY.md`](SECURITY.md).
 
 ## Resource profile
 
-The default design target is a modest Linux laptop with 8 GB of RAM. Phase 0 records
-the following conservative defaults:
+The default design target is a modest Linux laptop with 8 GB of RAM.
 
 | Budget | Default |
 | --- | ---: |
 | Maximum request | 1 MiB |
 | Maximum response | 1 MiB |
-| Pending-request queue | 16 |
-| Worker threads | 2 |
-| Operation timeout | 30 seconds |
+| Pending-request queue | 16 (reserved for later phases) |
+| Worker threads | 2 (reserved for later phases) |
+| Operation timeout | 30 seconds (reserved for later phases) |
 
-Large benchmarks and extended fuzzing will remain opt-in. Build presets use at most
-two parallel compilation jobs.
+Phase 1 actively enforces request and response byte limits. It remains synchronous,
+so queue, worker, and timeout values are not yet applied to protocol work. Build
+presets use at most two compilation jobs.
 
 ## Build and verify
 
@@ -107,6 +89,10 @@ two parallel compilation jobs.
 - CMake 3.20 or newer
 - Ninja
 - A C++20-capable GCC or Clang compiler
+- system-provided [nlohmann/json](https://github.com/nlohmann/json) 3.11 or newer
+
+On EndeavourOS/Arch Linux, install the `nlohmann-json` package. CMake does not download
+or vendor the dependency.
 
 ### Development build
 
@@ -117,7 +103,7 @@ ctest --preset dev
 ./build/dev/native-mcp-sandbox --self-check
 ```
 
-Expected final line:
+Expected self-check line:
 
 ```text
 self-check passed: request_limit=1048576 response_limit=1048576 queue_limit=16 workers=2 timeout_ms=30000
@@ -139,33 +125,48 @@ cmake --build --preset release
 ctest --preset release
 ```
 
-The repository does not require Docker and Phase 0 has no third-party runtime
-dependencies.
+The repository does not require Docker or a local language model.
 
-## Architecture direction
+## Try the protocol
 
-The intended design separates protocol I/O from policy enforcement and analysis:
+```bash
+./build/dev/native-mcp-sandbox <<'EOF'
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"demo-client","version":"1.0"}}}
+{"jsonrpc":"2.0","method":"notifications/initialized"}
+{"jsonrpc":"2.0","id":2,"method":"ping"}
+{"jsonrpc":"2.0","id":3,"method":"tools/list"}
+EOF
+```
+
+Expected stdout:
+
+```jsonl
+{"id":1,"jsonrpc":"2.0","result":{"capabilities":{"tools":{}},"protocolVersion":"2025-11-25","serverInfo":{"name":"native-mcp-sandbox","version":"0.2.0"}}}
+{"id":2,"jsonrpc":"2.0","result":{}}
+{"id":3,"jsonrpc":"2.0","result":{"tools":[]}}
+```
+
+The initialized notification receives no response.
+
+## Architecture
 
 ```mermaid
 flowchart LR
-    A["MCP client"] --> B["stdio transport"]
-    B --> C["JSON-RPC dispatcher"]
-    C --> D["Policy gate"]
-    D --> E["Bounded analysis tools"]
-    E --> C
+    A["MCP client"] --> B["bounded newline reader"]
+    B --> C["JSON-RPC validation"]
+    C --> D["MCP lifecycle dispatcher"]
+    D --> E["bounded serializer"]
+    E --> A
+    C -. "safe diagnostics" .-> F["stderr"]
 ```
 
-Only a single response writer will own standard output, preventing concurrent
-workers from interleaving protocol messages. Diagnostics will use standard error.
-Detailed decisions live in [`ARCHITECTURE.md`](ARCHITECTURE.md) and
-[`docs/adr`](docs/adr).
+A future policy gate will sit between the dispatcher and any host-facing tool. No
+analysis implementation is present. See [`ARCHITECTURE.md`](ARCHITECTURE.md).
 
 ## Roadmap
 
-Each phase is intended to be independently reviewed, tested, and released.
-
-1. **Phase 0:** public foundation, constraints, build, tests, and CI — current
-2. **Phase 1:** minimal MCP lifecycle and JSON-RPC-over-stdio transport
+1. **Phase 0:** foundation, constraints, build, tests, and CI — complete
+2. **Phase 1:** minimal MCP lifecycle and JSON-RPC-over-stdio — current
 3. **Phase 2:** filesystem policy gate and resource enforcement
 4. **Phase 3:** streaming log-analysis tools
 5. **Phase 4:** safe Linux ELF inspection
@@ -176,29 +177,28 @@ Each phase is intended to be independently reviewed, tested, and released.
 10. **Phase 9:** reproducible benchmarks and reference comparison
 11. **Phase 10:** release hardening and stable tool interface
 
-Roadmap details can change when testing exposes a safer or simpler design. Security
-work will not be postponed merely to preserve the original schedule.
+Security findings may change the order.
 
 ## Repository layout
 
 ```text
 .
 ├── .github/workflows/       Continuous integration
-├── cmake/                   CMake support files
-├── docs/adr/                Architecture decision records
+├── docs/adr/                Architecture decisions
 ├── include/native_mcp/      Public C++ interfaces
-├── src/                     Implementation and executable entry point
-├── tests/                   Automated tests
-├── ARCHITECTURE.md          System boundaries and planned components
-├── SECURITY.md              Vulnerability reporting and supported status
+├── src/                     Foundation, protocol, and executable code
+├── tests/                   Unit and stdio integration tests
+├── ARCHITECTURE.md          Current boundaries and component plan
+├── PHASE_1_MANIFEST.md      Phase scope and expected source tree
+├── THIRD_PARTY_NOTICES.md   Dependency attribution
+├── SECURITY.md              Vulnerability reporting
 └── THREAT_MODEL.md          Assets, adversaries, controls, and limitations
 ```
 
 ## Contributing
 
-Contributions are welcome once they preserve the project's narrow security model.
-Please read [`CONTRIBUTING.md`](CONTRIBUTING.md) and open an issue before proposing
-large protocol, dependency, or sandbox changes.
+Read [`CONTRIBUTING.md`](CONTRIBUTING.md) before proposing large protocol, dependency,
+or sandbox changes.
 
 ## License
 
