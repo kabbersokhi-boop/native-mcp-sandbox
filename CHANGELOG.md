@@ -5,6 +5,25 @@ the first stable release; pre-1.0 versions may change interfaces.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-07-18
+
+### Added
+
+- Bounded schema-v1 filesystem policy configuration parser.
+- Named read-only roots with owned directory descriptors.
+- Strict Linux `openat2` containment for traversal, symlink, magic-link, and mount
+  crossing denial.
+- Regular-file, read-permission, and per-root file-size enforcement.
+- Pinned descriptor reopening through `/proc/self/fd`.
+- Explicit opt-in descriptor-walk compatibility mode for old kernels.
+- Adversarial filesystem policy unit tests.
+- ADR 0006 documenting the descriptor-based security boundary.
+
+### Changed
+
+- Project version advanced to `0.3.0`.
+- Documentation now distinguishes the implemented policy library from future MCP tools.
+
 ## [0.2.0] - 2026-07-18
 
 ### Added
@@ -22,6 +41,10 @@ the first stable release; pre-1.0 versions may change interfaces.
 - Project version advanced to `0.2.0`.
 - Documentation distinguishes the protocol server from future host tools.
 - CI installs nlohmann/json 3.11 or newer.
+
+### Removed
+
+- Phase-specific internal publication instructions from the public source tree.
 
 ## [0.1.0] - 2026-07-18
 

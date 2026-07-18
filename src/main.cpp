@@ -10,8 +10,9 @@ void print_usage(std::ostream& output) {
   output << "Usage: native-mcp-sandbox [--help | --version | --self-check]\n"
          << "       native-mcp-sandbox\n"
          << "\n"
-         << "With no arguments, run the Phase 1 MCP server over stdin/stdout.\n"
-         << "Diagnostics are written only to stderr. No analysis tools are exposed.\n";
+         << "With no arguments, run the MCP server over stdin/stdout.\n"
+         << "Phase 2 adds a non-MCP filesystem policy library; no analysis tools are exposed.\n"
+         << "Diagnostics are written only to stderr.\n";
 }
 
 }  // namespace
