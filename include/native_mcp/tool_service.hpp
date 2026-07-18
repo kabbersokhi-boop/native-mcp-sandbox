@@ -1,5 +1,6 @@
 #pragma once
 
+#include "native_mcp/elf_analysis.hpp"
 #include "native_mcp/file_policy.hpp"
 #include "native_mcp/log_analysis.hpp"
 
@@ -16,15 +17,16 @@ struct ToolExecutionResult final {
   nlohmann::json structured_content;
 };
 
-class LogToolService final {
+class ToolService final {
  public:
-  explicit LogToolService(FilesystemPolicy policy,
-                          LogAnalysisLimits limits = {});
+  explicit ToolService(FilesystemPolicy policy,
+                       LogAnalysisLimits log_limits = {},
+                       ElfInspectionLimits elf_limits = {});
 
-  LogToolService(const LogToolService&) = delete;
-  LogToolService& operator=(const LogToolService&) = delete;
-  LogToolService(LogToolService&&) noexcept = default;
-  LogToolService& operator=(LogToolService&&) noexcept = default;
+  ToolService(const ToolService&) = delete;
+  ToolService& operator=(const ToolService&) = delete;
+  ToolService(ToolService&&) noexcept = default;
+  ToolService& operator=(ToolService&&) noexcept = default;
 
   [[nodiscard]] nlohmann::json tool_definitions() const;
   [[nodiscard]] bool knows_tool(std::string_view name) const noexcept;
@@ -35,7 +37,8 @@ class LogToolService final {
   [[nodiscard]] bool acquire_rate_limit_slot();
 
   FilesystemPolicy policy_;
-  LogAnalyzer analyzer_;
+  LogAnalyzer log_analyzer_;
+  ElfAnalyzer elf_analyzer_;
   std::deque<std::chrono::steady_clock::time_point> recent_calls_;
 };
 

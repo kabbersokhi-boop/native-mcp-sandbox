@@ -110,7 +110,7 @@ struct HandlerResult final {
 
 [[nodiscard]] HandlerResult handle_tools_list(
     const Json& message, const Json& id, const LifecycleState state,
-    LogToolService* tools) {
+    ToolService* tools) {
   if (state != LifecycleState::kReady) {
     return request_error(id, json_rpc::kLifecycleError,
                          "Server is not ready for tool discovery");
@@ -138,7 +138,7 @@ struct HandlerResult final {
 
 [[nodiscard]] HandlerResult handle_tools_call(
     const Json& message, const Json& id, const LifecycleState state,
-    LogToolService* tools) {
+    ToolService* tools) {
   if (state != LifecycleState::kReady) {
     return request_error(id, json_rpc::kLifecycleError,
                          "Server is not ready for tool calls");
@@ -189,7 +189,7 @@ struct HandlerResult final {
 [[nodiscard]] HandlerResult dispatch(const Json& message, const Json& id,
                                      const bool notification,
                                      const LifecycleState state,
-                                     LogToolService* tools) {
+                                     ToolService* tools) {
   const auto& method = message.at("method").get_ref<const std::string&>();
 
   if (method == "ping") {
@@ -324,7 +324,7 @@ void write_diagnostic(std::ostream& diagnostics,
 }  // namespace
 
 Server::Server(const ResourceBudget budget,
-               std::optional<LogToolService> tools)
+               std::optional<ToolService> tools)
     : budget_(budget), tools_(std::move(tools)) {
   if (!is_budget_valid(budget_)) {
     budget_ = conservative_budget();
@@ -407,7 +407,7 @@ LifecycleState Server::state() const noexcept { return state_; }
 
 int run_stdio(std::istream& input, std::ostream& output,
               std::ostream& diagnostics, const ResourceBudget budget,
-              std::optional<LogToolService> tools) {
+              std::optional<ToolService> tools) {
   if (!is_budget_valid(budget)) {
     diagnostics << "native-mcp-sandbox: invalid resource budget\n";
     return 78;

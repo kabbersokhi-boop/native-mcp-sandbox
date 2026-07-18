@@ -1,6 +1,8 @@
 #include "native_mcp/file_policy.hpp"
+
+#include <elf.h>
 #include "native_mcp/json_rpc.hpp"
-#include "native_mcp/log_tools.hpp"
+#include "native_mcp/tool_service.hpp"
 #include "native_mcp/server.hpp"
 
 #include <cstdlib>
@@ -12,6 +14,7 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 namespace {
 
@@ -52,6 +55,26 @@ class TempDirectory final {
  private:
   fs::path path_;
 };
+
+void write_minimal_elf64(const fs::path& path) {
+  std::vector<unsigned char> bytes(64U, 0U);
+  bytes[EI_MAG0] = ELFMAG0;
+  bytes[EI_MAG1] = ELFMAG1;
+  bytes[EI_MAG2] = ELFMAG2;
+  bytes[EI_MAG3] = ELFMAG3;
+  bytes[EI_CLASS] = ELFCLASS64;
+  bytes[EI_DATA] = ELFDATA2LSB;
+  bytes[EI_VERSION] = EV_CURRENT;
+  bytes[EI_OSABI] = ELFOSABI_LINUX;
+  bytes[16U] = static_cast<unsigned char>(ET_EXEC);
+  bytes[18U] = static_cast<unsigned char>(EM_X86_64);
+  bytes[20U] = static_cast<unsigned char>(EV_CURRENT);
+  bytes[52U] = 64U;
+  bytes[54U] = 56U;
+  std::ofstream output(path, std::ios::binary);
+  output.write(reinterpret_cast<const char*>(bytes.data()),
+               static_cast<std::streamsize>(bytes.size()));
+}
 
 Json response_json(const ProcessResult& result) {
   expect(result.response.has_value(), "expected a JSON-RPC response");
@@ -98,7 +121,7 @@ Server configured_server(const fs::path& root) {
   limits.allow_legacy_descriptor_walk = true;
   auto created = native_mcp::FilesystemPolicy::create(config, limits);
   expect(created.policy.has_value(), "test filesystem policy must be created");
-  std::optional<native_mcp::LogToolService> tools;
+  std::optional<native_mcp::ToolService> tools;
   tools.emplace(std::move(*created.policy));
   return Server{native_mcp::conservative_budget(), std::move(tools)};
 }
@@ -178,8 +201,8 @@ void test_lifecycle() {
          "initialize must negotiate the targeted protocol version");
   expect(response["result"]["capabilities"].contains("tools"),
          "initialize must advertise tool discovery capability");
-  expect(response["result"]["serverInfo"]["version"] == "0.4.0",
-         "initialize must report the Phase 3 version");
+  expect(response["result"]["serverInfo"]["version"] == "0.5.0",
+         "initialize must report the Phase 4 version");
   expect(server.state() == LifecycleState::kAwaitingInitializedNotification,
          "initialize response must advance to awaiting notification");
 
@@ -215,6 +238,7 @@ void test_log_tool_protocol() {
     std::ofstream output(directory.path() / "app.log");
     output << "INFO start\nERROR first\nINFO end\n";
   }
+  write_minimal_elf64(directory.path() / "sample.elf");
   Server server = configured_server(directory.path());
 
   Json response = response_json(server.process_line(
@@ -228,9 +252,10 @@ void test_log_tool_protocol() {
   response = response_json(server.process_line(
       R"({"jsonrpc":"2.0","id":2,"method":"tools/list"})"));
   const Json& tools = response["result"]["tools"];
-  expect(tools.size() == 2U, "configured server must advertise two log tools");
+  expect(tools.size() == 3U, "configured server must advertise the three bounded tools");
   expect(tools[0]["name"] == "logs.search" &&
-             tools[1]["name"] == "logs.tail",
+             tools[1]["name"] == "logs.tail" &&
+             tools[2]["name"] == "elf.inspect",
          "tool names must be stable and deterministic");
   expect(tools[0]["annotations"]["readOnlyHint"] == true &&
              tools[0]["execution"]["taskSupport"] == "forbidden",
@@ -253,6 +278,30 @@ void test_log_tool_protocol() {
   expect(response["result"]["isError"] == false &&
              response["result"]["structuredContent"]["lines"].size() == 2U,
          "approved log tail must return bounded final lines");
+
+  response = response_json(server.process_line(
+      R"({"jsonrpc":"2.0","id":40,"method":"tools/call","params":{"name":"elf.inspect","arguments":{"root":"logs","path":"sample.elf"}}})"));
+  expect(response["result"]["isError"] == false &&
+             response["result"]["structuredContent"]["class"] == "ELF64" &&
+             response["result"]["structuredContent"]["machine"] == "x86_64" &&
+             (response["result"]["structuredContent"]["interpreter"].is_string() ||
+              response["result"]["structuredContent"]["interpreter"].is_null()) &&
+             (response["result"]["structuredContent"]["buildId"].is_string() ||
+              response["result"]["structuredContent"]["buildId"].is_null()),
+         "approved ELF inspection must return schema-conforming bounded metadata");
+
+  response = response_json(server.process_line(
+      R"({"jsonrpc":"2.0","id":41,"method":"tools/call","params":{"name":"elf.inspect","arguments":{"root":"logs","path":"app.log"}}})"));
+  expect(response["result"]["isError"] == true &&
+             !response["result"].contains("structuredContent") &&
+             tool_text_json(response)["error"]["code"] == "invalid_elf",
+         "non-ELF targets must return a schema-safe tool execution error");
+
+  response = response_json(server.process_line(
+      R"({"jsonrpc":"2.0","id":42,"method":"tools/call","params":{"name":"elf.inspect","arguments":{"root":"logs","path":"sample.elf","extra":true}}})"));
+  expect(response["result"]["isError"] == true &&
+             tool_text_json(response)["error"]["code"] == "invalid_arguments",
+         "ELF tool arguments must use a closed schema");
 
   response = response_json(server.process_line(
       R"({"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"logs.search","arguments":{"root":"logs","path":"../escape","query":"x"}}})"));

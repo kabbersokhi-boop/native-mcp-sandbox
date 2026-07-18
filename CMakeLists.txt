@@ -2,8 +2,8 @@ cmake_minimum_required(VERSION 3.20)
 
 project(
   native_mcp_sandbox
-  VERSION 0.4.0
-  DESCRIPTION "A security-first, resource-bounded C++20 foundation for local MCP analysis tools"
+  VERSION 0.5.0
+  DESCRIPTION "A security-first, resource-bounded C++20 server for local MCP evidence tools"
   LANGUAGES CXX
 )
 
@@ -76,22 +76,23 @@ target_link_libraries(native_mcp_policy
 nms_set_project_warnings(native_mcp_policy)
 nms_enable_sanitizers(native_mcp_policy)
 
-add_library(native_mcp_log_tools STATIC
+add_library(native_mcp_tools STATIC
   src/log_analysis.cpp
-  src/log_tools.cpp
+  src/elf_analysis.cpp
+  src/tool_service.cpp
 )
-add_library(native_mcp::log_tools ALIAS native_mcp_log_tools)
-target_compile_features(native_mcp_log_tools PUBLIC cxx_std_20)
-target_include_directories(native_mcp_log_tools
+add_library(native_mcp::tools ALIAS native_mcp_tools)
+target_compile_features(native_mcp_tools PUBLIC cxx_std_20)
+target_include_directories(native_mcp_tools
   PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
-target_link_libraries(native_mcp_log_tools
+target_link_libraries(native_mcp_tools
   PUBLIC native_mcp::policy nlohmann_json::nlohmann_json
 )
-nms_set_project_warnings(native_mcp_log_tools)
-nms_enable_sanitizers(native_mcp_log_tools)
+nms_set_project_warnings(native_mcp_tools)
+nms_enable_sanitizers(native_mcp_tools)
 
 add_library(native_mcp_protocol STATIC
   src/json_rpc.cpp
@@ -105,7 +106,7 @@ target_include_directories(native_mcp_protocol
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
 target_link_libraries(native_mcp_protocol
-  PUBLIC native_mcp::foundation native_mcp::log_tools nlohmann_json::nlohmann_json
+  PUBLIC native_mcp::foundation native_mcp::tools nlohmann_json::nlohmann_json
 )
 nms_set_project_warnings(native_mcp_protocol)
 nms_enable_sanitizers(native_mcp_protocol)
@@ -132,11 +133,19 @@ if(BUILD_TESTING)
 
   add_executable(native_mcp_log_analysis_tests tests/log_analysis_tests.cpp)
   target_link_libraries(native_mcp_log_analysis_tests
-    PRIVATE native_mcp::log_tools nlohmann_json::nlohmann_json
+    PRIVATE native_mcp::tools nlohmann_json::nlohmann_json
   )
   target_compile_features(native_mcp_log_analysis_tests PRIVATE cxx_std_20)
   nms_set_project_warnings(native_mcp_log_analysis_tests)
   nms_enable_sanitizers(native_mcp_log_analysis_tests)
+
+  add_executable(native_mcp_elf_analysis_tests tests/elf_analysis_tests.cpp)
+  target_link_libraries(native_mcp_elf_analysis_tests
+    PRIVATE native_mcp::tools nlohmann_json::nlohmann_json
+  )
+  target_compile_features(native_mcp_elf_analysis_tests PRIVATE cxx_std_20)
+  nms_set_project_warnings(native_mcp_elf_analysis_tests)
+  nms_enable_sanitizers(native_mcp_elf_analysis_tests)
 
   add_executable(native_mcp_protocol_tests tests/protocol_tests.cpp)
   target_link_libraries(native_mcp_protocol_tests
@@ -160,6 +169,7 @@ if(BUILD_TESTING)
   add_test(NAME foundation.self_check COMMAND native-mcp-sandbox --self-check)
   add_test(NAME policy.unit COMMAND native_mcp_policy_tests)
   add_test(NAME logs.unit COMMAND native_mcp_log_analysis_tests)
+  add_test(NAME elf.unit COMMAND native_mcp_elf_analysis_tests)
   add_test(NAME protocol.unit COMMAND native_mcp_protocol_tests)
   add_test(
     NAME protocol.stdio_integration
