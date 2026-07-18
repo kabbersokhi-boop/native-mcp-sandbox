@@ -1,11 +1,15 @@
 #include "native_mcp/server.hpp"
 
 #include "native_mcp/json_rpc.hpp"
+#include "native_mcp/orchestration.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <istream>
+#include <memory>
+#include <mutex>
 #include <ostream>
 #include <string>
 #include <utility>
@@ -22,6 +26,11 @@ struct HandlerResult final {
   std::optional<Json> response;
   std::optional<std::string> diagnostic;
   std::optional<LifecycleState> next_state;
+};
+
+struct ToolCallPreparation final {
+  std::optional<PreparedToolCall> call;
+  std::optional<HandlerResult> error;
 };
 
 [[nodiscard]] Json null_id() { return nullptr; }
@@ -136,54 +145,53 @@ struct HandlerResult final {
   };
 }
 
-[[nodiscard]] HandlerResult handle_tools_call(
+[[nodiscard]] ToolCallPreparation prepare_tools_call(
     const Json& message, const Json& id, const LifecycleState state,
     ToolService* tools) {
   if (state != LifecycleState::kReady) {
-    return request_error(id, json_rpc::kLifecycleError,
-                         "Server is not ready for tool calls");
+    return {.call = std::nullopt,
+            .error = request_error(id, json_rpc::kLifecycleError,
+                                   "Server is not ready for tool calls")};
   }
   const auto params = message.find("params");
   if (params == message.end() || !params->is_object()) {
-    return request_error(id, json_rpc::kInvalidParams,
-                         "tools/call requires object params");
+    return {.call = std::nullopt,
+            .error = request_error(id, json_rpc::kInvalidParams,
+                                   "tools/call requires object params")};
   }
   if (params->contains("task")) {
-    return request_error(id, json_rpc::kInvalidParams,
-                         "Task-augmented tool execution is not supported");
+    return {.call = std::nullopt,
+            .error = request_error(
+                id, json_rpc::kInvalidParams,
+                "Task-augmented tool execution is not supported")};
   }
   const auto name = params->find("name");
   if (name == params->end() || !name->is_string() ||
       name->get_ref<const std::string&>().empty()) {
-    return request_error(id, json_rpc::kInvalidParams,
-                         "tools/call requires a nonempty tool name");
+    return {.call = std::nullopt,
+            .error = request_error(id, json_rpc::kInvalidParams,
+                                   "tools/call requires a nonempty tool name")};
   }
   const auto arguments = params->find("arguments");
   if (arguments != params->end() && !arguments->is_object()) {
-    return request_error(id, json_rpc::kInvalidParams,
-                         "tools/call arguments must be an object");
+    return {.call = std::nullopt,
+            .error = request_error(id, json_rpc::kInvalidParams,
+                                   "tools/call arguments must be an object")};
   }
 
   const auto& tool_name = name->get_ref<const std::string&>();
   if (tools == nullptr || !tools->knows_tool(tool_name)) {
-    return request_error(id, json_rpc::kInvalidParams, "Unknown tool");
+    return {.call = std::nullopt,
+            .error = request_error(id, json_rpc::kInvalidParams,
+                                   "Unknown tool")};
   }
-  const Json empty_arguments = Json::object();
-  const Json& tool_arguments =
-      arguments == params->end() ? empty_arguments : *arguments;
-  ToolExecutionResult execution = tools->execute(tool_name, tool_arguments);
-  const std::string text = execution.structured_content.dump();
-  Json result{{"content", Json::array({Json{{"type", "text"},
-                                             {"text", text}}})},
-              {"isError", execution.is_error}};
-  if (!execution.is_error) {
-    result["structuredContent"] = std::move(execution.structured_content);
-  }
-  return HandlerResult{
-      .response = json_rpc::make_result(id, std::move(result)),
-      .diagnostic = std::nullopt,
-      .next_state = std::nullopt,
-  };
+  return {.call = PreparedToolCall{
+              .request_id = id,
+              .name = tool_name,
+              .arguments = arguments == params->end() ? Json::object()
+                                                       : *arguments,
+          },
+          .error = std::nullopt};
 }
 
 [[nodiscard]] HandlerResult dispatch(const Json& message, const Json& id,
@@ -245,11 +253,8 @@ struct HandlerResult final {
     return handle_tools_list(message, id, state, tools);
   }
 
-  if (method == "tools/call") {
-    if (notification) {
-      return notification_diagnostic("ignored tools/call notification");
-    }
-    return handle_tools_call(message, id, state, tools);
+  if (method == "tools/call" && notification) {
+    return notification_diagnostic("ignored tools/call notification");
   }
 
   if (notification) {
@@ -304,46 +309,82 @@ struct HandlerResult final {
   };
 }
 
-void write_diagnostic(std::ostream& diagnostics,
-                      const std::optional<std::string>& message) {
-  if (message.has_value()) {
-    diagnostics << "native-mcp-sandbox: " << *message << '\n';
-  }
+[[nodiscard]] ToolExecutionResult tool_error_execution(
+    const std::string_view code, const std::string_view message) {
+  return ToolExecutionResult{
+      .is_error = true,
+      .structured_content =
+          Json{{"error", Json{{"code", code}, {"message", message}}}},
+  };
 }
 
-[[nodiscard]] bool write_response(
-    std::ostream& output, const std::optional<std::string>& response) {
-  if (!response.has_value()) {
+class SerializedProtocolWriter final {
+ public:
+  SerializedProtocolWriter(std::ostream& output, std::ostream& diagnostics)
+      : output_(output), diagnostics_(diagnostics) {}
+
+  [[nodiscard]] bool write(const ProcessResult& result) {
+    std::lock_guard lock{mutex_};
+    if (failed_.load(std::memory_order_acquire)) {
+      return false;
+    }
+    if (result.diagnostic.has_value()) {
+      diagnostics_ << "native-mcp-sandbox: " << *result.diagnostic << '\n';
+    }
+    if (result.response.has_value()) {
+      output_ << *result.response << '\n';
+      output_.flush();
+      if (!output_) {
+        failed_.store(true, std::memory_order_release);
+        return false;
+      }
+    }
+    if (!diagnostics_) {
+      failed_.store(true, std::memory_order_release);
+      return false;
+    }
     return true;
   }
-  output << *response << '\n';
-  output.flush();
-  return static_cast<bool>(output);
-}
+
+  [[nodiscard]] bool failed() const noexcept {
+    return failed_.load(std::memory_order_acquire);
+  }
+
+ private:
+  std::ostream& output_;
+  std::ostream& diagnostics_;
+  mutable std::mutex mutex_;
+  std::atomic<bool> failed_{false};
+};
 
 }  // namespace
 
-Server::Server(const ResourceBudget budget,
-               std::optional<ToolService> tools)
+Server::Server(const ResourceBudget budget, std::optional<ToolService> tools)
+    : Server(budget, tools.has_value()
+                         ? std::make_shared<ToolService>(std::move(*tools))
+                         : std::shared_ptr<ToolService>{}) {}
+
+Server::Server(const ResourceBudget budget, std::shared_ptr<ToolService> tools)
     : budget_(budget), tools_(std::move(tools)) {
   if (!is_budget_valid(budget_)) {
     budget_ = conservative_budget();
   }
 }
 
-ProcessResult Server::process_line(const std::string_view line) {
+LineAction Server::accept_line(const std::string_view line) {
   Json message = Json::parse(line, nullptr, false);
   if (message.is_discarded()) {
-    return serialize_bounded(
-        json_rpc::make_error(null_id(), json_rpc::kParseError, "Parse error"),
-        budget_, std::nullopt, state_);
+    return {.immediate = serialize_bounded(
+                json_rpc::make_error(null_id(), json_rpc::kParseError,
+                                     "Parse error"),
+                budget_, std::nullopt, state_)};
   }
 
   if (!message.is_object()) {
-    return serialize_bounded(json_rpc::make_error(
-                                 null_id(), json_rpc::kInvalidRequest,
-                                 "Invalid Request"),
-                             budget_, std::nullopt, state_);
+    return {.immediate = serialize_bounded(
+                json_rpc::make_error(null_id(), json_rpc::kInvalidRequest,
+                                     "Invalid Request"),
+                budget_, std::nullopt, state_)};
   }
 
   const auto jsonrpc = message.find("jsonrpc");
@@ -353,38 +394,83 @@ ProcessResult Server::process_line(const std::string_view line) {
   const bool notification = !has_id;
 
   if (has_id && !json_rpc::is_valid_id(*id)) {
-    return serialize_bounded(json_rpc::make_error(
-                                 null_id(), json_rpc::kInvalidRequest,
-                                 "Invalid Request"),
-                             budget_, std::nullopt, state_);
+    return {.immediate = serialize_bounded(
+                json_rpc::make_error(null_id(), json_rpc::kInvalidRequest,
+                                     "Invalid Request"),
+                budget_, std::nullopt, state_)};
   }
 
   if (jsonrpc == message.end() || !jsonrpc->is_string() ||
       jsonrpc->get_ref<const std::string&>() != "2.0" ||
       method == message.end() || !method->is_string()) {
     if (notification && method != message.end() && method->is_string()) {
-      return ProcessResult{
-          .response = std::nullopt,
-          .diagnostic = "ignored malformed notification envelope",
-      };
+      return {.immediate = ProcessResult{
+                  .response = std::nullopt,
+                  .diagnostic = "ignored malformed notification envelope",
+              }};
     }
     const Json response_id = has_id ? *id : null_id();
-    return serialize_bounded(json_rpc::make_error(
-                                 response_id, json_rpc::kInvalidRequest,
-                                 "Invalid Request"),
-                             budget_, std::nullopt, state_);
+    return {.immediate = serialize_bounded(
+                json_rpc::make_error(response_id, json_rpc::kInvalidRequest,
+                                     "Invalid Request"),
+                budget_, std::nullopt, state_)};
   }
 
   const Json request_id = has_id ? *id : null_id();
-  HandlerResult handled =
-      dispatch(message, request_id, notification, state_,
-               tools_.has_value() ? &*tools_ : nullptr);
+  const auto& method_name = method->get_ref<const std::string&>();
+
+  if (method_name == "tools/call" && !notification) {
+    ToolCallPreparation prepared = prepare_tools_call(
+        message, request_id, state_, tools_.get());
+    if (prepared.error.has_value()) {
+      HandlerResult handled = std::move(*prepared.error);
+      return {.immediate = serialize_bounded(
+                  std::move(*handled.response), budget_, handled.next_state,
+                  state_)};
+    }
+    return {.tool_call = std::move(prepared.call)};
+  }
+
+  if (method_name == "notifications/cancelled") {
+    if (!notification) {
+      return {.immediate = serialize_bounded(
+                  json_rpc::make_error(
+                      request_id, json_rpc::kInvalidRequest,
+                      "notifications/cancelled must be a notification"),
+                  budget_, std::nullopt, state_)};
+    }
+    const auto params = message.find("params");
+    if (params == message.end() || !params->is_object()) {
+      return {.immediate = ProcessResult{
+                  .response = std::nullopt,
+                  .diagnostic =
+                      "ignored cancellation notification with invalid params",
+              }};
+    }
+    const auto cancelled_id = params->find("requestId");
+    const auto reason = params->find("reason");
+    if (cancelled_id == params->end() ||
+        !json_rpc::is_valid_id(*cancelled_id) ||
+        (reason != params->end() && !reason->is_string())) {
+      return {.immediate = ProcessResult{
+                  .response = std::nullopt,
+                  .diagnostic =
+                      "ignored malformed cancellation notification",
+              }};
+    }
+    return {.cancellation = CancellationNotice{.request_id = *cancelled_id}};
+  }
+
+  HandlerResult handled = dispatch(message, request_id, notification, state_,
+                                   tools_.get());
   if (!handled.response.has_value()) {
     if (handled.next_state.has_value()) {
       state_ = *handled.next_state;
     }
-    return ProcessResult{.response = std::nullopt,
-                         .diagnostic = std::move(handled.diagnostic)};
+    return {.immediate = ProcessResult{
+                .response = std::nullopt,
+                .diagnostic = std::move(handled.diagnostic),
+            }};
   }
 
   ProcessResult result = serialize_bounded(std::move(*handled.response), budget_,
@@ -392,11 +478,49 @@ ProcessResult Server::process_line(const std::string_view line) {
   if (!result.diagnostic.has_value() && handled.diagnostic.has_value()) {
     result.diagnostic = std::move(handled.diagnostic);
   }
-  return result;
+  return {.immediate = std::move(result)};
+}
+
+ProcessResult Server::process_line(const std::string_view line) {
+  LineAction action = accept_line(line);
+  if (action.immediate.has_value()) {
+    return std::move(*action.immediate);
+  }
+  if (action.cancellation.has_value()) {
+    return {.response = std::nullopt, .diagnostic = std::nullopt};
+  }
+  if (!action.tool_call.has_value() || tools_ == nullptr) {
+    return {.response = std::nullopt,
+            .diagnostic = "tool request could not be executed"};
+  }
+  PreparedToolCall call = std::move(*action.tool_call);
+  return format_tool_result(
+      call.request_id, tools_->execute(call.name, call.arguments));
+}
+
+ProcessResult Server::format_tool_result(
+    const Json& request_id, ToolExecutionResult execution) const {
+  const std::string text = execution.structured_content.dump();
+  Json result{{"content", Json::array({Json{{"type", "text"},
+                                             {"text", text}}})},
+              {"isError", execution.is_error}};
+  if (!execution.is_error) {
+    result["structuredContent"] = std::move(execution.structured_content);
+  }
+  LifecycleState unchanged = LifecycleState::kReady;
+  return serialize_bounded(
+      json_rpc::make_result(request_id, std::move(result)), budget_,
+      std::nullopt, unchanged);
+}
+
+ProcessResult Server::format_tool_error(
+    const Json& request_id, const std::string_view code,
+    const std::string_view message) const {
+  return format_tool_result(request_id, tool_error_execution(code, message));
 }
 
 ProcessResult Server::request_too_large() const {
-  LifecycleState unchanged = state_;
+  LifecycleState unchanged = LifecycleState::kReady;
   return serialize_bounded(
       json_rpc::make_error(null_id(), json_rpc::kRequestTooLarge,
                            "Request exceeds configured limit"),
@@ -404,6 +528,10 @@ ProcessResult Server::request_too_large() const {
 }
 
 LifecycleState Server::state() const noexcept { return state_; }
+
+std::shared_ptr<ToolService> Server::tool_service() const noexcept {
+  return tools_;
+}
 
 int run_stdio(std::istream& input, std::ostream& output,
               std::ostream& diagnostics, const ResourceBudget budget,
@@ -413,23 +541,82 @@ int run_stdio(std::istream& input, std::ostream& output,
     return 78;
   }
 
-  Server server{budget, std::move(tools)};
+  std::shared_ptr<ToolService> shared_tools;
+  if (tools.has_value()) {
+    shared_tools = std::make_shared<ToolService>(std::move(*tools));
+  }
+  Server server{budget, shared_tools};
+  SerializedProtocolWriter writer{output, diagnostics};
+
+  std::unique_ptr<ToolScheduler> scheduler;
+  if (shared_tools != nullptr) {
+    scheduler = std::make_unique<ToolScheduler>(
+        budget, shared_tools,
+        [&server, &writer](const Json& request_id,
+                           ToolExecutionResult execution) {
+          (void)writer.write(
+              server.format_tool_result(request_id, std::move(execution)));
+        });
+  }
+
   std::string line;
   line.reserve(std::min<std::size_t>(budget.max_request_bytes, 4U * 1024U));
   bool oversized = false;
 
+  const auto process_action = [&](LineAction action) -> bool {
+    if (action.immediate.has_value()) {
+      return writer.write(*action.immediate);
+    }
+    if (action.cancellation.has_value()) {
+      if (scheduler != nullptr) {
+        (void)scheduler->cancel(action.cancellation->request_id);
+      }
+      return !writer.failed();
+    }
+    if (!action.tool_call.has_value() || scheduler == nullptr) {
+      return writer.write(ProcessResult{
+          .response = std::nullopt,
+          .diagnostic = "tool request could not be scheduled",
+      });
+    }
+
+    PreparedToolCall call = std::move(*action.tool_call);
+    const Json request_id = call.request_id;
+    const ToolSubmitStatus submitted = scheduler->submit(ScheduledToolCall{
+        .request_id = std::move(call.request_id),
+        .name = std::move(call.name),
+        .arguments = std::move(call.arguments),
+    });
+    switch (submitted) {
+      case ToolSubmitStatus::kAccepted:
+        return !writer.failed();
+      case ToolSubmitStatus::kQueueFull:
+        return writer.write(server.format_tool_error(
+            request_id, "server_busy",
+            "bounded tool queue is full; retry after pending work completes"));
+      case ToolSubmitStatus::kDuplicateRequestId:
+        return writer.write(server.format_tool_error(
+            request_id, "duplicate_request_id",
+            "a tool request with this id is already in flight"));
+      case ToolSubmitStatus::kStopped:
+        return writer.write(server.format_tool_error(
+            request_id, "server_stopping",
+            "tool scheduler is no longer accepting work"));
+    }
+    return false;
+  };
+
   const auto process_current_line = [&]() -> bool {
-    ProcessResult result;
+    LineAction action;
     if (oversized) {
-      result = server.request_too_large();
+      action.immediate = server.request_too_large();
     } else {
       if (!line.empty() && line.back() == '\r') {
         line.pop_back();
       }
-      result = server.process_line(line);
+      action = server.accept_line(line);
     }
-    write_diagnostic(diagnostics, result.diagnostic);
-    const bool success = write_response(output, result.response);
+    const bool success = process_action(std::move(action));
     line.clear();
     oversized = false;
     return success;
@@ -439,8 +626,10 @@ int run_stdio(std::istream& input, std::ostream& output,
   while (input.get(character)) {
     if (character == '\n') {
       if (!process_current_line()) {
-        diagnostics <<
-            "native-mcp-sandbox: failed to write protocol response\n";
+        if (scheduler != nullptr) {
+          scheduler->shutdown();
+        }
+        diagnostics << "native-mcp-sandbox: failed to write protocol response\n";
         return 74;
       }
       continue;
@@ -457,17 +646,30 @@ int run_stdio(std::istream& input, std::ostream& output,
   }
 
   if (input.bad()) {
+    if (scheduler != nullptr) {
+      scheduler->shutdown();
+    }
     diagnostics << "native-mcp-sandbox: failed to read protocol input\n";
     return 74;
   }
 
   if (oversized || !line.empty()) {
     if (!process_current_line()) {
+      if (scheduler != nullptr) {
+        scheduler->shutdown();
+      }
       diagnostics << "native-mcp-sandbox: failed to write protocol response\n";
       return 74;
     }
   }
 
+  if (scheduler != nullptr) {
+    scheduler->shutdown();
+  }
+  if (writer.failed()) {
+    diagnostics << "native-mcp-sandbox: failed to write protocol response\n";
+    return 74;
+  }
   return 0;
 }
 

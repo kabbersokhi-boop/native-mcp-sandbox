@@ -1,6 +1,7 @@
 #pragma once
 
 #include "native_mcp/file_policy.hpp"
+#include "native_mcp/operation.hpp"
 
 #include <cstddef>
 #include <cstdint>
@@ -16,6 +17,8 @@ enum class ElfAnalysisErrorCode {
   kUnsupportedFeature,
   kMetadataTooLarge,
   kReadFailed,
+  kCancelled,
+  kDeadlineExceeded,
 };
 
 struct ElfAnalysisError final {
@@ -81,7 +84,8 @@ class ElfAnalyzer final {
  public:
   explicit ElfAnalyzer(ElfInspectionLimits limits = {});
 
-  [[nodiscard]] ElfInspectionOutcome inspect(const ReadOnlyFile& file) const;
+  [[nodiscard]] ElfInspectionOutcome inspect(
+      const ReadOnlyFile& file, OperationContext context = {}) const;
   [[nodiscard]] const ElfInspectionLimits& limits() const noexcept;
 
  private:

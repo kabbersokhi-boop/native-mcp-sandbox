@@ -26,6 +26,21 @@ namespace {
   return ElfAnalysisError{.code = code, .message = std::move(message)};
 }
 
+[[nodiscard]] std::optional<ElfAnalysisError> operation_error(
+    const OperationContext& context) {
+  switch (context.stop_reason()) {
+    case OperationStopReason::kCancelled:
+      return error(ElfAnalysisErrorCode::kCancelled,
+                   "ELF inspection was cancelled");
+    case OperationStopReason::kDeadlineExceeded:
+      return error(ElfAnalysisErrorCode::kDeadlineExceeded,
+                   "ELF inspection exceeded its deadline");
+    case OperationStopReason::kNone:
+      return std::nullopt;
+  }
+  return std::nullopt;
+}
+
 [[nodiscard]] bool checked_add(const std::uint64_t left,
                                const std::uint64_t right,
                                std::uint64_t& result) noexcept {
@@ -48,14 +63,19 @@ namespace {
 
 class Reader final {
  public:
-  Reader(const ReadOnlyFile& file, const std::size_t metadata_limit)
+  Reader(const ReadOnlyFile& file, const std::size_t metadata_limit,
+         OperationContext context)
       : file_(file),
         file_limit_(std::min(file.observed_size(), file.max_read_bytes())),
-        metadata_limit_(metadata_limit) {}
+        metadata_limit_(metadata_limit),
+        context_(context) {}
 
   [[nodiscard]] bool read(const std::uint64_t offset, const std::size_t size,
                           std::vector<unsigned char>& output,
                           ElfAnalysisError& failure) {
+    if (!check_operation(failure)) {
+      return false;
+    }
     std::uint64_t end = 0U;
     if (!checked_add(offset, static_cast<std::uint64_t>(size), end) ||
         end > file_limit_) {
@@ -71,6 +91,9 @@ class Reader final {
     output.assign(size, 0U);
     std::size_t total = 0U;
     while (total < size) {
+      if (!check_operation(failure)) {
+        return false;
+      }
       const ssize_t count = ::pread(
           file_.fd(), output.data() + total, size - total,
           static_cast<off_t>(offset + static_cast<std::uint64_t>(total)));
@@ -96,10 +119,19 @@ class Reader final {
   [[nodiscard]] std::uint64_t file_limit() const noexcept { return file_limit_; }
   [[nodiscard]] std::size_t bytes_read() const noexcept { return bytes_read_; }
 
+  [[nodiscard]] bool check_operation(ElfAnalysisError& failure) const {
+    if (const auto stopped = operation_error(context_)) {
+      failure = *stopped;
+      return false;
+    }
+    return true;
+  }
+
  private:
   const ReadOnlyFile& file_;
   std::uint64_t file_limit_;
   std::size_t metadata_limit_;
+  OperationContext context_;
   std::size_t bytes_read_ = 0U;
 };
 
@@ -404,14 +436,18 @@ struct ProgramHeader final {
 
 ElfAnalyzer::ElfAnalyzer(const ElfInspectionLimits limits) : limits_(limits) {}
 
-ElfInspectionOutcome ElfAnalyzer::inspect(const ReadOnlyFile& file) const {
+ElfInspectionOutcome ElfAnalyzer::inspect(const ReadOnlyFile& file,
+                                             const OperationContext context) const {
+  if (const auto stopped = operation_error(context)) {
+    return {.result = std::nullopt, .error = stopped};
+  }
   struct stat before {};
   if (::fstat(file.fd(), &before) != 0 || before.st_size < 0) {
     return {.result = std::nullopt,
             .error = error(ElfAnalysisErrorCode::kReadFailed,
                            "failed to snapshot the approved ELF file")};
   }
-  Reader reader{file, limits_.max_metadata_bytes};
+  Reader reader{file, limits_.max_metadata_bytes, context};
   ElfAnalysisError failure =
       error(ElfAnalysisErrorCode::kInvalidFormat, "invalid ELF file");
   std::vector<unsigned char> identification;
@@ -559,6 +595,9 @@ ElfInspectionOutcome ElfAnalyzer::inspect(const ReadOnlyFile& file) const {
   std::optional<ProgramHeader> dynamic_segment;
   std::vector<ProgramHeader> note_segments;
   for (const ProgramHeader& program : program_headers) {
+    if (const auto stopped = operation_error(context)) {
+      return {.result = std::nullopt, .error = stopped};
+    }
     if (result.segments.size() < limits_.max_segment_summaries) {
       result.segments.push_back(ElfSegmentSummary{
           .type = segment_type_name(program.type),
@@ -651,6 +690,11 @@ ElfInspectionOutcome ElfAnalyzer::inspect(const ReadOnlyFile& file) const {
     const std::size_t count = dynamic_bytes.size() / entry_size;
     bool dynamic_terminated = false;
     for (std::size_t index = 0U; index < count; ++index) {
+      if ((index & 63U) == 0U) {
+        if (const auto stopped = operation_error(context)) {
+          return {.result = std::nullopt, .error = stopped};
+        }
+      }
       const unsigned char* current = dynamic_bytes.data() + index * entry_size;
       const std::uint64_t tag =
           is_64 ? read_u64(current, little) : read_u32(current, little);
@@ -706,6 +750,9 @@ ElfInspectionOutcome ElfAnalyzer::inspect(const ReadOnlyFile& file) const {
       return {.result = std::nullopt, .error = std::move(failure)};
     }
     for (const std::uint64_t needed : needed_offsets) {
+      if (const auto stopped = operation_error(context)) {
+        return {.result = std::nullopt, .error = stopped};
+      }
       if (result.needed_libraries.size() >= limits_.max_needed_libraries) {
         result.needed_libraries_truncated = true;
         break;
@@ -759,6 +806,10 @@ std::string_view elf_analysis_error_name(
       return "elf_metadata_too_large";
     case ElfAnalysisErrorCode::kReadFailed:
       return "elf_read_failed";
+    case ElfAnalysisErrorCode::kCancelled:
+      return "cancelled";
+    case ElfAnalysisErrorCode::kDeadlineExceeded:
+      return "deadline_exceeded";
   }
   return "unknown";
 }

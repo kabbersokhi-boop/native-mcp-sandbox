@@ -11,6 +11,7 @@
 #include <iostream>
 #include <string>
 #include <string_view>
+#include <stop_token>
 #include <vector>
 
 namespace {
@@ -383,12 +384,26 @@ void test_real_process_image() {
 
 }  // namespace
 
+void test_operation_stop_context() {
+  TempDirectory directory;
+  auto file = open_fixture(directory.path() / "cancel.elf", make_elf64());
+  std::stop_source source;
+  (void)source.request_stop();
+  const native_mcp::OperationContext cancelled{
+      source.get_token(), native_mcp::OperationContext::Clock::time_point::max()};
+  const auto inspected = native_mcp::ElfAnalyzer{}.inspect(file, cancelled);
+  expect(inspected.error.has_value() &&
+             inspected.error->code == native_mcp::ElfAnalysisErrorCode::kCancelled,
+         "ELF inspection must honor cooperative cancellation before parsing");
+}
+
 int main() {
   test_elf64_metadata();
   test_elf32_big_endian();
   test_invalid_and_bounded_inputs();
   test_security_signals_and_output_bounds();
   test_real_process_image();
+  test_operation_stop_context();
   std::cout << "All ELF analysis tests passed\n";
   return EXIT_SUCCESS;
 }

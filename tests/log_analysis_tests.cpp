@@ -10,6 +10,7 @@
 #include <iostream>
 #include <string>
 #include <string_view>
+#include <stop_token>
 
 namespace {
 
@@ -237,6 +238,22 @@ void test_fixed_read_budget_and_argument_errors() {
 
 }  // namespace
 
+void test_operation_stop_context() {
+  TempDirectory directory;
+  const fs::path path = directory.path() / "cancel.log";
+  write_bytes(path, "one\ntwo\n");
+  auto file = open_read_only(path, 8U);
+  std::stop_source source;
+  (void)source.request_stop();
+  const native_mcp::OperationContext cancelled{
+      source.get_token(), native_mcp::OperationContext::Clock::time_point::max()};
+  const auto searched = native_mcp::LogAnalyzer{}.search(
+      file, native_mcp::LogSearchOptions{.query = "one"}, cancelled);
+  expect(searched.error.has_value() &&
+             searched.error->code == native_mcp::LogAnalysisErrorCode::kCancelled,
+         "log analysis must honor cooperative cancellation before reading");
+}
+
 int main() {
   test_literal_search();
   test_chunk_boundary_and_long_line_preview();
@@ -244,6 +261,7 @@ int main() {
   test_match_limit_stops_scan();
   test_tail_and_long_line_retention();
   test_fixed_read_budget_and_argument_errors();
+  test_operation_stop_context();
   std::cout << "All log analysis tests passed\n";
   return EXIT_SUCCESS;
 }

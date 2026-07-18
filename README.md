@@ -5,12 +5,12 @@
 Native MCP Sandbox gives an MCP client narrow, read-only access to selected Linux
 evidence without exposing a shell, unrestricted filesystem browser, or raw process
 memory. The project is built in small auditable phases: protocol handling, filesystem
-containment, bounded log analysis, non-executing ELF inspection, and now aggregate
-process-memory observation.
+containment, bounded log and ELF analysis, aggregate process-memory observation, and
+now bounded concurrent orchestration.
 
 ## Project status
 
-**Phase 5 — Bounded `/proc` memory observation (`v0.6.0`)**
+**Phase 6 — Coroutine orchestration, cancellation, and backpressure (`v0.7.0`)**
 
 With no arguments, the executable remains host-isolated and advertises no tools. With a
 trusted runtime policy, it exposes only the capabilities explicitly configured:
@@ -147,6 +147,30 @@ It never reads `/proc/<pid>/mem`, `maps`, `smaps`, `pagemap`, `cmdline`, `enviro
 than falling back to a more invasive source. The counters are non-atomic snapshots, and
 Linux documents some `statm` values as approximate.
 
+## Phase 6 orchestration
+
+Configured `tools/call` requests no longer block stdin processing. A fixed pool of two
+worker threads resumes small C++20 coroutines that bridge admitted requests to the
+existing policy-gated tools. At most 16 tool calls may be accepted but unfinished at
+once, including running calls. New work beyond that cap receives a bounded
+`server_busy` tool error; duplicate in-flight JSON-RPC IDs receive
+`duplicate_request_id`. No thread is created per request.
+
+The server accepts MCP `notifications/cancelled` notifications with a valid `requestId`.
+For matching in-flight tool work it requests cooperative stop and suppresses the normal
+response. Unknown or already-completed IDs are ignored. Log, ELF, and process analyzers
+check the stop context before work and at bounded read or parse checkpoints.
+
+Each accepted call also has a 30-second steady-clock deadline. Expired work returns a
+bounded `deadline_exceeded` execution error unless client cancellation has already
+suppressed the response. Cancellation is cooperative: Phase 6 does not claim forced
+thread termination or hard real-time interruption of arbitrary system calls.
+
+Workers and the stdin reader share one serialized protocol writer, so stdout contains
+complete JSON-RPC lines without byte interleaving. Tool responses may finish out of
+request order and are correlated by their JSON-RPC IDs. EOF stops new admission, drains
+already accepted work, and joins the worker pool. MCP task support remains forbidden.
+
 ## Fixed limits
 
 | Boundary | Limit |
@@ -166,6 +190,9 @@ Linux documents some `statm` values as approximate.
 | ELF program headers | 256 |
 | ELF dynamic entries | 4096 |
 | ELF dynamic string table | 256 KiB |
+| Outstanding tool calls | 16 queued plus running |
+| Worker threads | 2 |
+| Tool-call deadline | 30 seconds |
 | Tool-call burst | 16 calls per one-second window |
 | JSON-RPC request and response | 1 MiB each |
 
@@ -176,8 +203,9 @@ stdin/stdout. It supports `initialize`, `notifications/initialized`, `ping`,
 `tools/list`, and—in configured mode—`tools/call`.
 
 Tool definitions have closed input schemas, success output schemas, read-only
-annotations, and forbidden task support. Successful calls return matching
-`structuredContent` and text content. Expected execution failures use `isError` and do
+annotations, and forbidden task support. `notifications/cancelled` is supported for
+normal in-flight tool requests; experimental MCP tasks are not. Successful calls return
+matching `structuredContent` and text content. Expected execution failures use `isError` and do
 not claim conformance to a success-only output schema. Unknown tools and malformed call
 envelopes are JSON-RPC errors.
 
@@ -198,14 +226,15 @@ MCP_INPUT
 Expected stdout:
 
 ```jsonl
-{"id":1,"jsonrpc":"2.0","result":{"capabilities":{"tools":{}},"protocolVersion":"2025-11-25","serverInfo":{"name":"native-mcp-sandbox","version":"0.6.0"}}}
+{"id":1,"jsonrpc":"2.0","result":{"capabilities":{"tools":{}},"protocolVersion":"2025-11-25","serverInfo":{"name":"native-mcp-sandbox","version":"0.7.0"}}}
 {"id":2,"jsonrpc":"2.0","result":{}}
 {"id":3,"jsonrpc":"2.0","result":{"tools":[]}}
 ```
 
 The initialized notification receives no response, and this normal transcript writes
 nothing to stderr. Process integration tests also launch configured filesystem-only,
-process-only, and combined servers.
+process-only, and combined servers. Configured tool responses are validated by ID rather
+than assuming completion order.
 
 ## Build and verify
 
@@ -235,26 +264,24 @@ Presets treat warnings as errors and use at most two compilation jobs.
 ```mermaid
 flowchart LR
     A["MCP client"] --> B["bounded stdio and lifecycle"]
-    B --> C["closed schemas and rate limit"]
-    C --> D["named filesystem root"]
-    C --> E["named same-UID process"]
-    D --> F["openat2 and pinned regular file"]
-    E --> G["proc directory, start time, pidfd"]
-    F --> H["log or ELF analyzer"]
-    G --> I["bounded aggregate memory counters"]
-    H --> J["compact structured evidence"]
-    I --> J
-    J --> A
+    B --> C["admission, duplicate check, backpressure"]
+    C --> D["bounded coroutine queue"]
+    D --> E["fixed two-worker pool"]
+    A -. "notifications/cancelled" .-> C
+    E --> F["filesystem or process policy gate"]
+    F --> G["log, ELF, or proc analyzer"]
+    G --> H["serialized complete response line"]
+    H --> A
 ```
 
 ## Deliberate limitations
 
-Phase 5 does not provide regex, recursive search, file watching, arbitrary file reads,
+Phase 6 does not provide regex, recursive search, file watching, arbitrary file reads,
 filesystem mutation, shell execution, networking, ELF sections or symbols, disassembly,
-signature verification, raw process memory, memory maps, command lines, environments,
-process discovery, worker scheduling, cancellation, or hard per-call deadlines.
-Processing remains synchronous. These omissions are explicit rather than hidden behind
-security claims.
+signature verification, raw process memory, maps, command lines, environments, process
+discovery, forced cancellation, hard real-time preemption, MCP tasks, dynamic worker
+resizing, priorities, or durable queues. Cancellation and deadlines are cooperative.
+These limitations are explicit rather than hidden behind security claims.
 
 ## Roadmap
 
@@ -264,7 +291,7 @@ security claims.
 4. Phase 3 — streaming log-analysis tools: complete
 5. Phase 4 — safe Linux ELF inspection: complete
 6. Phase 5 — bounded `/proc` memory observation: complete
-7. Phase 6 — coroutine orchestration, cancellation, and backpressure
+7. Phase 6 — coroutine orchestration, cancellation, and backpressure: complete
 8. Phase 7 — fuzzing, sanitizer coverage, and security regression suite
 9. Phase 8 — deterministic agent investigation demonstration
 10. Phase 9 — reproducible benchmarks and reference comparison
@@ -273,6 +300,9 @@ security claims.
 ## Repository layout
 
 ```text
+include/native_mcp/orchestration.hpp      Bounded coroutine scheduler API
+src/orchestration.cpp                     Worker pool, cancellation, deadlines, backpressure
+include/native_mcp/operation.hpp          Cooperative stop and deadline context
 include/native_mcp/runtime_config.hpp     Versioned runtime-policy parser
 src/runtime_config.cpp                    Closed schema v1/v2 parsing
 include/native_mcp/process_memory.hpp     Process policy and aggregate-memory API

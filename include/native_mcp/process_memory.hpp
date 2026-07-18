@@ -1,6 +1,7 @@
 #pragma once
 
 #include "native_mcp/file_policy.hpp"
+#include "native_mcp/operation.hpp"
 
 #include <cstddef>
 #include <cstdint>
@@ -27,6 +28,8 @@ enum class ProcessMemoryErrorCode {
   kDataTooLarge,
   kIoError,
   kUnknownProcess,
+  kCancelled,
+  kDeadlineExceeded,
 };
 
 struct ProcessMemoryError final {
@@ -132,7 +135,7 @@ class ProcessPolicy final {
       const ProcessPolicyConfig& config, ProcessPolicyLimits limits = {});
 
   [[nodiscard]] ProcessMemoryOutcome inspect_memory(
-      std::string_view process_name) const;
+      std::string_view process_name, OperationContext context = {}) const;
   [[nodiscard]] std::size_t process_count() const noexcept;
   [[nodiscard]] bool uses_legacy_pinning() const noexcept;
 

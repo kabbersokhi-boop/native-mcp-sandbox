@@ -5,6 +5,25 @@ the first stable release; pre-1.0 versions may change interfaces.
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-07-18
+
+### Added
+
+- Fixed two-thread worker pool and bounded C++20 coroutine scheduling.
+- Sixteen-call outstanding-work cap with explicit backpressure errors.
+- MCP `notifications/cancelled` handling for in-flight tool requests.
+- Cooperative stop contexts in log, ELF, and process analyzers.
+- Thirty-second steady-clock deadlines and bounded timeout errors.
+- Serialized multi-threaded protocol output and EOF draining.
+- Scheduler tests for parallelism, saturation, duplicate IDs, cancellation, and deadlines.
+- ADR 0010 documenting the orchestration boundary.
+
+### Changed
+
+- Project version advanced to `0.7.0`.
+- Configured tool calls may complete out of request order and remain correlated by ID.
+- MCP task execution remains explicitly forbidden.
+
 ## [0.6.0] - 2026-07-18
 
 ### Added

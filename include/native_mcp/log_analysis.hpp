@@ -1,6 +1,7 @@
 #pragma once
 
 #include "native_mcp/file_policy.hpp"
+#include "native_mcp/operation.hpp"
 
 #include <cstddef>
 #include <cstdint>
@@ -15,6 +16,8 @@ enum class LogAnalysisErrorCode {
   kInvalidArguments,
   kInputTooLarge,
   kReadFailed,
+  kCancelled,
+  kDeadlineExceeded,
 };
 
 struct LogAnalysisError final {
@@ -85,10 +88,12 @@ class LogAnalyzer final {
  public:
   explicit LogAnalyzer(LogAnalysisLimits limits = {});
 
-  [[nodiscard]] LogSearchOutcome search(const ReadOnlyFile& file,
-                                        const LogSearchOptions& options) const;
-  [[nodiscard]] LogTailOutcome tail(const ReadOnlyFile& file,
-                                    const LogTailOptions& options) const;
+  [[nodiscard]] LogSearchOutcome search(
+      const ReadOnlyFile& file, const LogSearchOptions& options,
+      OperationContext context = {}) const;
+  [[nodiscard]] LogTailOutcome tail(
+      const ReadOnlyFile& file, const LogTailOptions& options,
+      OperationContext context = {}) const;
   [[nodiscard]] const LogAnalysisLimits& limits() const noexcept;
 
  private:
