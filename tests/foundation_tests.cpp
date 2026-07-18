@@ -34,7 +34,7 @@ int main() {
 
   const std::string summary = native_mcp::budget_summary(budget);
   expect(summary.find("workers=2") != std::string::npos, "summary must report worker count");
-  expect(native_mcp::project_version() == "0.4.0", "version must match Phase 3 release");
+  expect(native_mcp::project_version() == "0.5.0", "version must match Phase 4 candidate");
 
   std::cout << "All foundation tests passed\n";
   return EXIT_SUCCESS;

@@ -1,4 +1,4 @@
-#include "native_mcp/log_tools.hpp"
+#include "native_mcp/tool_service.hpp"
 
 #include <cstddef>
 #include <chrono>
@@ -16,6 +16,7 @@ using Json = nlohmann::json;
 
 constexpr std::string_view kSearchTool = "logs.search";
 constexpr std::string_view kTailTool = "logs.tail";
+constexpr std::string_view kElfInspectTool = "elf.inspect";
 
 [[nodiscard]] bool has_only_fields(
     const Json& object, const std::initializer_list<std::string_view> allowed) {
@@ -50,6 +51,11 @@ constexpr std::string_view kTailTool = "logs.tail";
 [[nodiscard]] ToolExecutionResult analysis_error_result(
     const LogAnalysisError& failure) {
   return tool_error(log_analysis_error_name(failure.code), failure.message);
+}
+
+[[nodiscard]] ToolExecutionResult elf_error_result(
+    const ElfAnalysisError& failure) {
+  return tool_error(elf_analysis_error_name(failure.code), failure.message);
 }
 
 [[nodiscard]] Json common_annotations() {
@@ -184,6 +190,86 @@ constexpr std::string_view kTailTool = "logs.tail";
             {"required",
              Json::array({"root", "path", "bytesScanned", "linesScanned",
                           "fileChangedDuringRead", "lines"})}}},
+      {"annotations", common_annotations()},
+      {"execution", Json{{"taskSupport", "forbidden"}}},
+  };
+}
+
+[[nodiscard]] Json elf_definition(const ElfInspectionLimits& limits) {
+  return Json{
+      {"name", kElfInspectTool},
+      {"title", "Inspect an approved Linux ELF file"},
+      {"description",
+       "Inspect bounded ELF metadata from one approved regular file without executing "
+       "or memory-mapping it. Reports identity, interpreter, dependencies, build ID, "
+       "segment summaries, and common hardening signals."},
+      {"inputSchema",
+       Json{{"type", "object"},
+            {"additionalProperties", false},
+            {"properties",
+             Json{{"root",
+                   Json{{"type", "string"},
+                        {"minLength", 1},
+                        {"maxLength", 64},
+                        {"description", "Operator-configured symbolic root name"}}},
+                  {"path",
+                   Json{{"type", "string"},
+                        {"minLength", 1},
+                        {"maxLength", 4096},
+                        {"description", "Relative path beneath the selected root"}}}}},
+            {"required", Json::array({"root", "path"})}}},
+      {"outputSchema",
+       Json{{"type", "object"},
+            {"properties",
+             Json{{"root", Json{{"type", "string"}}},
+                  {"path", Json{{"type", "string"}}},
+                  {"class", Json{{"type", "string"}}},
+                  {"endianness", Json{{"type", "string"}}},
+                  {"fileType", Json{{"type", "string"}}},
+                  {"fileTypeNumber", Json{{"type", "integer"}, {"minimum", 0}}},
+                  {"machine", Json{{"type", "string"}}},
+                  {"machineNumber", Json{{"type", "integer"}, {"minimum", 0}}},
+                  {"osAbi", Json{{"type", "string"}}},
+                  {"osAbiNumber", Json{{"type", "integer"}, {"minimum", 0}}},
+                  {"entryPoint", Json{{"type", "string"}}},
+                  {"programHeaderCount", Json{{"type", "integer"}, {"minimum", 0},
+                                               {"maximum", limits.max_program_headers}}},
+                  {"interpreter", Json{{"type", {"string", "null"}}}},
+                  {"neededLibraries", Json{{"type", "array"},
+                                            {"items", Json{{"type", "string"}}}}},
+                  {"neededLibrariesTruncated", Json{{"type", "boolean"}}},
+                  {"buildId", Json{{"type", {"string", "null"}}}},
+                  {"stackPolicy", Json{{"type", "string"}}},
+                  {"relro", Json{{"type", "string"}}},
+                  {"positionIndependent", Json{{"type", "boolean"}}},
+                  {"pieExecutable", Json{{"type", "boolean"}}},
+                  {"writableExecutableLoadSegment", Json{{"type", "boolean"}}},
+                  {"fileChangedDuringRead", Json{{"type", "boolean"}}},
+                  {"metadataBytesRead", Json{{"type", "integer"}, {"minimum", 0}}},
+                  {"segments",
+                   Json{{"type", "array"},
+                        {"items",
+                         Json{{"type", "object"},
+                              {"properties",
+                               Json{{"type", Json{{"type", "string"}}},
+                                    {"flags", Json{{"type", "string"}}},
+                                    {"fileOffset", Json{{"type", "integer"}, {"minimum", 0}}},
+                                    {"fileSize", Json{{"type", "integer"}, {"minimum", 0}}},
+                                    {"memorySize", Json{{"type", "integer"}, {"minimum", 0}}},
+                                    {"virtualAddress", Json{{"type", "string"}}}}},
+                              {"required", Json::array({"type", "flags", "fileOffset",
+                                                        "fileSize", "memorySize",
+                                                        "virtualAddress"})}}}}},
+                  {"segmentSummariesTruncated", Json{{"type", "boolean"}}}}},
+            {"required",
+             Json::array({"root", "path", "class", "endianness", "fileType",
+                          "fileTypeNumber", "machine", "machineNumber", "osAbi",
+                          "osAbiNumber", "entryPoint", "programHeaderCount",
+                          "interpreter", "neededLibraries", "neededLibrariesTruncated",
+                          "buildId", "stackPolicy", "relro", "positionIndependent",
+                          "pieExecutable", "writableExecutableLoadSegment",
+                          "fileChangedDuringRead", "metadataBytesRead", "segments",
+                          "segmentSummariesTruncated"})}}},
       {"annotations", common_annotations()},
       {"execution", Json{{"taskSupport", "forbidden"}}},
   };
@@ -341,22 +427,100 @@ constexpr std::string_view kTailTool = "logs.tail";
   };
 }
 
+
+[[nodiscard]] ToolExecutionResult execute_elf(
+    const FilesystemPolicy& policy, const ElfAnalyzer& analyzer,
+    const Json& arguments) {
+  if (!arguments.is_object() || !has_only_fields(arguments, {"root", "path"})) {
+    return tool_error("invalid_arguments",
+                      "elf.inspect arguments must match the closed schema");
+  }
+  const auto root = required_string(arguments, "root");
+  const auto path = required_string(arguments, "path");
+  if (!root.has_value() || !path.has_value()) {
+    return tool_error("invalid_arguments",
+                      "root and path must be nonempty strings");
+  }
+  auto opened = policy.open_regular_file(*root, *path);
+  if (!opened.file.has_value()) {
+    return policy_error_result(*opened.error);
+  }
+  ElfInspectionOutcome inspected = analyzer.inspect(*opened.file);
+  if (!inspected.result.has_value()) {
+    return elf_error_result(*inspected.error);
+  }
+
+  Json segments = Json::array();
+  for (const ElfSegmentSummary& segment : inspected.result->segments) {
+    segments.push_back(Json{{"type", segment.type},
+                            {"flags", segment.flags},
+                            {"fileOffset", segment.file_offset},
+                            {"fileSize", segment.file_size},
+                            {"memorySize", segment.memory_size},
+                            {"virtualAddress", segment.virtual_address}});
+  }
+  Json interpreter = inspected.result->interpreter.has_value()
+                         ? Json(*inspected.result->interpreter)
+                         : Json(nullptr);
+  Json build_id = inspected.result->build_id.has_value()
+                      ? Json(*inspected.result->build_id)
+                      : Json(nullptr);
+  return ToolExecutionResult{
+      .is_error = false,
+      .structured_content =
+          Json{{"root", *root},
+               {"path", *path},
+               {"class", inspected.result->elf_class},
+               {"endianness", inspected.result->endianness},
+               {"fileType", inspected.result->file_type},
+               {"fileTypeNumber", inspected.result->file_type_number},
+               {"machine", inspected.result->machine},
+               {"machineNumber", inspected.result->machine_number},
+               {"osAbi", inspected.result->os_abi},
+               {"osAbiNumber", inspected.result->os_abi_number},
+               {"entryPoint", inspected.result->entry_point},
+               {"programHeaderCount", inspected.result->program_header_count},
+               {"interpreter", std::move(interpreter)},
+               {"neededLibraries", inspected.result->needed_libraries},
+               {"neededLibrariesTruncated",
+                inspected.result->needed_libraries_truncated},
+               {"buildId", std::move(build_id)},
+               {"stackPolicy", inspected.result->stack_policy},
+               {"relro", inspected.result->relro},
+               {"positionIndependent", inspected.result->position_independent},
+               {"pieExecutable", inspected.result->pie_executable},
+               {"writableExecutableLoadSegment",
+                inspected.result->writable_executable_load_segment},
+               {"fileChangedDuringRead",
+                inspected.result->file_changed_during_read},
+               {"metadataBytesRead", inspected.result->metadata_bytes_read},
+               {"segments", std::move(segments)},
+               {"segmentSummariesTruncated",
+                inspected.result->segment_summaries_truncated}},
+  };
+}
+
 }  // namespace
 
-LogToolService::LogToolService(FilesystemPolicy policy,
-                               const LogAnalysisLimits limits)
-    : policy_(std::move(policy)), analyzer_(limits) {}
+ToolService::ToolService(FilesystemPolicy policy,
+                         const LogAnalysisLimits log_limits,
+                         const ElfInspectionLimits elf_limits)
+    : policy_(std::move(policy)),
+      log_analyzer_(log_limits),
+      elf_analyzer_(elf_limits) {}
 
-Json LogToolService::tool_definitions() const {
+Json ToolService::tool_definitions() const {
   return Json::array(
-      {search_definition(analyzer_.limits()), tail_definition(analyzer_.limits())});
+      {search_definition(log_analyzer_.limits()),
+       tail_definition(log_analyzer_.limits()),
+       elf_definition(elf_analyzer_.limits())});
 }
 
-bool LogToolService::knows_tool(const std::string_view name) const noexcept {
-  return name == kSearchTool || name == kTailTool;
+bool ToolService::knows_tool(const std::string_view name) const noexcept {
+  return name == kSearchTool || name == kTailTool || name == kElfInspectTool;
 }
 
-bool LogToolService::acquire_rate_limit_slot() {
+bool ToolService::acquire_rate_limit_slot() {
   constexpr std::size_t kMaxCallsPerWindow = 16U;
   constexpr auto kWindow = std::chrono::seconds{1};
   const auto now = std::chrono::steady_clock::now();
@@ -370,17 +534,20 @@ bool LogToolService::acquire_rate_limit_slot() {
   return true;
 }
 
-ToolExecutionResult LogToolService::execute(
+ToolExecutionResult ToolService::execute(
     const std::string_view name, const Json& arguments) {
   if (!acquire_rate_limit_slot()) {
     return tool_error("rate_limited",
                       "too many tool calls; retry after a short pause");
   }
   if (name == kSearchTool) {
-    return execute_search(policy_, analyzer_, arguments);
+    return execute_search(policy_, log_analyzer_, arguments);
   }
   if (name == kTailTool) {
-    return execute_tail(policy_, analyzer_, arguments);
+    return execute_tail(policy_, log_analyzer_, arguments);
+  }
+  if (name == kElfInspectTool) {
+    return execute_elf(policy_, elf_analyzer_, arguments);
   }
   return tool_error("unknown_tool", "requested tool is not available");
 }

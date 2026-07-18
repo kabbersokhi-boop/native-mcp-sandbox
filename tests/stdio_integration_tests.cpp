@@ -1,3 +1,7 @@
+#include <elf.h>
+#include <fcntl.h>
+#include <linux/openat2.h>
+#include <sys/syscall.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -160,6 +164,43 @@ class TempDirectory final {
   fs::path path_;
 };
 
+bool strict_openat2_available(const fs::path& directory) {
+  open_how how{};
+  how.flags = O_PATH | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW;
+  how.resolve = RESOLVE_NO_SYMLINKS | RESOLVE_NO_MAGICLINKS;
+  const int fd = static_cast<int>(
+      ::syscall(SYS_openat2, AT_FDCWD, directory.c_str(), &how, sizeof(how)));
+  if (fd >= 0) {
+    close_fd(fd);
+    return true;
+  }
+  if (errno == ENOSYS || errno == EINVAL || errno == E2BIG) {
+    return false;
+  }
+  fail("unexpected openat2 probe failure");
+  return false;
+}
+
+void write_minimal_elf64(const fs::path& path) {
+  std::vector<unsigned char> bytes(64U, 0U);
+  bytes[EI_MAG0] = ELFMAG0;
+  bytes[EI_MAG1] = ELFMAG1;
+  bytes[EI_MAG2] = ELFMAG2;
+  bytes[EI_MAG3] = ELFMAG3;
+  bytes[EI_CLASS] = ELFCLASS64;
+  bytes[EI_DATA] = ELFDATA2LSB;
+  bytes[EI_VERSION] = EV_CURRENT;
+  bytes[EI_OSABI] = ELFOSABI_LINUX;
+  bytes[16U] = static_cast<unsigned char>(ET_EXEC);
+  bytes[18U] = static_cast<unsigned char>(EM_X86_64);
+  bytes[20U] = static_cast<unsigned char>(EV_CURRENT);
+  bytes[52U] = 64U;
+  bytes[54U] = 56U;
+  std::ofstream output(path, std::ios::binary);
+  output.write(reinterpret_cast<const char*>(bytes.data()),
+               static_cast<std::streamsize>(bytes.size()));
+}
+
 void test_unconfigured_server(const std::string& executable) {
   const std::string input =
       "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"ping\"}\r\n"
@@ -170,7 +211,7 @@ void test_unconfigured_server(const std::string& executable) {
   const ProcessOutput output = run_server(executable, {}, input);
   const std::string expected =
       "{\"id\":1,\"jsonrpc\":\"2.0\",\"result\":{}}\n"
-      "{\"id\":2,\"jsonrpc\":\"2.0\",\"result\":{\"capabilities\":{\"tools\":{}},\"protocolVersion\":\"2025-11-25\",\"serverInfo\":{\"name\":\"native-mcp-sandbox\",\"version\":\"0.4.0\"}}}\n"
+      "{\"id\":2,\"jsonrpc\":\"2.0\",\"result\":{\"capabilities\":{\"tools\":{}},\"protocolVersion\":\"2025-11-25\",\"serverInfo\":{\"name\":\"native-mcp-sandbox\",\"version\":\"0.5.0\"}}}\n"
       "{\"id\":3,\"jsonrpc\":\"2.0\",\"result\":{\"tools\":[]}}\n";
   expect(output.standard_output == expected,
          "unconfigured stdout must remain deterministic and tool-free");
@@ -181,13 +222,14 @@ void test_unconfigured_server(const std::string& executable) {
          "stderr must not echo untrusted request content");
 }
 
-void test_configured_log_tools(const std::string& executable) {
+void test_configured_tools(const std::string& executable) {
   TempDirectory directory;
   const fs::path log_path = directory.path() / "app.log";
   {
     std::ofstream log{log_path, std::ios::binary};
     log << "boot ok\nERROR first\nquiet\nerror second\n";
   }
+  write_minimal_elf64(directory.path() / "sample.elf");
   const fs::path config_path = directory.path() / "policy.json";
   {
     std::ofstream config{config_path, std::ios::binary};
@@ -201,21 +243,24 @@ void test_configured_log_tools(const std::string& executable) {
       "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}\n"
       "{\"jsonrpc\":\"2.0\",\"id\":11,\"method\":\"tools/list\"}\n"
       "{\"jsonrpc\":\"2.0\",\"id\":12,\"method\":\"tools/call\",\"params\":{\"name\":\"logs.search\",\"arguments\":{\"root\":\"logs\",\"path\":\"app.log\",\"query\":\"error\",\"caseSensitive\":false,\"maxMatches\":5}}}\n"
-      "{\"jsonrpc\":\"2.0\",\"id\":13,\"method\":\"tools/call\",\"params\":{\"name\":\"logs.tail\",\"arguments\":{\"root\":\"logs\",\"path\":\"app.log\",\"maxLines\":2}}}\n";
-  const ProcessOutput output = run_server(
-      executable,
-      {"--policy-config", config_path.string(),
-       "--allow-legacy-descriptor-walk"},
-      input);
+      "{\"jsonrpc\":\"2.0\",\"id\":13,\"method\":\"tools/call\",\"params\":{\"name\":\"logs.tail\",\"arguments\":{\"root\":\"logs\",\"path\":\"app.log\",\"maxLines\":2}}}\n"
+      "{\"jsonrpc\":\"2.0\",\"id\":14,\"method\":\"tools/call\",\"params\":{\"name\":\"elf.inspect\",\"arguments\":{\"root\":\"logs\",\"path\":\"sample.elf\"}}}\n";
+  const bool strict_backend = strict_openat2_available(directory.path());
+  std::vector<std::string> arguments{"--policy-config", config_path.string()};
+  if (!strict_backend) {
+    arguments.push_back("--allow-legacy-descriptor-walk");
+  }
+  const ProcessOutput output = run_server(executable, arguments, input);
   const std::vector<Json> messages = parse_lines(output.standard_output);
-  expect(messages.size() == 4U, "configured transcript must return four responses");
-  expect(messages[0]["result"]["serverInfo"]["version"] == "0.4.0",
-         "configured initialize must report the Phase 3 version");
+  expect(messages.size() == 5U, "configured transcript must return five responses");
+  expect(messages[0]["result"]["serverInfo"]["version"] == "0.5.0",
+         "configured initialize must report the Phase 4 version");
   const Json& tools = messages[1]["result"]["tools"];
-  expect(tools.is_array() && tools.size() == 2U &&
+  expect(tools.is_array() && tools.size() == 3U &&
              tools[0]["name"] == "logs.search" &&
-             tools[1]["name"] == "logs.tail",
-         "configured server must advertise only the two Phase 3 tools");
+             tools[1]["name"] == "logs.tail" &&
+             tools[2]["name"] == "elf.inspect",
+         "configured server must advertise the three bounded Phase 4 tools");
   expect(messages[2]["result"]["isError"] == false &&
              messages[2]["result"]["structuredContent"]["matches"].size() == 2U,
          "logs.search must run through the real configured process");
@@ -224,9 +269,18 @@ void test_configured_log_tools(const std::string& executable) {
              messages[3]["result"]["structuredContent"]["lines"][1]["preview"] ==
                  "error second",
          "logs.tail must return the final requested lines");
-  expect(output.standard_error.find("legacy descriptor walk enabled") !=
-             std::string::npos,
-         "explicit legacy startup must disclose its weaker containment");
+  expect(messages[4]["result"]["isError"] == false &&
+             messages[4]["result"]["structuredContent"]["class"] == "ELF64" &&
+             messages[4]["result"]["structuredContent"]["machine"] == "x86_64",
+         "elf.inspect must inspect a non-executable fixture without launching it");
+  if (strict_backend) {
+    expect(output.standard_error.empty(),
+           "strict configured execution must keep normal stderr empty");
+  } else {
+    expect(output.standard_error.find("legacy descriptor walk enabled") !=
+               std::string::npos,
+           "explicit legacy startup must disclose its weaker containment");
+  }
   expect(output.standard_error.find("tool-client") == std::string::npos &&
              output.standard_error.find("error second") == std::string::npos,
          "configured diagnostics must not echo client or log contents");
@@ -238,7 +292,7 @@ int main(int argc, char* argv[]) {
   expect(argc == 2, "expected server executable path");
   const std::string executable{argv[1]};
   test_unconfigured_server(executable);
-  test_configured_log_tools(executable);
+  test_configured_tools(executable);
   std::cout << "All stdio integration tests passed\n";
   return EXIT_SUCCESS;
 }

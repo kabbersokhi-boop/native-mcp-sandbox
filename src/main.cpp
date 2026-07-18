@@ -1,6 +1,6 @@
 #include "native_mcp/file_policy.hpp"
 #include "native_mcp/foundation.hpp"
-#include "native_mcp/log_tools.hpp"
+#include "native_mcp/tool_service.hpp"
 #include "native_mcp/server.hpp"
 
 #include <fcntl.h>
@@ -19,7 +19,7 @@
 namespace {
 
 struct ToolLoadResult final {
-  std::optional<native_mcp::LogToolService> tools;
+  std::optional<native_mcp::ToolService> tools;
   std::string error;
 };
 
@@ -31,7 +31,7 @@ void print_usage(std::ostream& output) {
          "[--allow-legacy-descriptor-walk]\n"
       << "\n"
       << "With no arguments, run the MCP lifecycle server with no host tools.\n"
-      << "With --policy-config, expose bounded read-only logs.search and logs.tail tools.\n"
+      << "With --policy-config, expose bounded read-only log and ELF inspection tools.\n"
       << "Strict openat2 containment is required unless the explicit legacy flag is used.\n"
       << "Diagnostics are written only to stderr.\n";
 }
@@ -101,7 +101,7 @@ void print_usage(std::ostream& output) {
     return {.tools = std::nullopt,
             .error = created.error->message};
   }
-  return {.tools = native_mcp::LogToolService{std::move(*created.policy)},
+  return {.tools = native_mcp::ToolService{std::move(*created.policy)},
           .error = {}};
 }
 

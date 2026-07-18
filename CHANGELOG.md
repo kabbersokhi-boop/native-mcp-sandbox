@@ -5,6 +5,24 @@ the first stable release; pre-1.0 versions may change interfaces.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-07-18
+
+### Added
+
+- Policy-gated `elf.inspect` MCP tool for bounded ELF32 and ELF64 metadata.
+- Little- and big-endian ELF parsing without executing or memory-mapping targets.
+- Bounded interpreter, dynamic dependency, GNU build-ID, and segment inspection.
+- Structural stack, RELRO, PIE, and writable-executable segment indicators.
+- Overflow-checked file-range validation and a 1 MiB metadata-read ceiling.
+- Deterministic synthetic and real-process ELF tests.
+- ADR 0008 documenting the safe ELF inspection boundary.
+
+### Changed
+
+- Project version advanced to `0.5.0`.
+- The generic tool service now advertises log and ELF tools together.
+- Third-party notices cover Phases 1 through 4.
+
 ## [0.4.0] - 2026-07-18
 
 ### Added
