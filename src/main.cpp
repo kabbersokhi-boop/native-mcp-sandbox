@@ -1,4 +1,5 @@
 #include "native_mcp/foundation.hpp"
+#include "native_mcp/server.hpp"
 
 #include <iostream>
 #include <string_view>
@@ -7,14 +8,19 @@ namespace {
 
 void print_usage(std::ostream& output) {
   output << "Usage: native-mcp-sandbox [--help | --version | --self-check]\n"
+         << "       native-mcp-sandbox\n"
          << "\n"
-         << "Phase 0 provides a buildable foundation only. MCP transport and analysis\n"
-         << "tools are intentionally scheduled for later, reviewed phases.\n";
+         << "With no arguments, run the Phase 1 MCP server over stdin/stdout.\n"
+         << "Diagnostics are written only to stderr. No analysis tools are exposed.\n";
 }
 
 }  // namespace
 
 int main(int argc, char* argv[]) {
+  if (argc == 1) {
+    return native_mcp::run_stdio(std::cin, std::cout, std::cerr);
+  }
+
   if (argc != 2) {
     print_usage(std::cerr);
     return 64;
