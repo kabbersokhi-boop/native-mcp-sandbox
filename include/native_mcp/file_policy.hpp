@@ -80,7 +80,8 @@ class UniqueFd final {
 
 class ReadOnlyFile final {
  public:
-  ReadOnlyFile(UniqueFd fd, std::uint64_t observed_size, std::uint64_t max_read_bytes) noexcept;
+  ReadOnlyFile(UniqueFd fd, std::uint64_t observed_size,
+               std::uint64_t max_read_bytes) noexcept;
 
   ReadOnlyFile(const ReadOnlyFile&) = delete;
   ReadOnlyFile& operator=(const ReadOnlyFile&) = delete;
@@ -114,11 +115,12 @@ class FilesystemPolicy final {
 
   struct CreateResult;
 
-  [[nodiscard]] static CreateResult create(const FilesystemPolicyConfig& config,
-                                           FilesystemPolicyLimits limits = {});
+  [[nodiscard]] static CreateResult create(
+      const FilesystemPolicyConfig& config,
+      FilesystemPolicyLimits limits = {});
 
-  [[nodiscard]] OpenFileResult open_regular_file(std::string_view root_name,
-                                                 std::string_view relative_path) const;
+  [[nodiscard]] OpenFileResult open_regular_file(
+      std::string_view root_name, std::string_view relative_path) const;
   [[nodiscard]] std::size_t root_count() const noexcept;
 
  private:
@@ -139,8 +141,8 @@ struct FilesystemPolicy::CreateResult final {
   std::optional<PolicyError> error;
 };
 
-[[nodiscard]] ConfigParseResult parse_filesystem_policy_config(std::string_view text,
-                                                               FilesystemPolicyLimits limits = {});
+[[nodiscard]] ConfigParseResult parse_filesystem_policy_config(
+    std::string_view text, FilesystemPolicyLimits limits = {});
 [[nodiscard]] std::string_view policy_error_name(PolicyErrorCode code) noexcept;
 
 }  // namespace native_mcp

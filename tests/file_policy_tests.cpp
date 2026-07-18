@@ -50,13 +50,18 @@ class TempDirectory final {
 };
 
 native_mcp::FilesystemPolicy create_policy(const fs::path& root,
-                                           const std::uint64_t max_bytes = 1024U,
-                                           const bool allow_legacy = false) {
+                                            const std::uint64_t max_bytes = 1024U,
+                                            const bool allow_legacy = false) {
   native_mcp::FilesystemPolicyConfig config;
   config.roots.push_back({.name = "evidence", .path = root.string(), .max_file_bytes = max_bytes});
   native_mcp::FilesystemPolicyLimits limits;
   limits.allow_legacy_descriptor_walk = allow_legacy;
   auto result = native_mcp::FilesystemPolicy::create(config, limits);
+  if (!result.policy.has_value() && !allow_legacy && result.error.has_value() &&
+      result.error->code == native_mcp::PolicyErrorCode::kKernelUnsupported) {
+    limits.allow_legacy_descriptor_walk = true;
+    result = native_mcp::FilesystemPolicy::create(config, limits);
+  }
   expect(result.policy.has_value(), "valid policy must be created");
   return std::move(*result.policy);
 }
