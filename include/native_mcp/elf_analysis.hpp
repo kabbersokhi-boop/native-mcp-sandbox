@@ -25,6 +25,7 @@ struct ElfAnalysisError final {
 
 struct ElfInspectionLimits final {
   std::size_t max_program_headers = 256U;
+  std::size_t max_program_header_entry_bytes = 256U;
   std::size_t max_segment_summaries = 64U;
   std::size_t max_interpreter_bytes = 4096U;
   std::size_t max_dynamic_entries = 4096U;

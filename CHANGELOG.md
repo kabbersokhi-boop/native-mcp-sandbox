@@ -5,6 +5,25 @@ the first stable release; pre-1.0 versions may change interfaces.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-07-18
+
+### Added
+
+- Version-2 runtime policy with explicit symbolic process targets.
+- Policy-gated `proc.memory` MCP tool for bounded aggregate `/proc` counters.
+- Same-effective-UID enforcement and startup process identity capture.
+- Strict pidfd pinning with an explicit old-kernel compatibility option.
+- Pinned `/proc/<pid>` directory and start-time revalidation against PID reuse.
+- Bounded `status`, `statm`, and optional `smaps_rollup` parsing.
+- Process lifecycle, runtime-config, protocol, and real-process regression tests.
+- ADR 0009 documenting the bounded process-memory observation boundary.
+
+### Changed
+
+- Project version advanced to `0.6.0`.
+- Tool discovery is now capability-dependent for filesystem and process policies.
+- Phase 4 ELF malformed-input and schema regressions are retained in the cumulative suite.
+
 ## [0.5.0] - 2026-07-18
 
 ### Added

@@ -2,38 +2,43 @@
 
 ## Supported versions
 
-The project is pre-1.0. Only the latest tagged release and the default branch receive
-security fixes.
+The project is pre-1.0. Only the most recent tagged release and the default branch
+receive security fixes.
 
-Phase 4 exposes read-only log and ELF inspection tools only when an operator supplies
-a policy configuration. Reports involving protocol framing, lifecycle, tool schemas,
-rate limiting, path containment, descriptor identity, streaming limits, ELF range or
-integer validation, parser memory use, output sanitization, dependencies, or
-information disclosure are in scope.
+Phase 5 accepts local MCP traffic over stdio and may expose configured read-only log,
+ELF, and process-memory tools. Filesystem containment, process identity, bounded parsing,
+protocol framing, lifecycle, output schemas, resource limits, and dependencies are in
+scope.
 
 ## Reporting a vulnerability
 
-Use GitHub private vulnerability reporting. Do not publish a working exploit,
-malicious binary, or sensitive local evidence in a public issue. If private reporting
-is unavailable, open a public issue without exploit details and request a private
-channel.
+Do not publish a working exploit in a public issue. Use GitHub private vulnerability
+reporting. If unavailable, open a public issue without exploit details and request a
+private channel.
 
-Include where possible:
+Include, where possible:
 
 - affected version and commit;
-- Linux kernel, compiler, and configuration mode;
-- minimal reproduction steps or a safely shareable reduced fixture;
+- operating system, kernel, and compiler;
+- minimal reproduction steps;
 - expected and observed behavior;
-- security impact;
-- whether strict `openat2` or legacy mode was active.
+- security impact; and
+- whether the issue is already public.
 
 Responses are best-effort; this is an independent educational project, not a service
 with an SLA.
 
-## Expectations for changes
+## Security expectations for changes
 
-Security-sensitive changes require permitted and denied tests, threat-model updates,
-strict warnings, sanitizer-clean execution where applicable, bounded failures,
-non-echoing diagnostics, and focused review of protocol output and host-access paths.
-Do not commit credentials, local paths, builds, archives, session artifacts, or
-private development material.
+Changes affecting protocol parsing, filesystem access, process observation, concurrency,
+resource limits, or dependencies require:
+
+- tests for permitted and rejected behavior;
+- a threat-model update when assumptions change;
+- sanitizer-clean execution where applicable;
+- bounded failure paths and non-echoing diagnostics;
+- focused review of identity, lifecycle, output framing, and cancellation behavior; and
+- no expansion from aggregate process counters to raw memory or unconfigured PIDs without
+  a new threat-model decision.
+
+Do not commit credentials, local paths, build outputs, or archives.

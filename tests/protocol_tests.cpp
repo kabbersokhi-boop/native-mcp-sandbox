@@ -1,4 +1,5 @@
 #include "native_mcp/file_policy.hpp"
+#include "native_mcp/process_memory.hpp"
 
 #include <elf.h>
 #include "native_mcp/json_rpc.hpp"
@@ -126,6 +127,19 @@ Server configured_server(const fs::path& root) {
   return Server{native_mcp::conservative_budget(), std::move(tools)};
 }
 
+Server process_configured_server() {
+  native_mcp::ProcessPolicyConfig config;
+  config.processes.push_back({.name = "server", .pid = std::nullopt});
+  native_mcp::ProcessPolicyLimits limits;
+  limits.allow_legacy_process_pinning = true;
+  auto created = native_mcp::ProcessPolicy::create(config, limits);
+  expect(created.policy.has_value(), "test process policy must be created");
+  std::optional<native_mcp::ToolService> tools;
+  tools.emplace(std::nullopt,
+                std::optional<native_mcp::ProcessPolicy>{std::move(*created.policy)});
+  return Server{native_mcp::conservative_budget(), std::move(tools)};
+}
+
 void test_parse_and_envelope_errors() {
   Server server;
   Json response = response_json(server.process_line("{"));
@@ -201,8 +215,8 @@ void test_lifecycle() {
          "initialize must negotiate the targeted protocol version");
   expect(response["result"]["capabilities"].contains("tools"),
          "initialize must advertise tool discovery capability");
-  expect(response["result"]["serverInfo"]["version"] == "0.5.0",
-         "initialize must report the Phase 4 version");
+  expect(response["result"]["serverInfo"]["version"] == "0.6.0",
+         "initialize must report the Phase 5 version");
   expect(server.state() == LifecycleState::kAwaitingInitializedNotification,
          "initialize response must advance to awaiting notification");
 
@@ -284,11 +298,9 @@ void test_log_tool_protocol() {
   expect(response["result"]["isError"] == false &&
              response["result"]["structuredContent"]["class"] == "ELF64" &&
              response["result"]["structuredContent"]["machine"] == "x86_64" &&
-             (response["result"]["structuredContent"]["interpreter"].is_string() ||
-              response["result"]["structuredContent"]["interpreter"].is_null()) &&
-             (response["result"]["structuredContent"]["buildId"].is_string() ||
-              response["result"]["structuredContent"]["buildId"].is_null()),
-         "approved ELF inspection must return schema-conforming bounded metadata");
+             response["result"]["structuredContent"]["interpreter"].is_null() &&
+             response["result"]["structuredContent"]["buildId"].is_null(),
+         "approved ELF inspection must return schema-valid bounded metadata");
 
   response = response_json(server.process_line(
       R"({"jsonrpc":"2.0","id":41,"method":"tools/call","params":{"name":"elf.inspect","arguments":{"root":"logs","path":"app.log"}}})"));
@@ -348,6 +360,43 @@ void test_log_tool_protocol() {
                      "tools/call notifications must never receive a response");
   expect(notification.diagnostic.has_value(),
          "ignored tools/call notifications should be diagnosed safely");
+}
+
+void test_process_memory_tool_protocol() {
+  Server server = process_configured_server();
+  (void)initialize(server);
+  become_ready(server);
+
+  Json response = response_json(server.process_line(
+      R"({"jsonrpc":"2.0","id":50,"method":"tools/list"})"));
+  const Json& tools = response["result"]["tools"];
+  expect(tools.size() == 1U && tools[0]["name"] == "proc.memory",
+         "process-only configuration must advertise only proc.memory");
+  expect(tools[0]["annotations"]["readOnlyHint"] == true &&
+             tools[0]["execution"]["taskSupport"] == "forbidden",
+         "process observation must be advertised as read-only and synchronous");
+
+  response = response_json(server.process_line(
+      R"({"jsonrpc":"2.0","id":51,"method":"tools/call","params":{"name":"proc.memory","arguments":{"process":"server"}}})"));
+  expect(response["result"]["isError"] == false &&
+             response["result"]["structuredContent"]["pid"] > 0U &&
+             response["result"]["structuredContent"]["status"]["vmRssBytes"].is_number_unsigned(),
+         "proc.memory must return bounded aggregate memory counters");
+  expect(response["result"]["structuredContent"] == tool_text_json(response),
+         "process text content must mirror structured content");
+
+  response = response_json(server.process_line(
+      R"({"jsonrpc":"2.0","id":52,"method":"tools/call","params":{"name":"proc.memory","arguments":{"process":"missing"}}})"));
+  expect(response["result"]["isError"] == true &&
+             !response["result"].contains("structuredContent") &&
+             tool_text_json(response)["error"]["code"] == "unknown_process",
+         "unknown process aliases must produce bounded tool errors");
+
+  response = response_json(server.process_line(
+      R"({"jsonrpc":"2.0","id":53,"method":"tools/call","params":{"name":"proc.memory","arguments":{"process":"server","pid":1}}})"));
+  expect(response["result"]["isError"] == true &&
+             tool_text_json(response)["error"]["code"] == "invalid_arguments",
+         "proc.memory must reject undeclared fields and raw PID selection");
 }
 
 void test_initialize_validation() {
@@ -424,6 +473,7 @@ int main() {
   test_notifications_and_unknown_methods();
   test_lifecycle();
   test_log_tool_protocol();
+  test_process_memory_tool_protocol();
   test_initialize_validation();
   test_response_limit_preserves_state();
   test_request_size_error();

@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.20)
 
 project(
   native_mcp_sandbox
-  VERSION 0.5.0
+  VERSION 0.6.0
   DESCRIPTION "A security-first, resource-bounded C++20 server for local MCP evidence tools"
   LANGUAGES CXX
 )
@@ -62,6 +62,8 @@ nms_enable_sanitizers(native_mcp_foundation)
 
 add_library(native_mcp_policy STATIC
   src/file_policy.cpp
+  src/process_memory.cpp
+  src/runtime_config.cpp
 )
 add_library(native_mcp::policy ALIAS native_mcp_policy)
 target_compile_features(native_mcp_policy PUBLIC cxx_std_20)
@@ -131,6 +133,15 @@ if(BUILD_TESTING)
   nms_set_project_warnings(native_mcp_policy_tests)
   nms_enable_sanitizers(native_mcp_policy_tests)
 
+
+  add_executable(native_mcp_process_memory_tests tests/process_memory_tests.cpp)
+  target_link_libraries(native_mcp_process_memory_tests
+    PRIVATE native_mcp::policy nlohmann_json::nlohmann_json
+  )
+  target_compile_features(native_mcp_process_memory_tests PRIVATE cxx_std_20)
+  nms_set_project_warnings(native_mcp_process_memory_tests)
+  nms_enable_sanitizers(native_mcp_process_memory_tests)
+
   add_executable(native_mcp_log_analysis_tests tests/log_analysis_tests.cpp)
   target_link_libraries(native_mcp_log_analysis_tests
     PRIVATE native_mcp::tools nlohmann_json::nlohmann_json
@@ -168,6 +179,7 @@ if(BUILD_TESTING)
   add_test(NAME foundation.unit COMMAND native_mcp_foundation_tests)
   add_test(NAME foundation.self_check COMMAND native-mcp-sandbox --self-check)
   add_test(NAME policy.unit COMMAND native_mcp_policy_tests)
+  add_test(NAME process.unit COMMAND native_mcp_process_memory_tests)
   add_test(NAME logs.unit COMMAND native_mcp_log_analysis_tests)
   add_test(NAME elf.unit COMMAND native_mcp_elf_analysis_tests)
   add_test(NAME protocol.unit COMMAND native_mcp_protocol_tests)

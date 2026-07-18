@@ -307,31 +307,31 @@ void test_invalid_and_bounded_inputs() {
          "unterminated dynamic tables must be rejected");
 
   native_mcp::ElfInspectionLimits dynamic_limit;
-  dynamic_limit.max_dynamic_entries = 4U;
-  file = open_fixture(directory.path() / "dynamic-count", make_elf64());
+  dynamic_limit.max_dynamic_entries = 2U;
+  file = open_fixture(directory.path() / "dynamic-limit", make_elf64());
   inspected = native_mcp::ElfAnalyzer{dynamic_limit}.inspect(file);
   expect(inspected.error.has_value() &&
              inspected.error->code ==
                  native_mcp::ElfAnalysisErrorCode::kMetadataTooLarge,
-         "dynamic entry counts must be bounded before allocation");
+         "dynamic entry limits must be enforced");
 
   native_mcp::ElfInspectionLimits string_limit;
   string_limit.max_dynamic_string_bytes = 8U;
-  file = open_fixture(directory.path() / "dynamic-strings", make_elf64());
+  file = open_fixture(directory.path() / "string-limit", make_elf64());
   inspected = native_mcp::ElfAnalyzer{string_limit}.inspect(file);
   expect(inspected.error.has_value() &&
              inspected.error->code ==
                  native_mcp::ElfAnalysisErrorCode::kMetadataTooLarge,
-         "dynamic string tables must be bounded before allocation");
+         "dynamic string limits must be enforced");
 
   native_mcp::ElfInspectionLimits note_limit;
-  note_limit.max_note_bytes = 19U;
-  file = open_fixture(directory.path() / "notes", make_elf64());
+  note_limit.max_note_bytes = 8U;
+  file = open_fixture(directory.path() / "note-limit", make_elf64());
   inspected = native_mcp::ElfAnalyzer{note_limit}.inspect(file);
   expect(inspected.error.has_value() &&
              inspected.error->code ==
                  native_mcp::ElfAnalysisErrorCode::kMetadataTooLarge,
-         "note data must be bounded before allocation");
+         "note byte limits must be enforced");
 
   native_mcp::ElfInspectionLimits tiny;
   tiny.max_metadata_bytes = 32U;

@@ -181,6 +181,23 @@ bool strict_openat2_available(const fs::path& directory) {
   return false;
 }
 
+bool strict_pidfd_available() {
+#ifdef SYS_pidfd_open
+  const int fd = static_cast<int>(::syscall(SYS_pidfd_open, ::getpid(), 0U));
+  if (fd >= 0) {
+    close_fd(fd);
+    return true;
+  }
+  if (errno == ENOSYS || errno == EINVAL) {
+    return false;
+  }
+  fail("unexpected pidfd_open probe failure");
+  return false;
+#else
+  return false;
+#endif
+}
+
 void write_minimal_elf64(const fs::path& path) {
   std::vector<unsigned char> bytes(64U, 0U);
   bytes[EI_MAG0] = ELFMAG0;
@@ -211,7 +228,7 @@ void test_unconfigured_server(const std::string& executable) {
   const ProcessOutput output = run_server(executable, {}, input);
   const std::string expected =
       "{\"id\":1,\"jsonrpc\":\"2.0\",\"result\":{}}\n"
-      "{\"id\":2,\"jsonrpc\":\"2.0\",\"result\":{\"capabilities\":{\"tools\":{}},\"protocolVersion\":\"2025-11-25\",\"serverInfo\":{\"name\":\"native-mcp-sandbox\",\"version\":\"0.5.0\"}}}\n"
+      "{\"id\":2,\"jsonrpc\":\"2.0\",\"result\":{\"capabilities\":{\"tools\":{}},\"protocolVersion\":\"2025-11-25\",\"serverInfo\":{\"name\":\"native-mcp-sandbox\",\"version\":\"0.6.0\"}}}\n"
       "{\"id\":3,\"jsonrpc\":\"2.0\",\"result\":{\"tools\":[]}}\n";
   expect(output.standard_output == expected,
          "unconfigured stdout must remain deterministic and tool-free");
@@ -233,9 +250,10 @@ void test_configured_tools(const std::string& executable) {
   const fs::path config_path = directory.path() / "policy.json";
   {
     std::ofstream config{config_path, std::ios::binary};
-    config << "{\"version\":1,\"roots\":[{\"name\":\"logs\",\"path\":\""
+    config << "{\"version\":2,\"roots\":[{\"name\":\"logs\",\"path\":\""
            << directory.path().string()
-           << "\",\"maxFileBytes\":1048576}]}";
+           << "\",\"maxFileBytes\":1048576}],"
+              "\"processes\":[{\"name\":\"server\",\"pid\":\"self\"}]}";
   }
 
   const std::string input =
@@ -244,23 +262,29 @@ void test_configured_tools(const std::string& executable) {
       "{\"jsonrpc\":\"2.0\",\"id\":11,\"method\":\"tools/list\"}\n"
       "{\"jsonrpc\":\"2.0\",\"id\":12,\"method\":\"tools/call\",\"params\":{\"name\":\"logs.search\",\"arguments\":{\"root\":\"logs\",\"path\":\"app.log\",\"query\":\"error\",\"caseSensitive\":false,\"maxMatches\":5}}}\n"
       "{\"jsonrpc\":\"2.0\",\"id\":13,\"method\":\"tools/call\",\"params\":{\"name\":\"logs.tail\",\"arguments\":{\"root\":\"logs\",\"path\":\"app.log\",\"maxLines\":2}}}\n"
-      "{\"jsonrpc\":\"2.0\",\"id\":14,\"method\":\"tools/call\",\"params\":{\"name\":\"elf.inspect\",\"arguments\":{\"root\":\"logs\",\"path\":\"sample.elf\"}}}\n";
+      "{\"jsonrpc\":\"2.0\",\"id\":14,\"method\":\"tools/call\",\"params\":{\"name\":\"elf.inspect\",\"arguments\":{\"root\":\"logs\",\"path\":\"sample.elf\"}}}\n"
+      "{\"jsonrpc\":\"2.0\",\"id\":15,\"method\":\"tools/call\",\"params\":{\"name\":\"proc.memory\",\"arguments\":{\"process\":\"server\"}}}\n";
   const bool strict_backend = strict_openat2_available(directory.path());
+  const bool strict_process = strict_pidfd_available();
   std::vector<std::string> arguments{"--policy-config", config_path.string()};
   if (!strict_backend) {
     arguments.push_back("--allow-legacy-descriptor-walk");
   }
+  if (!strict_process) {
+    arguments.push_back("--allow-legacy-process-pinning");
+  }
   const ProcessOutput output = run_server(executable, arguments, input);
   const std::vector<Json> messages = parse_lines(output.standard_output);
-  expect(messages.size() == 5U, "configured transcript must return five responses");
-  expect(messages[0]["result"]["serverInfo"]["version"] == "0.5.0",
-         "configured initialize must report the Phase 4 version");
+  expect(messages.size() == 6U, "configured transcript must return six responses");
+  expect(messages[0]["result"]["serverInfo"]["version"] == "0.6.0",
+         "configured initialize must report the Phase 5 version");
   const Json& tools = messages[1]["result"]["tools"];
-  expect(tools.is_array() && tools.size() == 3U &&
+  expect(tools.is_array() && tools.size() == 4U &&
              tools[0]["name"] == "logs.search" &&
              tools[1]["name"] == "logs.tail" &&
-             tools[2]["name"] == "elf.inspect",
-         "configured server must advertise the three bounded Phase 4 tools");
+             tools[2]["name"] == "elf.inspect" &&
+             tools[3]["name"] == "proc.memory",
+         "configured server must advertise the four bounded Phase 5 tools");
   expect(messages[2]["result"]["isError"] == false &&
              messages[2]["result"]["structuredContent"]["matches"].size() == 2U,
          "logs.search must run through the real configured process");
@@ -273,13 +297,24 @@ void test_configured_tools(const std::string& executable) {
              messages[4]["result"]["structuredContent"]["class"] == "ELF64" &&
              messages[4]["result"]["structuredContent"]["machine"] == "x86_64",
          "elf.inspect must inspect a non-executable fixture without launching it");
-  if (strict_backend) {
+  expect(messages[5]["result"]["isError"] == false &&
+             messages[5]["result"]["structuredContent"]["pid"] > 0U &&
+             messages[5]["result"]["structuredContent"]["status"]["vmRssBytes"].is_number_unsigned(),
+         "proc.memory must observe only the configured server process");
+  if (strict_backend && strict_process) {
     expect(output.standard_error.empty(),
            "strict configured execution must keep normal stderr empty");
   } else {
-    expect(output.standard_error.find("legacy descriptor walk enabled") !=
-               std::string::npos,
-           "explicit legacy startup must disclose its weaker containment");
+    if (!strict_backend) {
+      expect(output.standard_error.find("legacy descriptor walk enabled") !=
+                 std::string::npos,
+             "explicit legacy filesystem startup must disclose weaker containment");
+    }
+    if (!strict_process) {
+      expect(output.standard_error.find("legacy process identity checks enabled") !=
+                 std::string::npos,
+             "explicit legacy process startup must disclose missing pidfd pinning");
+    }
   }
   expect(output.standard_error.find("tool-client") == std::string::npos &&
              output.standard_error.find("error second") == std::string::npos,

@@ -2,62 +2,51 @@
 
 ## Assets
 
-- confidentiality of files outside configured roots;
-- confidentiality of denied files and unreturned log or binary bytes;
-- integrity of the host filesystem and processes;
-- availability of the MCP server and development machine;
-- correctness and framing of protocol responses.
+- confidentiality and integrity of host files and processes;
+- privacy of process command lines, environments, mappings, and memory contents;
+- integrity of MCP protocol output;
+- bounded CPU, memory, descriptors, and response size; and
+- operator control over which roots and processes are observable.
 
-## Adversary
+## Trusted components
 
-The MCP client, tool arguments, root names, paths, queries, ELF bytes, log bytes, file
-changes, offsets encoded inside ELF metadata, and request timing are untrusted. The
-local operator, installed binary, startup policy configuration, kernel, and compiler
-toolchain are trusted for this phase.
+- the installed executable and trusted runtime policy file;
+- the operating system, procfs implementation, and compiler toolchain;
+- the MCP host that launches the process; and
+- operator-selected filesystem roots and process aliases.
+
+## Untrusted inputs
+
+- every byte received through stdin;
+- JSON structure, methods, IDs, and tool arguments;
+- inspected log and ELF contents;
+- changing `/proc` pseudo-file contents; and
+- target-process lifetime and credential changes after startup.
 
 ## Controls
 
-- bounded closed-schema policy configuration;
-- named roots opened as owned descriptors;
-- strict `openat2` containment with no symlinks, magic links, or mount crossing;
-- explicit weaker legacy mode, disabled by default;
-- regular-file and size enforcement with inode revalidation;
-- strict relative-path validation;
-- fixed captured read budgets;
-- bounded log chunks, queries, results, and previews;
-- ELF magic, class, byte-order, version, header, table, segment, and string validation;
-- overflow-checked ELF offset arithmetic;
-- 1 MiB ELF metadata-read ceiling and smaller per-structure limits;
-- no execution, `dlopen`, relocation, shell invocation, or target `mmap`;
-- escaped binary output and compact schemas;
-- closed MCP input schemas and stable tool names;
-- tool-call burst limiting;
-- 1 MiB protocol message limits;
-- stdout isolation and non-echoing stderr diagnostics.
-
-## Denied attacks
-
-Tests cover traversal, absolute paths, root and target symlinks, mount crossing,
-directories, FIFOs, sockets, devices, missing and oversized files, malformed numeric
-configuration, file growth, chunk-boundary matches, long lines, binary logs, invalid
-ELF magic, ELF32/ELF64 byte order, out-of-range tables and segments, extended program
-header numbering, oversized metadata budgets, extra tool fields, policy denials, and
-rapid repeated calls.
+- no-argument mode exposes no host tools;
+- closed configuration and tool schemas;
+- named filesystem roots and named process aliases;
+- strict `openat2` filesystem containment by default;
+- same-effective-UID process restriction;
+- retained `/proc/<pid>` directory descriptors and recorded start times;
+- pidfd lifetime pinning on supported kernels;
+- fixed pseudo-file names with no agent-controlled `/proc` paths;
+- bounded reads and overflow-checked page conversions;
+- no raw memory, mappings, command line, environment, or descriptor enumeration;
+- one serialized stdout writer and non-echoing stderr diagnostics; and
+- GCC, Clang, ASan, UBSan, malformed-input, lifecycle, and real-process tests.
 
 ## Residual risks and limitations
 
-- Legacy descriptor walking cannot detect every bind mount.
-- A privileged process can modify an already-open file. Phase 4 compares descriptor
-  identity, size, modification time, and change time around ELF inspection, but cannot
-  make a mutable inode immutable.
-- ELF hardening fields are structural indicators, not proof that a binary is safe.
-- GNU build IDs are currently read from bounded `PT_NOTE` segments, not section-only
-  notes in relocatable files.
-- Extended program-header numbering and unusual multiple interpreter or dynamic
-  segments are rejected rather than partially interpreted.
-- Processing is synchronous and has no hard deadline or cancellation.
-- The rate limiter is per process, not an identity-based multi-tenant quota.
-- Approved logs and binaries may contain secrets. Operators must configure roots
-  narrowly and clients should show tool invocations to users.
-- This phase does not add namespaces, Landlock, seccomp, privilege dropping, or a
-  network authentication boundary.
+- Aggregate memory values can change while being observed and are snapshots, not a
+  transaction across all proc files.
+- Linux documents some `statm` values as approximate; `smaps_rollup` is more accurate but
+  slower and may be unavailable or permission denied.
+- A privileged or compromised kernel can violate userspace assumptions.
+- The legacy filesystem backend cannot reliably detect every bind mount.
+- The explicit legacy process mode lacks pidfd pinning, although the proc-directory
+  descriptor and start time prevent silent PID rebinding in normal kernel behavior.
+- The rate limiter is per server process, not a multi-tenant identity quota.
+- Processing remains synchronous and has no hard cancellation deadline until Phase 6.

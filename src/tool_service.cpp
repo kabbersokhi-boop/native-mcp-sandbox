@@ -17,6 +17,7 @@ using Json = nlohmann::json;
 constexpr std::string_view kSearchTool = "logs.search";
 constexpr std::string_view kTailTool = "logs.tail";
 constexpr std::string_view kElfInspectTool = "elf.inspect";
+constexpr std::string_view kProcessMemoryTool = "proc.memory";
 
 [[nodiscard]] bool has_only_fields(
     const Json& object, const std::initializer_list<std::string_view> allowed) {
@@ -56,6 +57,11 @@ constexpr std::string_view kElfInspectTool = "elf.inspect";
 [[nodiscard]] ToolExecutionResult elf_error_result(
     const ElfAnalysisError& failure) {
   return tool_error(elf_analysis_error_name(failure.code), failure.message);
+}
+
+[[nodiscard]] ToolExecutionResult process_error_result(
+    const ProcessMemoryError& failure) {
+  return tool_error(process_memory_error_name(failure.code), failure.message);
 }
 
 [[nodiscard]] Json common_annotations() {
@@ -273,6 +279,142 @@ constexpr std::string_view kElfInspectTool = "elf.inspect";
       {"annotations", common_annotations()},
       {"execution", Json{{"taskSupport", "forbidden"}}},
   };
+}
+
+[[nodiscard]] Json nullable_integer_schema() {
+  return Json{{"type", Json::array({"integer", "null"})}, {"minimum", 0}};
+}
+
+[[nodiscard]] Json process_definition() {
+  const Json status_properties{
+      {"vmPeakBytes", nullable_integer_schema()},
+      {"vmSizeBytes", nullable_integer_schema()},
+      {"vmHwmBytes", nullable_integer_schema()},
+      {"vmRssBytes", nullable_integer_schema()},
+      {"rssAnonBytes", nullable_integer_schema()},
+      {"rssFileBytes", nullable_integer_schema()},
+      {"rssShmemBytes", nullable_integer_schema()},
+      {"vmDataBytes", nullable_integer_schema()},
+      {"vmStackBytes", nullable_integer_schema()},
+      {"vmExecutableBytes", nullable_integer_schema()},
+      {"vmLibraryBytes", nullable_integer_schema()},
+      {"vmPageTableBytes", nullable_integer_schema()},
+      {"vmSwapBytes", nullable_integer_schema()},
+      {"hugetlbBytes", nullable_integer_schema()},
+  };
+  const Json rollup_properties{
+      {"rssBytes", nullable_integer_schema()},
+      {"pssBytes", nullable_integer_schema()},
+      {"pssAnonBytes", nullable_integer_schema()},
+      {"pssFileBytes", nullable_integer_schema()},
+      {"pssShmemBytes", nullable_integer_schema()},
+      {"sharedCleanBytes", nullable_integer_schema()},
+      {"sharedDirtyBytes", nullable_integer_schema()},
+      {"privateCleanBytes", nullable_integer_schema()},
+      {"privateDirtyBytes", nullable_integer_schema()},
+      {"referencedBytes", nullable_integer_schema()},
+      {"anonymousBytes", nullable_integer_schema()},
+      {"swapBytes", nullable_integer_schema()},
+      {"swapPssBytes", nullable_integer_schema()},
+      {"lockedBytes", nullable_integer_schema()},
+  };
+  return Json{
+      {"name", kProcessMemoryTool},
+      {"title", "Observe bounded process memory totals"},
+      {"description",
+       "Return aggregate memory counters for one operator-configured same-UID Linux "
+       "process. Reads bounded status, statm, and optional smaps_rollup data from a "
+       "pinned /proc process directory. It never reads process memory, mappings, "
+       "command-line arguments, environment variables, or file descriptors."},
+      {"inputSchema",
+       Json{{"type", "object"},
+            {"additionalProperties", false},
+            {"properties",
+             Json{{"process",
+                   Json{{"type", "string"},
+                        {"minLength", 1},
+                        {"maxLength", 64},
+                        {"description", "Operator-configured symbolic process name"}}}}},
+            {"required", Json::array({"process"})}}},
+      {"outputSchema",
+       Json{{"type", "object"},
+            {"properties",
+             Json{{"process", Json{{"type", "string"}}},
+                  {"pid", Json{{"type", "integer"}, {"minimum", 1}}},
+                  {"uid", Json{{"type", "integer"}, {"minimum", 0}}},
+                  {"name", Json{{"type", "string"}}},
+                  {"state", Json{{"type", "string"}}},
+                  {"threads", Json{{"type", "integer"}, {"minimum", 0}}},
+                  {"pageSizeBytes", Json{{"type", "integer"}, {"minimum", 1}}},
+                  {"pidfdPinned", Json{{"type", "boolean"}}},
+                  {"status",
+                   Json{{"type", "object"},
+                        {"properties", status_properties},
+                        {"required", Json::array({
+                            "vmPeakBytes", "vmSizeBytes", "vmHwmBytes", "vmRssBytes",
+                            "rssAnonBytes", "rssFileBytes", "rssShmemBytes", "vmDataBytes",
+                            "vmStackBytes", "vmExecutableBytes", "vmLibraryBytes",
+                            "vmPageTableBytes", "vmSwapBytes", "hugetlbBytes"})}}},
+                  {"statm",
+                   Json{{"type", "object"},
+                        {"properties",
+                         Json{{"virtualBytes", Json{{"type", "integer"}, {"minimum", 0}}},
+                              {"residentBytes", Json{{"type", "integer"}, {"minimum", 0}}},
+                              {"sharedBytes", Json{{"type", "integer"}, {"minimum", 0}}},
+                              {"textBytes", Json{{"type", "integer"}, {"minimum", 0}}},
+                              {"dataAndStackBytes", Json{{"type", "integer"}, {"minimum", 0}}}}},
+                        {"required", Json::array({"virtualBytes", "residentBytes", "sharedBytes",
+                                                  "textBytes", "dataAndStackBytes"})}}},
+                  {"smapsRollupAvailable", Json{{"type", "boolean"}}},
+                  {"smapsRollupError", Json{{"type", Json::array({"string", "null"})}}},
+                  {"smapsRollup",
+                   Json{{"type", Json::array({"object", "null"})},
+                        {"properties", rollup_properties}}}}},
+            {"required", Json::array({"process", "pid", "uid", "name", "state",
+                                        "threads", "pageSizeBytes", "pidfdPinned", "status",
+                                        "statm", "smapsRollupAvailable", "smapsRollupError",
+                                        "smapsRollup"})}}},
+      {"annotations", common_annotations()},
+      {"execution", Json{{"taskSupport", "forbidden"}}},
+  };
+}
+
+[[nodiscard]] Json optional_number(const std::optional<std::uint64_t>& value) {
+  return value.has_value() ? Json(*value) : Json(nullptr);
+}
+
+[[nodiscard]] Json status_memory_json(const ProcessStatusMemory& memory) {
+  return Json{{"vmPeakBytes", optional_number(memory.vm_peak_bytes)},
+              {"vmSizeBytes", optional_number(memory.vm_size_bytes)},
+              {"vmHwmBytes", optional_number(memory.vm_hwm_bytes)},
+              {"vmRssBytes", optional_number(memory.vm_rss_bytes)},
+              {"rssAnonBytes", optional_number(memory.rss_anon_bytes)},
+              {"rssFileBytes", optional_number(memory.rss_file_bytes)},
+              {"rssShmemBytes", optional_number(memory.rss_shmem_bytes)},
+              {"vmDataBytes", optional_number(memory.vm_data_bytes)},
+              {"vmStackBytes", optional_number(memory.vm_stack_bytes)},
+              {"vmExecutableBytes", optional_number(memory.vm_executable_bytes)},
+              {"vmLibraryBytes", optional_number(memory.vm_library_bytes)},
+              {"vmPageTableBytes", optional_number(memory.vm_page_table_bytes)},
+              {"vmSwapBytes", optional_number(memory.vm_swap_bytes)},
+              {"hugetlbBytes", optional_number(memory.hugetlb_bytes)}};
+}
+
+[[nodiscard]] Json rollup_json(const ProcessSmapsRollup& rollup) {
+  return Json{{"rssBytes", optional_number(rollup.rss_bytes)},
+              {"pssBytes", optional_number(rollup.pss_bytes)},
+              {"pssAnonBytes", optional_number(rollup.pss_anon_bytes)},
+              {"pssFileBytes", optional_number(rollup.pss_file_bytes)},
+              {"pssShmemBytes", optional_number(rollup.pss_shmem_bytes)},
+              {"sharedCleanBytes", optional_number(rollup.shared_clean_bytes)},
+              {"sharedDirtyBytes", optional_number(rollup.shared_dirty_bytes)},
+              {"privateCleanBytes", optional_number(rollup.private_clean_bytes)},
+              {"privateDirtyBytes", optional_number(rollup.private_dirty_bytes)},
+              {"referencedBytes", optional_number(rollup.referenced_bytes)},
+              {"anonymousBytes", optional_number(rollup.anonymous_bytes)},
+              {"swapBytes", optional_number(rollup.swap_bytes)},
+              {"swapPssBytes", optional_number(rollup.swap_pss_bytes)},
+              {"lockedBytes", optional_number(rollup.locked_bytes)}};
 }
 
 [[nodiscard]] std::optional<std::string> required_string(
@@ -500,24 +642,86 @@ constexpr std::string_view kElfInspectTool = "elf.inspect";
   };
 }
 
+[[nodiscard]] ToolExecutionResult execute_process(
+    const ProcessPolicy& policy, const Json& arguments) {
+  if (!arguments.is_object() || !has_only_fields(arguments, {"process"})) {
+    return tool_error("invalid_arguments",
+                      "proc.memory arguments must match the closed schema");
+  }
+  const auto process = required_string(arguments, "process");
+  if (!process.has_value()) {
+    return tool_error("invalid_arguments", "process must be a nonempty string");
+  }
+  ProcessMemoryOutcome observed = policy.inspect_memory(*process);
+  if (!observed.result.has_value()) {
+    return process_error_result(*observed.error);
+  }
+  const ProcessMemoryResult& result = *observed.result;
+  Json rollup = result.smaps_rollup.has_value()
+                    ? rollup_json(*result.smaps_rollup)
+                    : Json(nullptr);
+  Json rollup_failure = result.smaps_rollup_error.has_value()
+                            ? Json(*result.smaps_rollup_error)
+                            : Json(nullptr);
+  return ToolExecutionResult{
+      .is_error = false,
+      .structured_content =
+          Json{{"process", result.process},
+               {"pid", result.pid},
+               {"uid", result.uid},
+               {"name", result.name},
+               {"state", result.state},
+               {"threads", result.threads},
+               {"pageSizeBytes", result.page_size_bytes},
+               {"pidfdPinned", result.pidfd_pinned},
+               {"status", status_memory_json(result.status)},
+               {"statm",
+                Json{{"virtualBytes", result.statm.virtual_bytes},
+                     {"residentBytes", result.statm.resident_bytes},
+                     {"sharedBytes", result.statm.shared_bytes},
+                     {"textBytes", result.statm.text_bytes},
+                     {"dataAndStackBytes", result.statm.data_and_stack_bytes}}},
+               {"smapsRollupAvailable", result.smaps_rollup_available},
+               {"smapsRollupError", std::move(rollup_failure)},
+               {"smapsRollup", std::move(rollup)}},
+  };
+}
+
 }  // namespace
 
 ToolService::ToolService(FilesystemPolicy policy,
                          const LogAnalysisLimits log_limits,
                          const ElfInspectionLimits elf_limits)
-    : policy_(std::move(policy)),
+    : ToolService(std::optional<FilesystemPolicy>{std::move(policy)},
+                  std::nullopt, log_limits, elf_limits) {}
+
+ToolService::ToolService(std::optional<FilesystemPolicy> filesystem_policy,
+                         std::optional<ProcessPolicy> process_policy,
+                         const LogAnalysisLimits log_limits,
+                         const ElfInspectionLimits elf_limits)
+    : filesystem_policy_(std::move(filesystem_policy)),
+      process_policy_(std::move(process_policy)),
       log_analyzer_(log_limits),
       elf_analyzer_(elf_limits) {}
 
 Json ToolService::tool_definitions() const {
-  return Json::array(
-      {search_definition(log_analyzer_.limits()),
-       tail_definition(log_analyzer_.limits()),
-       elf_definition(elf_analyzer_.limits())});
+  Json definitions = Json::array();
+  if (filesystem_policy_.has_value()) {
+    definitions.push_back(search_definition(log_analyzer_.limits()));
+    definitions.push_back(tail_definition(log_analyzer_.limits()));
+    definitions.push_back(elf_definition(elf_analyzer_.limits()));
+  }
+  if (process_policy_.has_value()) {
+    definitions.push_back(process_definition());
+  }
+  return definitions;
 }
 
 bool ToolService::knows_tool(const std::string_view name) const noexcept {
-  return name == kSearchTool || name == kTailTool || name == kElfInspectTool;
+  const bool file_tool = filesystem_policy_.has_value() &&
+                         (name == kSearchTool || name == kTailTool ||
+                          name == kElfInspectTool);
+  return file_tool || (process_policy_.has_value() && name == kProcessMemoryTool);
 }
 
 bool ToolService::acquire_rate_limit_slot() {
@@ -540,14 +744,17 @@ ToolExecutionResult ToolService::execute(
     return tool_error("rate_limited",
                       "too many tool calls; retry after a short pause");
   }
-  if (name == kSearchTool) {
-    return execute_search(policy_, log_analyzer_, arguments);
+  if (name == kSearchTool && filesystem_policy_.has_value()) {
+    return execute_search(*filesystem_policy_, log_analyzer_, arguments);
   }
-  if (name == kTailTool) {
-    return execute_tail(policy_, log_analyzer_, arguments);
+  if (name == kTailTool && filesystem_policy_.has_value()) {
+    return execute_tail(*filesystem_policy_, log_analyzer_, arguments);
   }
-  if (name == kElfInspectTool) {
-    return execute_elf(policy_, elf_analyzer_, arguments);
+  if (name == kElfInspectTool && filesystem_policy_.has_value()) {
+    return execute_elf(*filesystem_policy_, elf_analyzer_, arguments);
+  }
+  if (name == kProcessMemoryTool && process_policy_.has_value()) {
+    return execute_process(*process_policy_, arguments);
   }
   return tool_error("unknown_tool", "requested tool is not available");
 }
