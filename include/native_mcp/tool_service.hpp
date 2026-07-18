@@ -3,12 +3,14 @@
 #include "native_mcp/elf_analysis.hpp"
 #include "native_mcp/file_policy.hpp"
 #include "native_mcp/log_analysis.hpp"
+#include "native_mcp/operation.hpp"
 #include "native_mcp/process_memory.hpp"
 
 #include <nlohmann/json.hpp>
 
 #include <chrono>
 #include <deque>
+#include <memory>
 #include <optional>
 #include <string_view>
 
@@ -38,15 +40,20 @@ class ToolService final {
   [[nodiscard]] bool knows_tool(std::string_view name) const noexcept;
   [[nodiscard]] ToolExecutionResult execute(
       std::string_view name, const nlohmann::json& arguments);
+  [[nodiscard]] ToolExecutionResult execute(
+      std::string_view name, const nlohmann::json& arguments,
+      const OperationContext& context);
 
  private:
+  struct RateState;
+
   [[nodiscard]] bool acquire_rate_limit_slot();
 
   std::optional<FilesystemPolicy> filesystem_policy_;
   std::optional<ProcessPolicy> process_policy_;
   LogAnalyzer log_analyzer_;
   ElfAnalyzer elf_analyzer_;
-  std::deque<std::chrono::steady_clock::time_point> recent_calls_;
+  std::shared_ptr<RateState> rate_state_;
 };
 
 }  // namespace native_mcp

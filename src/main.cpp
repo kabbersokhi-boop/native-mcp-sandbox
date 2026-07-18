@@ -46,7 +46,8 @@ void print_usage(std::ostream& output) {
       << "Schema version 1 configures filesystem tools; version 2 may also name\n"
       << "same-UID processes for bounded aggregate /proc memory observation.\n"
       << "Strict openat2 and pidfd pinning are required unless explicit legacy flags\n"
-      << "are used. Diagnostics are written only to stderr.\n";
+      << "are used. Tool calls use a bounded two-worker scheduler with cooperative\n"
+      << "cancellation and deadlines. Diagnostics are written only to stderr.\n";
 }
 
 [[nodiscard]] std::optional<StartupOptions> parse_startup_options(

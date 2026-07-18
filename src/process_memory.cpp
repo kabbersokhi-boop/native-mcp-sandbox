@@ -32,6 +32,21 @@ namespace {
   return ProcessMemoryError{.code = code, .message = std::move(message)};
 }
 
+[[nodiscard]] std::optional<ProcessMemoryError> operation_error(
+    const OperationContext& context) {
+  switch (context.stop_reason()) {
+    case OperationStopReason::kCancelled:
+      return error(ProcessMemoryErrorCode::kCancelled,
+                   "process observation was cancelled");
+    case OperationStopReason::kDeadlineExceeded:
+      return error(ProcessMemoryErrorCode::kDeadlineExceeded,
+                   "process observation exceeded its deadline");
+    case OperationStopReason::kNone:
+      return std::nullopt;
+  }
+  return std::nullopt;
+}
+
 [[nodiscard]] bool valid_process_name(const std::string_view name,
                                       const std::size_t maximum) {
   if (name.empty() || name.size() > maximum) {
@@ -95,10 +110,12 @@ struct ReadTextResult final {
   std::optional<ProcessMemoryError> error;
 };
 
-[[nodiscard]] ReadTextResult read_proc_text(const int directory_fd,
-                                            const char* name,
-                                            const std::size_t limit,
-                                            const bool optional_file) {
+[[nodiscard]] ReadTextResult read_proc_text(
+    const int directory_fd, const char* name, const std::size_t limit,
+    const bool optional_file, const OperationContext context = {}) {
+  if (const auto stopped = operation_error(context)) {
+    return {.text = std::nullopt, .error = stopped};
+  }
   UniqueFd descriptor{
       ::openat(directory_fd, name,
                O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK)};
@@ -115,6 +132,9 @@ struct ReadTextResult final {
   std::string output(limit + 1U, '\0');
   std::size_t total = 0U;
   while (total < output.size()) {
+    if (const auto stopped = operation_error(context)) {
+      return {.text = std::nullopt, .error = stopped};
+    }
     const ssize_t count = ::read(descriptor.get(), output.data() + total,
                                  output.size() - total);
     if (count < 0) {
@@ -496,9 +516,9 @@ void assign_rollup_metric(const std::string_view key,
 
 [[nodiscard]] std::optional<StatIdentity> read_identity(
     const int proc_directory, const ProcessPolicyLimits& limits,
-    ProcessMemoryError& failure) {
-  ReadTextResult stat =
-      read_proc_text(proc_directory, "stat", limits.max_stat_bytes, false);
+    ProcessMemoryError& failure, const OperationContext context = {}) {
+  ReadTextResult stat = read_proc_text(proc_directory, "stat",
+                                       limits.max_stat_bytes, false, context);
   if (!stat.text.has_value()) {
     failure = std::move(*stat.error);
     return std::nullopt;
@@ -634,7 +654,11 @@ ProcessPolicy::CreateResult ProcessPolicy::create(
 }
 
 ProcessMemoryOutcome ProcessPolicy::inspect_memory(
-    const std::string_view process_name) const {
+    const std::string_view process_name,
+    const OperationContext context) const {
+  if (const auto stopped = operation_error(context)) {
+    return {.result = std::nullopt, .error = stopped};
+  }
   const ProcessHandle* target = nullptr;
   for (const ProcessHandle& candidate : processes_) {
     if (candidate.name == process_name) {
@@ -655,7 +679,7 @@ ProcessMemoryOutcome ProcessPolicy::inspect_memory(
 
   ProcessMemoryError identity_error =
       error(ProcessMemoryErrorCode::kMalformedProcData, "invalid process identity");
-  const auto before = read_identity(target->proc_directory.get(), limits_, identity_error);
+  const auto before = read_identity(target->proc_directory.get(), limits_, identity_error, context);
   if (!before.has_value()) {
     return {.result = std::nullopt, .error = std::move(identity_error)};
   }
@@ -666,7 +690,8 @@ ProcessMemoryOutcome ProcessPolicy::inspect_memory(
   }
 
   ReadTextResult status_text = read_proc_text(
-      target->proc_directory.get(), "status", limits_.max_status_bytes, false);
+      target->proc_directory.get(), "status", limits_.max_status_bytes, false,
+      context);
   if (!status_text.text.has_value()) {
     return {.result = std::nullopt, .error = std::move(status_text.error)};
   }
@@ -691,7 +716,8 @@ ProcessMemoryOutcome ProcessPolicy::inspect_memory(
   }
   const auto page_size = static_cast<std::uint64_t>(page_size_raw);
   ReadTextResult statm_text = read_proc_text(
-      target->proc_directory.get(), "statm", limits_.max_statm_bytes, false);
+      target->proc_directory.get(), "statm", limits_.max_statm_bytes, false,
+      context);
   if (!statm_text.text.has_value()) {
     return {.result = std::nullopt, .error = std::move(statm_text.error)};
   }
@@ -707,7 +733,7 @@ ProcessMemoryOutcome ProcessPolicy::inspect_memory(
   std::optional<ProcessSmapsRollup> rollup;
   ReadTextResult rollup_text = read_proc_text(
       target->proc_directory.get(), "smaps_rollup",
-      limits_.max_smaps_rollup_bytes, true);
+      limits_.max_smaps_rollup_bytes, true, context);
   if (rollup_text.text.has_value()) {
     rollup = parse_smaps_rollup(*rollup_text.text);
     if (!rollup.has_value()) {
@@ -720,7 +746,7 @@ ProcessMemoryOutcome ProcessPolicy::inspect_memory(
     rollup_error = std::string{process_memory_error_name(rollup_text.error->code)};
   }
 
-  const auto after = read_identity(target->proc_directory.get(), limits_, identity_error);
+  const auto after = read_identity(target->proc_directory.get(), limits_, identity_error, context);
   if (!after.has_value()) {
     return {.result = std::nullopt, .error = std::move(identity_error)};
   }
@@ -795,6 +821,10 @@ std::string_view process_memory_error_name(
       return "io_error";
     case ProcessMemoryErrorCode::kUnknownProcess:
       return "unknown_process";
+    case ProcessMemoryErrorCode::kCancelled:
+      return "cancelled";
+    case ProcessMemoryErrorCode::kDeadlineExceeded:
+      return "deadline_exceeded";
   }
   return "unknown";
 }

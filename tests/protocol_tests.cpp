@@ -195,6 +195,32 @@ void test_notifications_and_unknown_methods() {
          "unknown requests must return method not found");
 }
 
+void test_cancellation_notifications() {
+  Server server;
+
+  auto action = server.accept_line(
+      R"({"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":"work-1","reason":"no longer needed"}})");
+  expect(action.cancellation.has_value() &&
+             action.cancellation->request_id == "work-1" &&
+             !action.immediate.has_value(),
+         "valid cancellation notifications must expose the target request id");
+
+  action = server.accept_line(
+      R"({"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":1.5}})");
+  expect(action.immediate.has_value() &&
+             !action.immediate->response.has_value() &&
+             action.immediate->diagnostic.has_value(),
+         "malformed cancellation notifications must be ignored safely");
+
+  action = server.accept_line(
+      R"({"jsonrpc":"2.0","id":2,"method":"notifications/cancelled","params":{"requestId":1}})");
+  expect(action.immediate.has_value(),
+         "cancellation requests must receive an invalid-request response");
+  const Json response = response_json(*action.immediate);
+  expect(response["error"]["code"] == native_mcp::json_rpc::kInvalidRequest,
+         "notifications/cancelled must remain notification-only");
+}
+
 void test_lifecycle() {
   Server server;
 
@@ -215,8 +241,8 @@ void test_lifecycle() {
          "initialize must negotiate the targeted protocol version");
   expect(response["result"]["capabilities"].contains("tools"),
          "initialize must advertise tool discovery capability");
-  expect(response["result"]["serverInfo"]["version"] == "0.6.0",
-         "initialize must report the Phase 5 version");
+  expect(response["result"]["serverInfo"]["version"] == "0.7.0",
+         "initialize must report the Phase 6 version");
   expect(server.state() == LifecycleState::kAwaitingInitializedNotification,
          "initialize response must advance to awaiting notification");
 
@@ -471,6 +497,7 @@ void test_request_size_error() {
 int main() {
   test_parse_and_envelope_errors();
   test_notifications_and_unknown_methods();
+  test_cancellation_notifications();
   test_lifecycle();
   test_log_tool_protocol();
   test_process_memory_tool_protocol();

@@ -4,6 +4,7 @@
 #include <chrono>
 #include <cstdint>
 #include <initializer_list>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -446,7 +447,7 @@ constexpr std::string_view kProcessMemoryTool = "proc.memory";
 
 [[nodiscard]] ToolExecutionResult execute_search(
     const FilesystemPolicy& policy, const LogAnalyzer& analyzer,
-    const Json& arguments) {
+    const Json& arguments, const OperationContext& context) {
   if (!arguments.is_object() ||
       !has_only_fields(arguments,
                        {"root", "path", "query", "caseSensitive",
@@ -486,7 +487,8 @@ constexpr std::string_view kProcessMemoryTool = "proc.memory";
       *opened.file,
       LogSearchOptions{.query = *query,
                        .case_sensitive = case_sensitive,
-                       .max_matches = *max_matches});
+                       .max_matches = *max_matches},
+      context);
   if (!searched.result.has_value()) {
     return analysis_error_result(*searched.error);
   }
@@ -519,7 +521,7 @@ constexpr std::string_view kProcessMemoryTool = "proc.memory";
 
 [[nodiscard]] ToolExecutionResult execute_tail(
     const FilesystemPolicy& policy, const LogAnalyzer& analyzer,
-    const Json& arguments) {
+    const Json& arguments, const OperationContext& context) {
   if (!arguments.is_object() ||
       !has_only_fields(arguments, {"root", "path", "maxLines"})) {
     return tool_error("invalid_arguments",
@@ -542,8 +544,8 @@ constexpr std::string_view kProcessMemoryTool = "proc.memory";
   if (!opened.file.has_value()) {
     return policy_error_result(*opened.error);
   }
-  LogTailOutcome tailed =
-      analyzer.tail(*opened.file, LogTailOptions{.max_lines = *max_lines});
+  LogTailOutcome tailed = analyzer.tail(
+      *opened.file, LogTailOptions{.max_lines = *max_lines}, context);
   if (!tailed.result.has_value()) {
     return analysis_error_result(*tailed.error);
   }
@@ -572,7 +574,7 @@ constexpr std::string_view kProcessMemoryTool = "proc.memory";
 
 [[nodiscard]] ToolExecutionResult execute_elf(
     const FilesystemPolicy& policy, const ElfAnalyzer& analyzer,
-    const Json& arguments) {
+    const Json& arguments, const OperationContext& context) {
   if (!arguments.is_object() || !has_only_fields(arguments, {"root", "path"})) {
     return tool_error("invalid_arguments",
                       "elf.inspect arguments must match the closed schema");
@@ -587,7 +589,7 @@ constexpr std::string_view kProcessMemoryTool = "proc.memory";
   if (!opened.file.has_value()) {
     return policy_error_result(*opened.error);
   }
-  ElfInspectionOutcome inspected = analyzer.inspect(*opened.file);
+  ElfInspectionOutcome inspected = analyzer.inspect(*opened.file, context);
   if (!inspected.result.has_value()) {
     return elf_error_result(*inspected.error);
   }
@@ -643,7 +645,8 @@ constexpr std::string_view kProcessMemoryTool = "proc.memory";
 }
 
 [[nodiscard]] ToolExecutionResult execute_process(
-    const ProcessPolicy& policy, const Json& arguments) {
+    const ProcessPolicy& policy, const Json& arguments,
+    const OperationContext& context) {
   if (!arguments.is_object() || !has_only_fields(arguments, {"process"})) {
     return tool_error("invalid_arguments",
                       "proc.memory arguments must match the closed schema");
@@ -652,7 +655,7 @@ constexpr std::string_view kProcessMemoryTool = "proc.memory";
   if (!process.has_value()) {
     return tool_error("invalid_arguments", "process must be a nonempty string");
   }
-  ProcessMemoryOutcome observed = policy.inspect_memory(*process);
+  ProcessMemoryOutcome observed = policy.inspect_memory(*process, context);
   if (!observed.result.has_value()) {
     return process_error_result(*observed.error);
   }
@@ -687,7 +690,12 @@ constexpr std::string_view kProcessMemoryTool = "proc.memory";
   };
 }
 
-}  // namespace
+ }  // namespace
+
+struct ToolService::RateState final {
+  std::mutex mutex;
+  std::deque<std::chrono::steady_clock::time_point> recent_calls;
+};
 
 ToolService::ToolService(FilesystemPolicy policy,
                          const LogAnalysisLimits log_limits,
@@ -702,7 +710,8 @@ ToolService::ToolService(std::optional<FilesystemPolicy> filesystem_policy,
     : filesystem_policy_(std::move(filesystem_policy)),
       process_policy_(std::move(process_policy)),
       log_analyzer_(log_limits),
-      elf_analyzer_(elf_limits) {}
+      elf_analyzer_(elf_limits),
+      rate_state_(std::make_shared<RateState>()) {}
 
 Json ToolService::tool_definitions() const {
   Json definitions = Json::array();
@@ -728,33 +737,41 @@ bool ToolService::acquire_rate_limit_slot() {
   constexpr std::size_t kMaxCallsPerWindow = 16U;
   constexpr auto kWindow = std::chrono::seconds{1};
   const auto now = std::chrono::steady_clock::now();
-  while (!recent_calls_.empty() && now - recent_calls_.front() >= kWindow) {
-    recent_calls_.pop_front();
+  std::lock_guard lock{rate_state_->mutex};
+  auto& recent_calls = rate_state_->recent_calls;
+  while (!recent_calls.empty() && now - recent_calls.front() >= kWindow) {
+    recent_calls.pop_front();
   }
-  if (recent_calls_.size() >= kMaxCallsPerWindow) {
+  if (recent_calls.size() >= kMaxCallsPerWindow) {
     return false;
   }
-  recent_calls_.push_back(now);
+  recent_calls.push_back(now);
   return true;
 }
 
 ToolExecutionResult ToolService::execute(
     const std::string_view name, const Json& arguments) {
+  return execute(name, arguments, OperationContext{});
+}
+
+ToolExecutionResult ToolService::execute(
+    const std::string_view name, const Json& arguments,
+    const OperationContext& context) {
   if (!acquire_rate_limit_slot()) {
     return tool_error("rate_limited",
                       "too many tool calls; retry after a short pause");
   }
   if (name == kSearchTool && filesystem_policy_.has_value()) {
-    return execute_search(*filesystem_policy_, log_analyzer_, arguments);
+    return execute_search(*filesystem_policy_, log_analyzer_, arguments, context);
   }
   if (name == kTailTool && filesystem_policy_.has_value()) {
-    return execute_tail(*filesystem_policy_, log_analyzer_, arguments);
+    return execute_tail(*filesystem_policy_, log_analyzer_, arguments, context);
   }
   if (name == kElfInspectTool && filesystem_policy_.has_value()) {
-    return execute_elf(*filesystem_policy_, elf_analyzer_, arguments);
+    return execute_elf(*filesystem_policy_, elf_analyzer_, arguments, context);
   }
   if (name == kProcessMemoryTool && process_policy_.has_value()) {
-    return execute_process(*process_policy_, arguments);
+    return execute_process(*process_policy_, arguments, context);
   }
   return tool_error("unknown_tool", "requested tool is not available");
 }

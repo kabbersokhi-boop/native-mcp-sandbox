@@ -2,7 +2,7 @@
 
 ## nlohmann/json
 
-Native MCP Sandbox Phases 1 through 5 depend on nlohmann/json 3.11 or newer, supplied
+Native MCP Sandbox Phases 1 through 6 depend on nlohmann/json 3.11 or newer, supplied
 by the host operating system. Dependency source is not vendored in this repository.
 
 - Project: JSON for Modern C++

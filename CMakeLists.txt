@@ -2,13 +2,15 @@ cmake_minimum_required(VERSION 3.20)
 
 project(
   native_mcp_sandbox
-  VERSION 0.6.0
+  VERSION 0.7.0
   DESCRIPTION "A security-first, resource-bounded C++20 server for local MCP evidence tools"
   LANGUAGES CXX
 )
 
 include(CTest)
 include(GNUInstallDirs)
+
+find_package(Threads REQUIRED)
 
 option(NMS_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" OFF)
 option(NMS_ENABLE_SANITIZERS "Enable AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
@@ -99,6 +101,7 @@ nms_enable_sanitizers(native_mcp_tools)
 add_library(native_mcp_protocol STATIC
   src/json_rpc.cpp
   src/server.cpp
+  src/orchestration.cpp
 )
 add_library(native_mcp::protocol ALIAS native_mcp_protocol)
 target_compile_features(native_mcp_protocol PUBLIC cxx_std_20)
@@ -108,7 +111,7 @@ target_include_directories(native_mcp_protocol
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
 target_link_libraries(native_mcp_protocol
-  PUBLIC native_mcp::foundation native_mcp::tools nlohmann_json::nlohmann_json
+  PUBLIC native_mcp::foundation native_mcp::tools nlohmann_json::nlohmann_json Threads::Threads
 )
 nms_set_project_warnings(native_mcp_protocol)
 nms_enable_sanitizers(native_mcp_protocol)
@@ -158,6 +161,15 @@ if(BUILD_TESTING)
   nms_set_project_warnings(native_mcp_elf_analysis_tests)
   nms_enable_sanitizers(native_mcp_elf_analysis_tests)
 
+
+  add_executable(native_mcp_orchestration_tests tests/orchestration_tests.cpp)
+  target_link_libraries(native_mcp_orchestration_tests
+    PRIVATE native_mcp::protocol nlohmann_json::nlohmann_json Threads::Threads
+  )
+  target_compile_features(native_mcp_orchestration_tests PRIVATE cxx_std_20)
+  nms_set_project_warnings(native_mcp_orchestration_tests)
+  nms_enable_sanitizers(native_mcp_orchestration_tests)
+
   add_executable(native_mcp_protocol_tests tests/protocol_tests.cpp)
   target_link_libraries(native_mcp_protocol_tests
     PRIVATE native_mcp::protocol nlohmann_json::nlohmann_json
@@ -182,6 +194,7 @@ if(BUILD_TESTING)
   add_test(NAME process.unit COMMAND native_mcp_process_memory_tests)
   add_test(NAME logs.unit COMMAND native_mcp_log_analysis_tests)
   add_test(NAME elf.unit COMMAND native_mcp_elf_analysis_tests)
+  add_test(NAME orchestration.unit COMMAND native_mcp_orchestration_tests)
   add_test(NAME protocol.unit COMMAND native_mcp_protocol_tests)
   add_test(
     NAME protocol.stdio_integration

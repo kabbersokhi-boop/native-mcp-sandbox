@@ -3,50 +3,56 @@
 ## Assets
 
 - confidentiality and integrity of host files and processes;
-- privacy of process command lines, environments, mappings, and memory contents;
-- integrity of MCP protocol output;
-- bounded CPU, memory, descriptors, and response size; and
-- operator control over which roots and processes are observable.
+- privacy of command lines, environments, mappings, descriptors, and memory contents;
+- integrity and framing of MCP stdout;
+- bounded CPU, memory, descriptors, threads, queued work, and response size; and
+- operator control over observable roots and processes.
 
 ## Trusted components
 
 - the installed executable and trusted runtime policy file;
-- the operating system, procfs implementation, and compiler toolchain;
+- the operating system, procfs implementation, C++ runtime, and compiler toolchain;
 - the MCP host that launches the process; and
 - operator-selected filesystem roots and process aliases.
 
 ## Untrusted inputs
 
 - every byte received through stdin;
-- JSON structure, methods, IDs, and tool arguments;
+- JSON structure, methods, IDs, cancellation IDs, and tool arguments;
 - inspected log and ELF contents;
-- changing `/proc` pseudo-file contents; and
-- target-process lifetime and credential changes after startup.
+- changing procfs data and process lifetime; and
+- request timing, concurrency, bursts, cancellation races, and EOF timing.
 
 ## Controls
 
 - no-argument mode exposes no host tools;
 - closed configuration and tool schemas;
-- named filesystem roots and named process aliases;
-- strict `openat2` filesystem containment by default;
-- same-effective-UID process restriction;
-- retained `/proc/<pid>` directory descriptors and recorded start times;
-- pidfd lifetime pinning on supported kernels;
-- fixed pseudo-file names with no agent-controlled `/proc` paths;
-- bounded reads and overflow-checked page conversions;
-- no raw memory, mappings, command line, environment, or descriptor enumeration;
-- one serialized stdout writer and non-echoing stderr diagnostics; and
-- GCC, Clang, ASan, UBSan, malformed-input, lifecycle, and real-process tests.
+- strict filesystem containment and same-UID process pinning;
+- fixed pseudo-files and bounded parsers;
+- a fixed two-thread worker pool instead of per-request threads;
+- at most 16 unfinished tool calls;
+- pre-reserved coroutine-handle queue storage;
+- duplicate in-flight request-ID rejection;
+- per-call steady-clock deadlines and cooperative stop tokens;
+- MCP cancellation response suppression;
+- one serialized protocol writer;
+- no raw memory, mappings, command line, environment, or descriptor enumeration; and
+- GCC, Clang, ASan, UBSan, ThreadSanitizer orchestration checks, malformed-input,
+  cancellation, saturation, lifecycle, and real-process tests.
 
 ## Residual risks and limitations
 
-- Aggregate memory values can change while being observed and are snapshots, not a
-  transaction across all proc files.
-- Linux documents some `statm` values as approximate; `smaps_rollup` is more accurate but
-  slower and may be unavailable or permission denied.
+- Cancellation and deadlines are cooperative. They do not forcibly interrupt an
+  arbitrary blocking system call or terminate a worker thread.
+- A tool can exceed its deadline until its next explicit stop checkpoint. Existing reads
+  are bounded, but Phase 6 does not claim hard real-time enforcement.
+- The outstanding-work cap includes running and queued calls; it is process-wide rather
+  than a per-client fairness policy.
+- JSON-RPC responses can complete out of order, which clients must correlate by ID.
+- Aggregate process counters remain non-atomic snapshots; some `statm` values are
+  approximate and `smaps_rollup` can be unavailable.
 - A privileged or compromised kernel can violate userspace assumptions.
-- The legacy filesystem backend cannot reliably detect every bind mount.
-- The explicit legacy process mode lacks pidfd pinning, although the proc-directory
-  descriptor and start time prevent silent PID rebinding in normal kernel behavior.
-- The rate limiter is per server process, not a multi-tenant identity quota.
-- Processing remains synchronous and has no hard cancellation deadline until Phase 6.
+- The legacy filesystem backend cannot detect every bind mount. The explicit legacy
+  process mode lacks pidfd pinning.
+- MCP tasks, durable job recovery, dynamic worker resizing, priorities, and distributed
+  cancellation are not implemented.

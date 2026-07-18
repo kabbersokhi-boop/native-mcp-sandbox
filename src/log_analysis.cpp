@@ -23,6 +23,21 @@ namespace {
   return LogAnalysisError{.code = code, .message = std::move(message)};
 }
 
+[[nodiscard]] std::optional<LogAnalysisError> operation_error(
+    const OperationContext& context) {
+  switch (context.stop_reason()) {
+    case OperationStopReason::kCancelled:
+      return error(LogAnalysisErrorCode::kCancelled,
+                   "log analysis was cancelled");
+    case OperationStopReason::kDeadlineExceeded:
+      return error(LogAnalysisErrorCode::kDeadlineExceeded,
+                   "log analysis exceeded its deadline");
+    case OperationStopReason::kNone:
+      return std::nullopt;
+  }
+  return std::nullopt;
+}
+
 [[nodiscard]] unsigned char fold_ascii(const unsigned char value) noexcept {
   if (value >= static_cast<unsigned char>('A') &&
       value <= static_cast<unsigned char>('Z')) {
@@ -98,7 +113,11 @@ namespace {
 LogAnalyzer::LogAnalyzer(const LogAnalysisLimits limits) : limits_(limits) {}
 
 LogSearchOutcome LogAnalyzer::search(const ReadOnlyFile& file,
-                                     const LogSearchOptions& options) const {
+                                     const LogSearchOptions& options,
+                                     const OperationContext context) const {
+  if (const auto stopped = operation_error(context)) {
+    return {.result = std::nullopt, .error = stopped};
+  }
   if (!query_is_valid(options.query, limits_) || options.max_matches == 0U ||
       options.max_matches > limits_.max_matches ||
       limits_.max_preview_bytes == 0U || limits_.read_chunk_bytes == 0U) {
@@ -182,6 +201,9 @@ LogSearchOutcome LogAnalyzer::search(const ReadOnlyFile& file,
   };
 
   while (absolute_offset < read_limit && !stop) {
+    if (const auto stopped = operation_error(context)) {
+      return {.result = std::nullopt, .error = stopped};
+    }
     const std::uint64_t remaining = read_limit - absolute_offset;
     const std::size_t requested = static_cast<std::size_t>(
         std::min<std::uint64_t>(remaining, buffer.size()));
@@ -254,7 +276,11 @@ LogSearchOutcome LogAnalyzer::search(const ReadOnlyFile& file,
 }
 
 LogTailOutcome LogAnalyzer::tail(const ReadOnlyFile& file,
-                                 const LogTailOptions& options) const {
+                                 const LogTailOptions& options,
+                                 const OperationContext context) const {
+  if (const auto stopped = operation_error(context)) {
+    return {.result = std::nullopt, .error = stopped};
+  }
   if (options.max_lines == 0U || options.max_lines > limits_.max_tail_lines ||
       limits_.max_preview_bytes == 0U || limits_.read_chunk_bytes == 0U) {
     return {.result = std::nullopt,
@@ -303,6 +329,9 @@ LogTailOutcome LogAnalyzer::tail(const ReadOnlyFile& file,
   };
 
   while (absolute_offset < read_limit) {
+    if (const auto stopped = operation_error(context)) {
+      return {.result = std::nullopt, .error = stopped};
+    }
     const std::uint64_t remaining = read_limit - absolute_offset;
     const std::size_t requested = static_cast<std::size_t>(
         std::min<std::uint64_t>(remaining, buffer.size()));
@@ -361,6 +390,10 @@ std::string_view log_analysis_error_name(
       return "input_too_large";
     case LogAnalysisErrorCode::kReadFailed:
       return "read_failed";
+    case LogAnalysisErrorCode::kCancelled:
+      return "cancelled";
+    case LogAnalysisErrorCode::kDeadlineExceeded:
+      return "deadline_exceeded";
   }
   return "unknown";
 }

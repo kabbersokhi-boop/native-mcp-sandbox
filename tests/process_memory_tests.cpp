@@ -10,6 +10,7 @@
 #include <iostream>
 #include <string>
 #include <string_view>
+#include <stop_token>
 
 namespace {
 
@@ -173,11 +174,24 @@ void test_exited_process_is_not_rebound() {
 
 }  // namespace
 
+void test_operation_stop_context() {
+  auto policy = create_self_policy();
+  std::stop_source source;
+  (void)source.request_stop();
+  const native_mcp::OperationContext cancelled{
+      source.get_token(), native_mcp::OperationContext::Clock::time_point::max()};
+  const auto observed = policy.inspect_memory("server", cancelled);
+  expect(observed.error.has_value() &&
+             observed.error->code == native_mcp::ProcessMemoryErrorCode::kCancelled,
+         "process observation must honor cooperative cancellation before proc reads");
+}
+
 int main() {
   test_runtime_config_versions();
   test_self_memory_observation();
   test_pidfd_strict_or_fail_closed();
   test_exited_process_is_not_rebound();
+  test_operation_stop_context();
   std::cout << "All process memory tests passed\n";
   return EXIT_SUCCESS;
 }

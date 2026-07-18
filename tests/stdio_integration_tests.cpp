@@ -143,6 +143,17 @@ std::vector<Json> parse_lines(const std::string& output) {
   return messages;
 }
 
+const Json& find_message_by_id(const std::vector<Json>& messages, const int id) {
+  for (const Json& message : messages) {
+    const auto value = message.find("id");
+    if (value != message.end() && value->is_number_integer() && *value == id) {
+      return message;
+    }
+  }
+  fail("expected protocol response id was not found");
+  return messages.front();
+}
+
 class TempDirectory final {
  public:
   TempDirectory() {
@@ -228,7 +239,7 @@ void test_unconfigured_server(const std::string& executable) {
   const ProcessOutput output = run_server(executable, {}, input);
   const std::string expected =
       "{\"id\":1,\"jsonrpc\":\"2.0\",\"result\":{}}\n"
-      "{\"id\":2,\"jsonrpc\":\"2.0\",\"result\":{\"capabilities\":{\"tools\":{}},\"protocolVersion\":\"2025-11-25\",\"serverInfo\":{\"name\":\"native-mcp-sandbox\",\"version\":\"0.6.0\"}}}\n"
+      "{\"id\":2,\"jsonrpc\":\"2.0\",\"result\":{\"capabilities\":{\"tools\":{}},\"protocolVersion\":\"2025-11-25\",\"serverInfo\":{\"name\":\"native-mcp-sandbox\",\"version\":\"0.7.0\"}}}\n"
       "{\"id\":3,\"jsonrpc\":\"2.0\",\"result\":{\"tools\":[]}}\n";
   expect(output.standard_output == expected,
          "unconfigured stdout must remain deterministic and tool-free");
@@ -276,30 +287,36 @@ void test_configured_tools(const std::string& executable) {
   const ProcessOutput output = run_server(executable, arguments, input);
   const std::vector<Json> messages = parse_lines(output.standard_output);
   expect(messages.size() == 6U, "configured transcript must return six responses");
-  expect(messages[0]["result"]["serverInfo"]["version"] == "0.6.0",
-         "configured initialize must report the Phase 5 version");
-  const Json& tools = messages[1]["result"]["tools"];
+  const Json& initialized = find_message_by_id(messages, 10);
+  const Json& listed = find_message_by_id(messages, 11);
+  const Json& searched = find_message_by_id(messages, 12);
+  const Json& tailed = find_message_by_id(messages, 13);
+  const Json& inspected = find_message_by_id(messages, 14);
+  const Json& observed = find_message_by_id(messages, 15);
+  expect(initialized["result"]["serverInfo"]["version"] == "0.7.0",
+         "configured initialize must report the Phase 6 version");
+  const Json& tools = listed["result"]["tools"];
   expect(tools.is_array() && tools.size() == 4U &&
              tools[0]["name"] == "logs.search" &&
              tools[1]["name"] == "logs.tail" &&
              tools[2]["name"] == "elf.inspect" &&
              tools[3]["name"] == "proc.memory",
          "configured server must advertise the four bounded Phase 5 tools");
-  expect(messages[2]["result"]["isError"] == false &&
-             messages[2]["result"]["structuredContent"]["matches"].size() == 2U,
+  expect(searched["result"]["isError"] == false &&
+             searched["result"]["structuredContent"]["matches"].size() == 2U,
          "logs.search must run through the real configured process");
-  expect(messages[3]["result"]["isError"] == false &&
-             messages[3]["result"]["structuredContent"]["lines"].size() == 2U &&
-             messages[3]["result"]["structuredContent"]["lines"][1]["preview"] ==
+  expect(tailed["result"]["isError"] == false &&
+             tailed["result"]["structuredContent"]["lines"].size() == 2U &&
+             tailed["result"]["structuredContent"]["lines"][1]["preview"] ==
                  "error second",
          "logs.tail must return the final requested lines");
-  expect(messages[4]["result"]["isError"] == false &&
-             messages[4]["result"]["structuredContent"]["class"] == "ELF64" &&
-             messages[4]["result"]["structuredContent"]["machine"] == "x86_64",
+  expect(inspected["result"]["isError"] == false &&
+             inspected["result"]["structuredContent"]["class"] == "ELF64" &&
+             inspected["result"]["structuredContent"]["machine"] == "x86_64",
          "elf.inspect must inspect a non-executable fixture without launching it");
-  expect(messages[5]["result"]["isError"] == false &&
-             messages[5]["result"]["structuredContent"]["pid"] > 0U &&
-             messages[5]["result"]["structuredContent"]["status"]["vmRssBytes"].is_number_unsigned(),
+  expect(observed["result"]["isError"] == false &&
+             observed["result"]["structuredContent"]["pid"] > 0U &&
+             observed["result"]["structuredContent"]["status"]["vmRssBytes"].is_number_unsigned(),
          "proc.memory must observe only the configured server process");
   if (strict_backend && strict_process) {
     expect(output.standard_error.empty(),
