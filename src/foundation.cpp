@@ -34,6 +34,6 @@ std::string budget_summary(const ResourceBudget& budget) {
 
 std::string_view project_name() noexcept { return "native-mcp-sandbox"; }
 
-std::string_view project_version() noexcept { return "0.5.0"; }
+std::string_view project_version() noexcept { return "0.6.0"; }
 
 }  // namespace native_mcp

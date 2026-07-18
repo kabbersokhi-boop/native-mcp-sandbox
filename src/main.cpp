@@ -1,7 +1,9 @@
 #include "native_mcp/file_policy.hpp"
 #include "native_mcp/foundation.hpp"
-#include "native_mcp/tool_service.hpp"
+#include "native_mcp/process_memory.hpp"
+#include "native_mcp/runtime_config.hpp"
 #include "native_mcp/server.hpp"
+#include "native_mcp/tool_service.hpp"
 
 #include <fcntl.h>
 #include <sys/stat.h>
@@ -20,7 +22,15 @@ namespace {
 
 struct ToolLoadResult final {
   std::optional<native_mcp::ToolService> tools;
+  bool legacy_filesystem = false;
+  bool legacy_process = false;
   std::string error;
+};
+
+struct StartupOptions final {
+  std::string config_path;
+  bool allow_legacy_descriptor_walk = false;
+  bool allow_legacy_process_pinning = false;
 };
 
 void print_usage(std::ostream& output) {
@@ -28,22 +38,48 @@ void print_usage(std::ostream& output) {
       << "Usage: native-mcp-sandbox [--help | --version | --self-check]\n"
       << "       native-mcp-sandbox\n"
       << "       native-mcp-sandbox --policy-config FILE "
-         "[--allow-legacy-descriptor-walk]\n"
+         "[--allow-legacy-descriptor-walk] "
+         "[--allow-legacy-process-pinning]\n"
       << "\n"
       << "With no arguments, run the MCP lifecycle server with no host tools.\n"
-      << "With --policy-config, expose bounded read-only log and ELF inspection tools.\n"
-      << "Strict openat2 containment is required unless the explicit legacy flag is used.\n"
-      << "Diagnostics are written only to stderr.\n";
+      << "With --policy-config, expose only explicitly configured read-only tools.\n"
+      << "Schema version 1 configures filesystem tools; version 2 may also name\n"
+      << "same-UID processes for bounded aggregate /proc memory observation.\n"
+      << "Strict openat2 and pidfd pinning are required unless explicit legacy flags\n"
+      << "are used. Diagnostics are written only to stderr.\n";
 }
 
-[[nodiscard]] ToolLoadResult load_tools(
-    const std::string_view path, const bool allow_legacy_descriptor_walk) {
-  native_mcp::FilesystemPolicyLimits limits;
-  limits.allow_legacy_descriptor_walk = allow_legacy_descriptor_walk;
+[[nodiscard]] std::optional<StartupOptions> parse_startup_options(
+    const int argc, char* argv[]) {
+  if (argc < 3 || argc > 5 || std::string_view{argv[1]} != "--policy-config") {
+    return std::nullopt;
+  }
+  StartupOptions options{.config_path = argv[2]};
+  for (int index = 3; index < argc; ++index) {
+    const std::string_view flag{argv[index]};
+    if (flag == "--allow-legacy-descriptor-walk" &&
+        !options.allow_legacy_descriptor_walk) {
+      options.allow_legacy_descriptor_walk = true;
+    } else if (flag == "--allow-legacy-process-pinning" &&
+               !options.allow_legacy_process_pinning) {
+      options.allow_legacy_process_pinning = true;
+    } else {
+      return std::nullopt;
+    }
+  }
+  return options;
+}
 
-  const std::string config_path{path};
+[[nodiscard]] ToolLoadResult load_tools(const StartupOptions& options) {
+  native_mcp::RuntimeConfigLimits limits;
+  limits.filesystem.allow_legacy_descriptor_walk =
+      options.allow_legacy_descriptor_walk;
+  limits.processes.allow_legacy_process_pinning =
+      options.allow_legacy_process_pinning;
+
   native_mcp::UniqueFd descriptor{
-      ::open(config_path.c_str(), O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK)};
+      ::open(options.config_path.c_str(),
+             O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK)};
   if (!descriptor.valid()) {
     return {.tools = std::nullopt,
             .error = "could not open the policy configuration as a regular file"};
@@ -89,19 +125,42 @@ void print_usage(std::ostream& output) {
             .error = "policy configuration changed during startup"};
   }
 
-  native_mcp::ConfigParseResult parsed =
-      native_mcp::parse_filesystem_policy_config(text, limits);
+  native_mcp::RuntimeConfigParseResult parsed =
+      native_mcp::parse_runtime_policy_config(text, limits);
   if (!parsed.config.has_value()) {
-    return {.tools = std::nullopt,
-            .error = parsed.error->message};
+    return {.tools = std::nullopt, .error = parsed.error->message};
   }
-  native_mcp::FilesystemPolicy::CreateResult created =
-      native_mcp::FilesystemPolicy::create(*parsed.config, limits);
-  if (!created.policy.has_value()) {
-    return {.tools = std::nullopt,
-            .error = created.error->message};
+
+  std::optional<native_mcp::FilesystemPolicy> filesystem;
+  if (!parsed.config->filesystem.roots.empty()) {
+    native_mcp::FilesystemPolicy::CreateResult created =
+        native_mcp::FilesystemPolicy::create(parsed.config->filesystem,
+                                             limits.filesystem);
+    if (!created.policy.has_value()) {
+      return {.tools = std::nullopt, .error = created.error->message};
+    }
+    filesystem = std::move(*created.policy);
   }
-  return {.tools = native_mcp::ToolService{std::move(*created.policy)},
+
+  std::optional<native_mcp::ProcessPolicy> processes;
+  bool legacy_process = false;
+  if (!parsed.config->processes.processes.empty()) {
+    native_mcp::ProcessPolicy::CreateResult created =
+        native_mcp::ProcessPolicy::create(parsed.config->processes,
+                                          limits.processes);
+    if (!created.policy.has_value()) {
+      return {.tools = std::nullopt, .error = created.error->message};
+    }
+    legacy_process = created.policy->uses_legacy_pinning();
+    processes = std::move(*created.policy);
+  }
+
+  const bool legacy_filesystem =
+      options.allow_legacy_descriptor_walk && filesystem.has_value();
+  return {.tools = native_mcp::ToolService{std::move(filesystem),
+                                            std::move(processes)},
+          .legacy_filesystem = legacy_filesystem,
+          .legacy_process = legacy_process,
           .error = {}};
 }
 
@@ -138,27 +197,27 @@ int main(int argc, char* argv[]) {
     return 64;
   }
 
-  const bool valid_config_form =
-      (argc == 3 || argc == 4) &&
-      std::string_view{argv[1]} == "--policy-config" &&
-      (argc == 3 ||
-       std::string_view{argv[3]} == "--allow-legacy-descriptor-walk");
-  if (!valid_config_form) {
+  const auto options = parse_startup_options(argc, argv);
+  if (!options.has_value()) {
     print_usage(std::cerr);
     return 64;
   }
 
-  const bool allow_legacy = argc == 4;
-  ToolLoadResult loaded = load_tools(argv[2], allow_legacy);
+  ToolLoadResult loaded = load_tools(*options);
   if (!loaded.tools.has_value()) {
     std::cerr << "native-mcp-sandbox: policy startup failed: "
               << loaded.error << '\n';
     return 78;
   }
-  if (allow_legacy) {
+  if (loaded.legacy_filesystem) {
     std::cerr
         << "native-mcp-sandbox: warning: legacy descriptor walk enabled; "
            "bind-mount containment is incomplete\n";
+  }
+  if (loaded.legacy_process) {
+    std::cerr
+        << "native-mcp-sandbox: warning: legacy process identity checks enabled; "
+           "pidfd pinning is unavailable\n";
   }
   return native_mcp::run_stdio(std::cin, std::cout, std::cerr,
                                native_mcp::conservative_budget(),

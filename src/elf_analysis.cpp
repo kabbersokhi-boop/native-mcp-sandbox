@@ -487,7 +487,9 @@ ElfInspectionOutcome ElfAnalyzer::inspect(const ReadOnlyFile& file) const {
             .error = error(ElfAnalysisErrorCode::kMetadataTooLarge,
                            "ELF program-header count exceeds the inspection limit")};
   }
-  if (program_count > 0U && program_entry_size != expected_program_size) {
+  if (program_count > 0U &&
+      (program_entry_size != expected_program_size ||
+       program_entry_size > limits_.max_program_header_entry_bytes)) {
     return {.result = std::nullopt,
             .error = error(ElfAnalysisErrorCode::kInvalidFormat,
                            "ELF program-header entry size is invalid")};

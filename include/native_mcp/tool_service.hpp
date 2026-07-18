@@ -3,11 +3,13 @@
 #include "native_mcp/elf_analysis.hpp"
 #include "native_mcp/file_policy.hpp"
 #include "native_mcp/log_analysis.hpp"
+#include "native_mcp/process_memory.hpp"
 
 #include <nlohmann/json.hpp>
 
 #include <chrono>
 #include <deque>
+#include <optional>
 #include <string_view>
 
 namespace native_mcp {
@@ -22,6 +24,10 @@ class ToolService final {
   explicit ToolService(FilesystemPolicy policy,
                        LogAnalysisLimits log_limits = {},
                        ElfInspectionLimits elf_limits = {});
+  ToolService(std::optional<FilesystemPolicy> filesystem_policy,
+              std::optional<ProcessPolicy> process_policy,
+              LogAnalysisLimits log_limits = {},
+              ElfInspectionLimits elf_limits = {});
 
   ToolService(const ToolService&) = delete;
   ToolService& operator=(const ToolService&) = delete;
@@ -36,7 +42,8 @@ class ToolService final {
  private:
   [[nodiscard]] bool acquire_rate_limit_slot();
 
-  FilesystemPolicy policy_;
+  std::optional<FilesystemPolicy> filesystem_policy_;
+  std::optional<ProcessPolicy> process_policy_;
   LogAnalyzer log_analyzer_;
   ElfAnalyzer elf_analyzer_;
   std::deque<std::chrono::steady_clock::time_point> recent_calls_;
