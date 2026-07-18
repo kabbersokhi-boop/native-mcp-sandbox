@@ -1,96 +1,61 @@
 # Architecture
 
-## Purpose
+## Current system boundary
 
-Native MCP Sandbox mediates between a local MCP client and, in later phases, a small
-collection of read-only Linux analysis tools. The design prioritizes explicit trust
-boundaries, bounded resource use, deterministic protocol output, and compact evidence
-suitable for an AI model's context.
+Phase 2 contains two deliberately separate paths:
 
-Phase 1 implements the local protocol edge. It does not access the filesystem, process
-table, network, or analysis data.
+1. the Phase 1 MCP protocol server, which exposes no host-access tools; and
+2. a filesystem policy library used only by unit tests and future native tools.
 
-## Current Phase 1 data path
+The MCP dispatcher is not connected to the policy library. This prevents a partially
+reviewed policy from becoming an agent capability merely because the code exists.
 
-1. The executable reads stdin one byte at a time into a bounded line buffer.
-2. A line longer than the request limit is drained and replaced with a size error.
-3. nlohmann/json parses one JSON value from the complete line.
-4. The dispatcher validates the JSON-RPC envelope, request ID, method, parameters,
-   and MCP lifecycle state.
-5. A bounded serializer creates at most one response for a request.
-6. Complete response lines are written to stdout; diagnostics use stderr.
+## Protocol path
 
-The implementation is synchronous. This gives Phase 1 one logical reader and writer
-without prematurely introducing scheduling races.
+1. Read one bounded line from stdin.
+2. Parse one JSON value.
+3. Validate JSON-RPC envelope, ID, parameters, and MCP lifecycle.
+4. Serialize one bounded response.
+5. Write protocol output to stdout and diagnostics to stderr.
 
-## Trust boundaries
+## Filesystem policy path
 
-### Trusted for the current model
+1. Parse a bounded, closed-schema JSON configuration.
+2. Validate unique symbolic root names and absolute normalized root paths.
+3. Open each root as an owned directory descriptor without following symlinks.
+4. Validate an untrusted relative path component by component.
+5. Open the target under the selected root with kernel path-resolution restrictions.
+6. Inspect the opened descriptor and accept only a bounded regular file.
+7. Reopen the pinned inode read-only through `/proc/self/fd` and compare metadata.
+8. Return an owned descriptor plus observed and maximum read sizes.
 
-- the installed executable and resource configuration;
-- the operating system and compiler toolchain; and
-- the MCP host that launches the process.
+## Strict Linux backend
 
-### Untrusted
+The strict backend requires `openat2`. Root creation uses no-symlink and no-magic-link
+resolution. Target opening additionally uses beneath-root and no-cross-mount
+resolution. All fields in `open_how` are zero-initialized before use.
 
-- every byte received through stdin;
-- JSON structure, IDs, methods, and parameters;
-- request order and lifecycle behavior;
-- line length and connection termination; and
-- future file contents and tool arguments.
+## Compatibility backend
 
-## Current components
-
-| Component | Current responsibility | Must not do |
-| --- | --- | --- |
-| Bounded stdio reader | Frame one line and drain oversized lines | Accumulate beyond the request budget |
-| JSON-RPC validation | Parse and validate envelopes and IDs | Echo payloads in diagnostics |
-| MCP lifecycle dispatcher | Handle initialize, initialized, ping, and tools/list | Advertise unavailable tools |
-| Bounded serializer | Keep output within its byte budget | Partially write or interleave messages |
-| Diagnostic path | Emit generic information to stderr | Write non-protocol text to stdout |
-
-## Lifecycle state machine
-
-```mermaid
-stateDiagram-v2
-    [*] --> Uninitialized
-    Uninitialized --> AwaitingInitialized: valid initialize response
-    AwaitingInitialized --> Ready: notifications/initialized
-    Ready --> Ready: ping or tools/list
-```
-
-`ping` is accepted in every state. `tools/list` is accepted only in `Ready` and
-returns an empty array. Initialization cannot be repeated. An initialize response
-that exceeds the response limit does not advance state.
+The optional compatibility backend is disabled by default. It walks each path
+component using a pinned directory descriptor and `O_PATH | O_NOFOLLOW`. This prevents
+textual traversal, symlink following, and rename-based substitution of previously
+opened parents. Old kernels do not expose a reliable equivalent of `RESOLVE_NO_XDEV`
+for every bind-mount case, so compatibility mode does not claim identical mount
+containment.
 
 ## Resource invariants
 
-1. Request buffering stops at a configured byte limit.
-2. Oversized input is drained to the next newline before framing resumes.
-3. A response cannot exceed its configured byte limit.
-4. Stdout contains only complete protocol messages in server mode.
-5. Notifications do not receive JSON-RPC responses.
-6. Large host data will be processed incrementally in later phases.
-7. Host-facing tools remain read-only unless the threat model is revised.
+- Configuration text is capped before JSON parsing.
+- Root count, root names, path bytes, and per-root file size are bounded.
+- Root and target descriptors use RAII and close on every return path.
+- Only regular files become readable descriptors.
+- The path used for agent-controlled lookup is never passed to a shell.
+- File growth after opening does not expand the future read budget.
+- stdout remains protocol-only in server mode.
 
-Phase 1 enforces the first five. Queue capacity, workers, deadlines, and cancellation
-remain reserved for phases that introduce concurrent work.
+## Planned Phase 3 connection
 
-## Dependency policy
-
-Phase 1 uses system-provided nlohmann/json 3.11 or newer. CMake does not fetch it from
-the network. The host distribution manages the package, and a compile-time assertion
-checks the minimum version. See ADR 0004 and `THIRD_PARTY_NOTICES.md`.
-
-## Planned boundary before tools
-
-Phase 2 must add a fail-closed filesystem policy gate before any log tool exists. It
-will need descriptor-aware containment, regular-file and size checks, denial of
-special files, and adversarial traversal, symlink, and race tests. The MCP dispatcher
-must not perform filesystem work directly.
-
-## Portability
-
-Phase 1 protocol code uses standard C++20. The process integration test and future
-log, ELF, `/proc`, namespace, and seccomp features are Linux-specific. Linux is the
-only promised target until automated evidence supports a broader claim.
+Phase 3 may introduce a log-analysis tool that receives a root name and relative path,
+uses this policy library, and streams at most the returned read budget. It must not
+accept raw absolute paths or bypass the policy with conventional `open()` calls.

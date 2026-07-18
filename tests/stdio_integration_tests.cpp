@@ -117,7 +117,7 @@ int main(int argc, char* argv[]) {
 
   const std::string expected_output =
       "{\"id\":1,\"jsonrpc\":\"2.0\",\"result\":{}}\n"
-      "{\"id\":2,\"jsonrpc\":\"2.0\",\"result\":{\"capabilities\":{\"tools\":{}},\"protocolVersion\":\"2025-11-25\",\"serverInfo\":{\"name\":\"native-mcp-sandbox\",\"version\":\"0.2.0\"}}}\n"
+      "{\"id\":2,\"jsonrpc\":\"2.0\",\"result\":{\"capabilities\":{\"tools\":{}},\"protocolVersion\":\"2025-11-25\",\"serverInfo\":{\"name\":\"native-mcp-sandbox\",\"version\":\"0.3.0\"}}}\n"
       "{\"id\":3,\"jsonrpc\":\"2.0\",\"result\":{\"tools\":[]}}\n";
   expect(standard_output == expected_output,
          "stdout must contain only deterministic JSON-RPC response lines");

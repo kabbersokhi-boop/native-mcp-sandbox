@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.20)
 
 project(
   native_mcp_sandbox
-  VERSION 0.2.0
+  VERSION 0.3.0
   DESCRIPTION "A security-first, resource-bounded C++20 foundation for local MCP analysis tools"
   LANGUAGES CXX
 )
@@ -60,6 +60,22 @@ target_include_directories(native_mcp_foundation
 nms_set_project_warnings(native_mcp_foundation)
 nms_enable_sanitizers(native_mcp_foundation)
 
+add_library(native_mcp_policy STATIC
+  src/file_policy.cpp
+)
+add_library(native_mcp::policy ALIAS native_mcp_policy)
+target_compile_features(native_mcp_policy PUBLIC cxx_std_20)
+target_include_directories(native_mcp_policy
+  PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+)
+target_link_libraries(native_mcp_policy
+  PUBLIC native_mcp::foundation nlohmann_json::nlohmann_json
+)
+nms_set_project_warnings(native_mcp_policy)
+nms_enable_sanitizers(native_mcp_policy)
+
 add_library(native_mcp_protocol STATIC
   src/json_rpc.cpp
   src/server.cpp
@@ -89,6 +105,14 @@ if(BUILD_TESTING)
   nms_set_project_warnings(native_mcp_foundation_tests)
   nms_enable_sanitizers(native_mcp_foundation_tests)
 
+  add_executable(native_mcp_policy_tests tests/file_policy_tests.cpp)
+  target_link_libraries(native_mcp_policy_tests
+    PRIVATE native_mcp::policy nlohmann_json::nlohmann_json
+  )
+  target_compile_features(native_mcp_policy_tests PRIVATE cxx_std_20)
+  nms_set_project_warnings(native_mcp_policy_tests)
+  nms_enable_sanitizers(native_mcp_policy_tests)
+
   add_executable(native_mcp_protocol_tests tests/protocol_tests.cpp)
   target_link_libraries(native_mcp_protocol_tests
     PRIVATE native_mcp::protocol nlohmann_json::nlohmann_json
@@ -106,6 +130,7 @@ if(BUILD_TESTING)
 
   add_test(NAME foundation.unit COMMAND native_mcp_foundation_tests)
   add_test(NAME foundation.self_check COMMAND native-mcp-sandbox --self-check)
+  add_test(NAME policy.unit COMMAND native_mcp_policy_tests)
   add_test(NAME protocol.unit COMMAND native_mcp_protocol_tests)
   add_test(
     NAME protocol.stdio_integration

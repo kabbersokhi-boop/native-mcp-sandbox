@@ -5,9 +5,10 @@
 The project is pre-1.0. Only the most recent tagged release and the default branch
 receive security fixes.
 
-Phase 1 accepts local MCP traffic over stdio but exposes no analysis tools and performs
-no filesystem, process, shell, or network access. Protocol parsing, framing,
-resource-bound, lifecycle, and dependency issues are in scope.
+Phase 2 adds a native filesystem policy library but does not expose filesystem access
+through MCP. Protocol parsing, lifecycle, descriptor handling, path containment,
+configuration validation, file-type enforcement, resource bounds, and dependency
+issues are in scope.
 
 ## Reporting a vulnerability
 
@@ -18,7 +19,7 @@ private channel.
 Include, where possible:
 
 - affected version and commit;
-- operating system and compiler;
+- operating system, kernel, and compiler;
 - minimal reproduction steps;
 - expected and observed behavior;
 - security impact; and
@@ -36,6 +37,6 @@ concurrency, resource limits, or dependencies require:
 - a threat-model update when assumptions change;
 - sanitizer-clean execution where applicable;
 - bounded failure paths and non-echoing diagnostics; and
-- focused review of lifecycle, output framing, and cancellation behavior.
+- focused review of descriptor lifetime, path races, lifecycle, and output framing.
 
 Do not commit credentials, local paths, builds, or archives.
