@@ -74,6 +74,32 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install --yes ninja-build nlohmann-json3-dev
+      - name: Require openat2 and pidfd
+        run: |
+          cat > /tmp/strict_probe.cpp <<'CPP'
+          #include <fcntl.h>
+          #include <linux/openat2.h>
+          #include <sys/syscall.h>
+          #include <unistd.h>
+          int main() {
+            open_how how{};
+            how.flags = O_PATH | O_DIRECTORY | O_CLOEXEC;
+            how.resolve = RESOLVE_NO_SYMLINKS | RESOLVE_NO_MAGICLINKS;
+            int root = static_cast<int>(syscall(SYS_openat2, AT_FDCWD, ".", &how, sizeof(how)));
+            if (root < 0) return 1;
+            close(root);
+          #ifdef SYS_pidfd_open
+            int process = static_cast<int>(syscall(SYS_pidfd_open, getpid(), 0U));
+            if (process < 0) return 2;
+            close(process);
+            return 0;
+          #else
+            return 3;
+          #endif
+          }
+          CPP
+          c++ -std=c++20 -Wall -Wextra -Werror /tmp/strict_probe.cpp -o /tmp/strict_probe
+          /tmp/strict_probe
       - name: Configure release build
         env:
           CXX: clang++
@@ -89,7 +115,10 @@ jobs:
         if: always()
         with:
           name: strict-integration-logs
-          path: '*-repeat.log\nself-check.log'
+          path: |
+            policy-repeat.log
+            integration-repeat.log
+            self-check.log
 
   libfuzzer-campaign:
     if: github.event_name == 'workflow_dispatch' || github.head_ref == 'phase/7-fuzzing-security-assurance'
