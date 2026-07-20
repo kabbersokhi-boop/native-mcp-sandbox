@@ -194,12 +194,62 @@ void test_throwing_completion_does_not_kill_workers() {
          "completion exceptions must not corrupt scheduler accounting");
 }
 
+void test_worker_callback_shutdown_stress() {
+  constexpr int kRounds = 250;
+  for (int round = 0; round < kRounds; ++round) {
+    std::atomic<int> executing{0};
+    std::atomic<int> callbacks_ready{0};
+    std::atomic<int> shutdown_returns{0};
+    ToolScheduler* scheduler_ptr = nullptr;
+    ToolScheduler scheduler{
+        budget(),
+        [&](std::string_view, const Json&, const OperationContext&) {
+          executing.fetch_add(1, std::memory_order_acq_rel);
+          while (executing.load(std::memory_order_acquire) != 2) {
+            std::this_thread::yield();
+          }
+          return success();
+        },
+        [&](const Json&, ToolExecutionResult result) {
+          expect(!result.is_error,
+                 "callback shutdown stress work must succeed");
+          callbacks_ready.fetch_add(1, std::memory_order_acq_rel);
+          while (callbacks_ready.load(std::memory_order_acquire) != 2) {
+            std::this_thread::yield();
+          }
+          scheduler_ptr->shutdown();
+          shutdown_returns.fetch_add(1, std::memory_order_acq_rel);
+        }};
+    scheduler_ptr = &scheduler;
+
+    expect(scheduler.submit({round * 2, "callback-shutdown", Json::object()}) ==
+               ToolSubmitStatus::kAccepted,
+           "first callback shutdown stress request must be accepted");
+    expect(scheduler.submit({round * 2 + 1, "callback-shutdown", Json::object()}) ==
+               ToolSubmitStatus::kAccepted,
+           "second callback shutdown stress request must be accepted");
+
+    const auto deadline = std::chrono::steady_clock::now() + 2s;
+    while (shutdown_returns.load(std::memory_order_acquire) != 2 &&
+           std::chrono::steady_clock::now() < deadline) {
+      std::this_thread::yield();
+    }
+    expect(shutdown_returns.load(std::memory_order_acquire) == 2,
+           "both callback shutdown calls must return in every stress round");
+    scheduler.shutdown();
+    expect(scheduler.stats().completed == 2U &&
+               scheduler.stats().outstanding == 0U,
+           "callback shutdown stress must drain and join exactly");
+  }
+}
+
 }  // namespace
 
 int main() {
   test_parallel_admission_cancellation_and_shutdown_stress();
   test_cancellation_deadline_precedence_stress();
   test_throwing_completion_does_not_kill_workers();
+  test_worker_callback_shutdown_stress();
   std::cout << "All orchestration stress tests passed\n";
   return EXIT_SUCCESS;
 }
