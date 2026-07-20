@@ -63,9 +63,10 @@ class ToolScheduler final {
 
   [[nodiscard]] ToolSubmitStatus submit(ScheduledToolCall call);
   [[nodiscard]] bool cancel(const nlohmann::json& request_id);
-  // A completion callback may call shutdown(). It must not destroy this
-  // scheduler from that callback; destruction is supported only after a
-  // non-worker caller has completed the deferred join.
+  // A completion callback may call shutdown(). On a worker this closes
+  // admission and returns without waiting or joining. A later non-worker
+  // shutdown (including normal destruction) drains accepted work and joins
+  // every worker. The scheduler must not be destroyed from its callback.
   void shutdown();
   [[nodiscard]] ToolSchedulerStats stats() const;
 
