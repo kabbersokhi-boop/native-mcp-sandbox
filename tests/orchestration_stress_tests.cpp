@@ -194,6 +194,66 @@ void test_throwing_completion_does_not_kill_workers() {
          "completion exceptions must not corrupt scheduler accounting");
 }
 
+void test_worker_shutdown_with_queued_work_stress() {
+  constexpr int kRounds = 250;
+  for (int round = 0; round < kRounds; ++round) {
+    std::atomic<bool> release_first{false};
+    std::atomic<int> completed{0};
+    ToolScheduler* scheduler_ptr = nullptr;
+    ResourceBudget single_worker = budget();
+    single_worker.worker_threads = 1U;
+    single_worker.max_pending_requests = 3U;
+    ToolScheduler scheduler{
+        single_worker,
+        [&](std::string_view, const Json& arguments, const OperationContext&) {
+          if (arguments.at("sequence").get<int>() == 1) {
+            while (!release_first.load(std::memory_order_acquire)) {
+              std::this_thread::yield();
+            }
+          }
+          return success();
+        },
+        [&](const Json& id, ToolExecutionResult result) {
+          expect(!result.is_error,
+                 "queued callback shutdown stress work must succeed");
+          if (id == round * 3) {
+            scheduler_ptr->shutdown();
+          }
+          completed.fetch_add(1, std::memory_order_acq_rel);
+        }};
+    scheduler_ptr = &scheduler;
+
+    expect(scheduler.submit({round * 3, "queued-shutdown",
+                             Json{{"sequence", 1}}}) ==
+               ToolSubmitStatus::kAccepted,
+           "first queued callback shutdown request must be accepted");
+    expect(scheduler.submit({round * 3 + 1, "queued-shutdown",
+                             Json{{"sequence", 2}}}) ==
+               ToolSubmitStatus::kAccepted,
+           "second queued callback shutdown request must be accepted");
+    expect(scheduler.submit({round * 3 + 2, "queued-shutdown",
+                             Json{{"sequence", 3}}}) ==
+               ToolSubmitStatus::kAccepted,
+           "third queued callback shutdown request must be accepted");
+    release_first.store(true, std::memory_order_release);
+
+    const auto deadline = std::chrono::steady_clock::now() + 2s;
+    while (completed.load(std::memory_order_acquire) != 3 &&
+           std::chrono::steady_clock::now() < deadline) {
+      std::this_thread::yield();
+    }
+    expect(completed.load(std::memory_order_acquire) == 3,
+           "worker callback shutdown must not strand queued work");
+    expect(scheduler.submit({round * 3 + 3, "queued-shutdown",
+                             Json::object()}) == ToolSubmitStatus::kStopped,
+           "worker callback shutdown must close admission immediately");
+    scheduler.shutdown();
+    expect(scheduler.stats().completed == 3U &&
+               scheduler.stats().outstanding == 0U,
+           "deferred non-worker shutdown must reap queued work exactly");
+  }
+}
+
 void test_worker_callback_shutdown_stress() {
   constexpr int kRounds = 250;
   for (int round = 0; round < kRounds; ++round) {
@@ -249,6 +309,7 @@ int main() {
   test_parallel_admission_cancellation_and_shutdown_stress();
   test_cancellation_deadline_precedence_stress();
   test_throwing_completion_does_not_kill_workers();
+  test_worker_shutdown_with_queued_work_stress();
   test_worker_callback_shutdown_stress();
   std::cout << "All orchestration stress tests passed\n";
   return EXIT_SUCCESS;
