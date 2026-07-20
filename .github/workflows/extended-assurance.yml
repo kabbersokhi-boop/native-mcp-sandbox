@@ -1,0 +1,19 @@
+name: Extended Assurance
+
+on:
+  workflow_dispatch:
+  pull_request:
+    types: [synchronize, reopened]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: extended-assurance-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  deterministic-mutation:
+    if: github.event_name == 'workflow_dispatch' || github.head_ref == 'phase/7-fuzzing-security-assurance'
+    runs-on: ubuntu-24.04
+    timeout
