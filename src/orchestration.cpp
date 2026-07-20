@@ -287,7 +287,28 @@ struct ToolScheduler::Impl final {
     return true;
   }
 
+  [[nodiscard]] bool called_from_worker() const noexcept {
+    const std::thread::id caller = std::this_thread::get_id();
+    for (const std::thread& worker : workers) {
+      if (worker.get_id() == caller) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   void shutdown() {
+    if (called_from_worker()) {
+      // Completion callbacks execute on workers. A worker must never wait for
+      // the outstanding set to drain or join peers: queued work may require
+      // this worker, and a peer may concurrently be entering shutdown().
+      // Closing admission is sufficient; a later non-worker caller performs
+      // the blocking drain and serialized join.
+      std::lock_guard lock{mutex};
+      accepting = false;
+      return;
+    }
+
     std::lock_guard shutdown_lock{shutdown_mutex};
     {
       std::unique_lock lock{mutex};
@@ -299,19 +320,12 @@ struct ToolScheduler::Impl final {
       stopping = true;
     }
     ready_cv.notify_all();
-    bool skipped_current_worker = false;
     for (std::thread& worker : workers) {
       if (worker.joinable()) {
-        if (worker.get_id() == std::this_thread::get_id()) {
-          skipped_current_worker = true;
-          continue;
-        }
         worker.join();
       }
     }
-    // A completion callback can request shutdown on a worker. It cannot join
-    // itself; a later non-worker shutdown (including destruction) reaps it.
-    joined = !skipped_current_worker;
+    joined = true;
   }
 
   ToolSchedulerStats stats() const {
