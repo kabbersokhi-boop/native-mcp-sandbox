@@ -22,3 +22,4 @@ The server will support fewer tasks than a general-purpose agent shell. Tool
 implementations and tests will require more policy work. In return, the system will
 have a smaller attack surface, clearer review criteria, and a defensible educational
 story.
+

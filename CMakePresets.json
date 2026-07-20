@@ -37,28 +37,83 @@
         "BUILD_TESTING": "ON",
         "NMS_WARNINGS_AS_ERRORS": "ON"
       }
+    },
+    {
+      "name": "thread-sanitizer",
+      "displayName": "ThreadSanitizer",
+      "inherits": "dev",
+      "binaryDir": "${sourceDir}/build/thread-sanitizer",
+      "cacheVariables": {
+        "NMS_ENABLE_THREAD_SANITIZER": "ON",
+        "NMS_WARNINGS_AS_ERRORS": "ON"
+      }
+    },
+    {
+      "name": "fuzzers",
+      "displayName": "Clang libFuzzer with address and undefined-behavior sanitizers",
+      "inherits": "sanitizers",
+      "binaryDir": "${sourceDir}/build/fuzzers",
+      "cacheVariables": {
+        "NMS_BUILD_FUZZERS": "ON",
+        "NMS_WARNINGS_AS_ERRORS": "ON"
+      }
     }
   ],
   "buildPresets": [
-    { "name": "dev", "configurePreset": "dev", "jobs": 2 },
-    { "name": "sanitizers", "configurePreset": "sanitizers", "jobs": 2 },
-    { "name": "release", "configurePreset": "release", "jobs": 2 }
+    {
+      "name": "dev",
+      "configurePreset": "dev",
+      "jobs": 2
+    },
+    {
+      "name": "sanitizers",
+      "configurePreset": "sanitizers",
+      "jobs": 2
+    },
+    {
+      "name": "release",
+      "configurePreset": "release",
+      "jobs": 2
+    },
+    {
+      "name": "thread-sanitizer",
+      "configurePreset": "thread-sanitizer",
+      "jobs": 2
+    },
+    {
+      "name": "fuzzers",
+      "configurePreset": "fuzzers",
+      "jobs": 2
+    }
   ],
   "testPresets": [
     {
       "name": "dev",
       "configurePreset": "dev",
-      "output": { "outputOnFailure": true }
+      "output": {
+        "outputOnFailure": true
+      }
     },
     {
       "name": "sanitizers",
       "configurePreset": "sanitizers",
-      "output": { "outputOnFailure": true }
+      "output": {
+        "outputOnFailure": true
+      }
     },
     {
       "name": "release",
       "configurePreset": "release",
-      "output": { "outputOnFailure": true }
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "thread-sanitizer",
+      "configurePreset": "thread-sanitizer",
+      "output": {
+        "outputOnFailure": true
+      }
     }
   ]
 }

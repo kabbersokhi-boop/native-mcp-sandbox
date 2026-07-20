@@ -24,3 +24,4 @@ analysis datasets will be opt-in.
 The project remains comfortable to build and demonstrate on modest hardware. Some
 workloads will be rejected or truncated. Results must explicitly report truncation
 so an agent does not mistake partial evidence for a complete scan.
+

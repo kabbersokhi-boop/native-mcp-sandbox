@@ -1,0 +1,8 @@
+Name:	checkout-worker
+State:	S (sleeping)
+Uid:	1000	1000	1000	1000
+Threads:	4
+VmSize:	409600 kB
+VmRSS:	131072 kB
+RssAnon:	98304 kB
+RssFile:	32768 kB

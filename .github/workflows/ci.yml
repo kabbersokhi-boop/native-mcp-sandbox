@@ -17,7 +17,7 @@ jobs:
   build-and-test:
     name: ${{ matrix.compiler }} / ${{ matrix.build_type }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 12
     strategy:
       fail-fast: false
       matrix:
@@ -55,9 +55,9 @@ jobs:
         run: ./build/native-mcp-sandbox --self-check
 
   sanitizers:
-    name: ASan + UBSan
+    name: ASan + UBSan + deterministic fuzz smoke
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 15
 
     steps:
       - name: Check out source
@@ -79,5 +79,99 @@ jobs:
       - name: Build
         run: cmake --build build --parallel 2
 
-      - name: Test
+      - name: Test with leak detection
+        env:
+          ASAN_OPTIONS: detect_leaks=1:abort_on_error=1:strict_string_checks=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
         run: ctest --test-dir build --output-on-failure
+
+      - name: Extended deterministic fuzz smoke
+        env:
+          ASAN_OPTIONS: detect_leaks=1:abort_on_error=1:strict_string_checks=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+        run: ./build/native_mcp_fuzz_smoke --iterations 100000 --seed 828927513140
+
+  thread-sanitizer:
+    name: ThreadSanitizer orchestration stress
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install --yes nlohmann-json3-dev
+
+      - name: Configure
+        env:
+          CXX: g++
+        run: >-
+          cmake -S . -B build
+          -G Ninja
+          -DCMAKE_BUILD_TYPE=Debug
+          -DNMS_ENABLE_THREAD_SANITIZER=ON
+          -DNMS_WARNINGS_AS_ERRORS=ON
+
+      - name: Build focused targets
+        run: >-
+          cmake --build build --target
+          native_mcp_orchestration_tests
+          native_mcp_orchestration_stress_tests
+          --parallel 2
+
+      - name: Run focused race and deadlock regressions
+        env:
+          TSAN_OPTIONS: halt_on_error=1:second_deadlock_stack=1
+        run: ctest --test-dir build --output-on-failure -R '^orchestration\.(unit|stress)$'
+
+  libfuzzer-smoke:
+    name: libFuzzer corpus and mutation smoke
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install --yes nlohmann-json3-dev
+
+      - name: Configure
+        env:
+          CXX: clang++
+        run: >-
+          cmake -S . -B build
+          -G Ninja
+          -DCMAKE_BUILD_TYPE=RelWithDebInfo
+          -DBUILD_TESTING=ON
+          -DNMS_ENABLE_SANITIZERS=ON
+          -DNMS_BUILD_FUZZERS=ON
+          -DNMS_WARNINGS_AS_ERRORS=ON
+
+      - name: Build fuzz targets
+        run: >-
+          cmake --build build --target
+          native_mcp_fuzz_protocol
+          native_mcp_fuzz_runtime_config
+          native_mcp_fuzz_elf
+          native_mcp_fuzz_log
+          native_mcp_fuzz_process
+          --parallel 2
+
+      - name: Run bounded libFuzzer campaigns
+        env:
+          ASAN_OPTIONS: detect_leaks=1:abort_on_error=1:strict_string_checks=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+        run: |
+          mkdir -p build/fuzz-corpus/{protocol,runtime_config,elf,log,process}
+          cp -a fuzz/corpus/protocol/. build/fuzz-corpus/protocol/
+          cp -a fuzz/corpus/runtime_config/. build/fuzz-corpus/runtime_config/
+          cp -a fuzz/corpus/elf/. build/fuzz-corpus/elf/
+          cp -a fuzz/corpus/log/. build/fuzz-corpus/log/
+          cp -a fuzz/corpus/process/. build/fuzz-corpus/process/
+          ./build/native_mcp_fuzz_protocol build/fuzz-corpus/protocol -runs=2000 -max_len=1048576 -timeout=10 -dict=fuzz/dictionaries/json.dict
+          ./build/native_mcp_fuzz_runtime_config build/fuzz-corpus/runtime_config -runs=2000 -max_len=65536 -timeout=10 -dict=fuzz/dictionaries/json.dict
+          ./build/native_mcp_fuzz_elf build/fuzz-corpus/elf -runs=2000 -max_len=1048576 -timeout=10 -dict=fuzz/dictionaries/elf.dict
+          ./build/native_mcp_fuzz_log build/fuzz-corpus/log -runs=2000 -max_len=262144 -timeout=10 -dict=fuzz/dictionaries/log.dict
+          ./build/native_mcp_fuzz_process build/fuzz-corpus/process -runs=2000 -max_len=262144 -timeout=10 -dict=fuzz/dictionaries/process.dict

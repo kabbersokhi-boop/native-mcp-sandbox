@@ -5,6 +5,31 @@ the first stable release; pre-1.0 versions may change interfaces.
 
 ## [Unreleased]
 
+## [0.8.0] - candidate
+
+### Added
+
+- Bounded SAX JSON preflight for syntax, nesting, token count, and duplicate keys.
+- Five optional Clang libFuzzer targets for protocol, runtime policy, ELF, log, and bounded `/proc` parser paths.
+- Deterministic mutation smoke runner shared by GCC, Clang, CTest, and sanitizer builds.
+- Curated fuzz corpora, target-specific dictionaries, and native campaign scripts.
+- Dedicated ThreadSanitizer build mode and repeated orchestration stress tests.
+- Security regressions for hostile JSON, oversized lines, canonical numeric IDs,
+  cancellation/deadline precedence, callback exceptions, and concurrent shutdown.
+- Synthetic `/proc` parser unit tests for identity, status, page counters, aggregate rollups, and overflow rejection.
+- ADR 0011 and a campaign guide documenting native fuzzing and regression policy.
+
+### Changed
+
+- Project version advanced to `0.8.0`.
+- Runtime-policy JSON is limited to 32 nested containers and 4,096 tokens.
+- Protocol JSON is limited to 64 nested containers and 32,768 tokens.
+- Equal signed and unsigned non-negative JSON-RPC IDs share one in-flight identity.
+- Scheduler construction now joins already-created workers if later thread creation fails.
+- Scheduler shutdown is serialized and safe for simultaneous callers.
+- CI adds leak-enabled ASan/UBSan fuzz smoke, focused ThreadSanitizer, and bounded
+  libFuzzer jobs.
+
 ## [0.7.0] - 2026-07-18
 
 ### Added

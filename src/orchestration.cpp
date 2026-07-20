@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <exception>
 #include <mutex>
+#include <stdexcept>
 #include <stop_token>
 #include <thread>
 #include <unordered_map>
@@ -20,26 +21,38 @@ using Json = nlohmann::json;
 
 [[nodiscard]] std::string request_key(const Json& request_id) {
   std::string key;
-  key.reserve(request_id.dump().size() + 3U);
   switch (request_id.type()) {
     case Json::value_t::null:
-      key = "n:";
-      break;
+      return "n:";
     case Json::value_t::string:
       key = "s:";
-      break;
-    case Json::value_t::number_integer:
-      key = "i:";
-      break;
+      key += request_id.get_ref<const std::string&>();
+      return key;
+    case Json::value_t::number_integer: {
+      const auto value = request_id.get<Json::number_integer_t>();
+      if (value >= 0) {
+        key = "j:";
+        key += std::to_string(static_cast<Json::number_unsigned_t>(value));
+      } else {
+        key = "i:";
+        key += std::to_string(value);
+      }
+      return key;
+    }
     case Json::value_t::number_unsigned:
-      key = "u:";
-      break;
+      key = "j:";
+      key += std::to_string(request_id.get<Json::number_unsigned_t>());
+      return key;
     default:
       key = "x:";
-      break;
+      key += request_id.dump();
+      return key;
   }
-  key += request_id.dump();
-  return key;
+}
+
+[[nodiscard]] std::thread default_worker_thread_factory(
+    std::function<void()> callback) {
+  return std::thread{std::move(callback)};
 }
 
 [[nodiscard]] ToolExecutionResult scheduler_error(
@@ -86,15 +99,35 @@ struct ToolScheduler::Impl final {
   };
 
   Impl(const ResourceBudget resource_budget, ToolExecutor tool_executor,
-       ToolCompletion tool_completion)
+       ToolCompletion tool_completion, WorkerThreadFactory worker_factory)
       : budget(is_budget_valid(resource_budget) ? resource_budget
                                                 : conservative_budget()),
         executor(std::move(tool_executor)),
         completion(std::move(tool_completion)) {
     ready.reserve(budget.max_pending_requests);
     workers.reserve(budget.worker_threads);
-    for (std::size_t index = 0U; index < budget.worker_threads; ++index) {
-      workers.emplace_back([this] { worker_loop(); });
+    try {
+      for (std::size_t index = 0U; index < budget.worker_threads; ++index) {
+        std::thread worker = worker_factory([this] { worker_loop(); });
+        if (!worker.joinable()) {
+          throw std::runtime_error("worker factory returned a non-joinable thread");
+        }
+        workers.emplace_back(std::move(worker));
+      }
+    } catch (...) {
+      {
+        std::lock_guard lock{mutex};
+        accepting = false;
+        stopping = true;
+      }
+      ready_cv.notify_all();
+      for (std::thread& worker : workers) {
+        if (worker.joinable()) {
+          worker.join();
+        }
+      }
+      joined = true;
+      throw;
     }
   }
 
@@ -255,6 +288,7 @@ struct ToolScheduler::Impl final {
   }
 
   void shutdown() {
+    std::lock_guard shutdown_lock{shutdown_mutex};
     {
       std::unique_lock lock{mutex};
       if (joined) {
@@ -265,12 +299,19 @@ struct ToolScheduler::Impl final {
       stopping = true;
     }
     ready_cv.notify_all();
+    bool skipped_current_worker = false;
     for (std::thread& worker : workers) {
       if (worker.joinable()) {
+        if (worker.get_id() == std::this_thread::get_id()) {
+          skipped_current_worker = true;
+          continue;
+        }
         worker.join();
       }
     }
-    joined = true;
+    // A completion callback can request shutdown on a worker. It cannot join
+    // itself; a later non-worker shutdown (including destruction) reaps it.
+    joined = !skipped_current_worker;
   }
 
   ToolSchedulerStats stats() const {
@@ -285,6 +326,7 @@ struct ToolScheduler::Impl final {
   ToolExecutor executor;
   ToolCompletion completion;
   mutable std::mutex mutex;
+  std::mutex shutdown_mutex;
   std::condition_variable ready_cv;
   std::condition_variable done_cv;
   std::vector<std::coroutine_handle<>> ready;
@@ -298,8 +340,15 @@ struct ToolScheduler::Impl final {
 
 ToolScheduler::ToolScheduler(const ResourceBudget budget, ToolExecutor executor,
                              ToolCompletion completion)
+    : ToolScheduler(budget, std::move(executor), std::move(completion),
+                    default_worker_thread_factory) {}
+
+ToolScheduler::ToolScheduler(const ResourceBudget budget, ToolExecutor executor,
+                             ToolCompletion completion,
+                             WorkerThreadFactory worker_factory)
     : impl_(std::make_unique<Impl>(budget, std::move(executor),
-                                  std::move(completion))) {}
+                                  std::move(completion),
+                                  std::move(worker_factory))) {}
 
 ToolScheduler::ToolScheduler(const ResourceBudget budget,
                              std::shared_ptr<ToolService> tools,
@@ -309,6 +358,10 @@ ToolScheduler::ToolScheduler(const ResourceBudget budget,
           [tools = std::move(tools)](const std::string_view name,
                                      const Json& arguments,
                                      const OperationContext& context) {
+            if (tools == nullptr) {
+              return scheduler_error("internal_error",
+                                     "tool service is unavailable");
+            }
             return tools->execute(name, arguments, context);
           },
           std::move(completion)) {}

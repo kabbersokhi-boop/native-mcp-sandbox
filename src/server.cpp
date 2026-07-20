@@ -1,6 +1,7 @@
 #include "native_mcp/server.hpp"
 
 #include "native_mcp/json_rpc.hpp"
+#include "native_mcp/json_safety.hpp"
 #include "native_mcp/orchestration.hpp"
 
 #include <algorithm>
@@ -372,6 +373,27 @@ Server::Server(const ResourceBudget budget, std::shared_ptr<ToolService> tools)
 }
 
 LineAction Server::accept_line(const std::string_view line) {
+  if (line.size() > budget_.max_request_bytes) {
+    return {.immediate = request_too_large()};
+  }
+
+  constexpr JsonSafetyLimits kProtocolJsonLimits{
+      .max_nesting_depth = 64U,
+      .max_tokens = 32U * 1024U,
+  };
+  const JsonPreflightStatus preflight =
+      preflight_json(line, kProtocolJsonLimits);
+  if (preflight != JsonPreflightStatus::kOk) {
+    const bool syntax_error = preflight == JsonPreflightStatus::kInvalid;
+    return {.immediate = serialize_bounded(
+                json_rpc::make_error(
+                    null_id(),
+                    syntax_error ? json_rpc::kParseError
+                                 : json_rpc::kInvalidRequest,
+                    syntax_error ? "Parse error" : "Invalid Request"),
+                budget_, std::nullopt, state_)};
+  }
+
   Json message = Json::parse(line, nullptr, false);
   if (message.is_discarded()) {
     return {.immediate = serialize_bounded(

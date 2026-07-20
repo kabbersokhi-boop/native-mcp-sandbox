@@ -1,0 +1,4 @@
+2026-07-18T10:00:00Z fraud-plugin initialized build=deadbeef
+2026-07-18T10:00:03Z checkout timeout rate=8%
+2026-07-18T10:00:05Z worker RSS crossed 384 MiB
+2026-07-18T10:00:07Z watchdog restarting checkout-worker

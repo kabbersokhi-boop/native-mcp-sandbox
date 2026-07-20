@@ -1,4 +1,5 @@
 #include "native_mcp/runtime_config.hpp"
+#include "native_mcp/json_safety.hpp"
 
 #include <nlohmann/json.hpp>
 
@@ -114,6 +115,16 @@ RuntimeConfigParseResult parse_runtime_policy_config(
             .error = error(RuntimeConfigErrorCode::kConfigTooLarge,
                            "runtime policy configuration exceeds the byte limit")};
   }
+  constexpr JsonSafetyLimits kConfigJsonLimits{
+      .max_nesting_depth = 32U,
+      .max_tokens = 4U * 1024U,
+  };
+  if (preflight_json(text, kConfigJsonLimits) != JsonPreflightStatus::kOk) {
+    return {.config = std::nullopt,
+            .error = error(RuntimeConfigErrorCode::kInvalidConfig,
+                           "runtime policy configuration failed bounded JSON validation")};
+  }
+
   Json document = Json::parse(text, nullptr, false);
   if (document.is_discarded() || !document.is_object() ||
       !document.contains("version") ||

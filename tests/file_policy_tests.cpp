@@ -3,6 +3,7 @@
 #include <sys/un.h>
 #include <unistd.h>
 
+#include <cerrno>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
@@ -31,7 +32,22 @@ void expect(const bool condition, const std::string_view message) {
 class TempDirectory final {
  public:
   TempDirectory() {
-    std::string pattern = "/tmp/native-mcp-policy-XXXXXX";
+    const char* base = std::getenv("NMS_TEST_TMPDIR");
+    if (base == nullptr || *base == '\0') {
+      base = std::getenv("TMPDIR");
+    }
+    if (base == nullptr || *base == '\0') {
+      base = "/tmp";
+    }
+    fs::path base_path{base};
+    std::error_code base_error;
+    if (!base_path.is_absolute() || !fs::is_directory(base_path, base_error)) {
+      base_path = "/tmp";
+    }
+    std::string pattern = (base_path / "nms-test-XXXXXX").string();
+    if (pattern.size() >= sizeof(sockaddr_un{}.sun_path)) {
+      pattern = "/tmp/nms-test-XXXXXX";
+    }
     pattern.push_back('\0');
     char* created = ::mkdtemp(pattern.data());
     expect(created != nullptr, "failed to create temporary directory");
@@ -141,6 +157,19 @@ void test_policy_creation() {
 
 void test_regular_file_and_denials() {
   TempDirectory directory;
+  const int socket_fd = ::socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+  expect(socket_fd >= 0, "failed to create Unix socket fixture");
+  const fs::path socket_path = directory.path() / "socket";
+  sockaddr_un socket_address{};
+  socket_address.sun_family = AF_UNIX;
+  expect(socket_path.string().size() < sizeof(socket_address.sun_path),
+         "socket fixture path must fit sockaddr_un");
+  std::strcpy(socket_address.sun_path, socket_path.c_str());
+  if (::bind(socket_fd, reinterpret_cast<const sockaddr*>(&socket_address),
+             sizeof(socket_address)) != 0) {
+    fail(std::string{"failed to bind Unix socket fixture at "} +
+         socket_path.string() + ": " + std::strerror(errno));
+  }
   fs::create_directories(directory.path() / "nested");
   {
     std::ofstream output(directory.path() / "nested" / "allowed.log");
@@ -152,18 +181,8 @@ void test_regular_file_and_denials() {
   }
   fs::create_symlink("nested/allowed.log", directory.path() / "link.log");
   fs::create_directory_symlink("nested", directory.path() / "linked-dir");
-  expect(::mkfifo((directory.path() / "pipe").c_str(), 0600) == 0, "failed to create FIFO fixture");
-  const int socket_fd = ::socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
-  expect(socket_fd >= 0, "failed to create Unix socket fixture");
-  const fs::path socket_path = directory.path() / "socket";
-  sockaddr_un socket_address{};
-  socket_address.sun_family = AF_UNIX;
-  expect(socket_path.string().size() < sizeof(socket_address.sun_path),
-         "socket fixture path must fit sockaddr_un");
-  std::strcpy(socket_address.sun_path, socket_path.c_str());
-  expect(::bind(socket_fd, reinterpret_cast<const sockaddr*>(&socket_address),
-                sizeof(socket_address)) == 0,
-         "failed to bind Unix socket fixture");
+  expect(::mkfifo((directory.path() / "pipe").c_str(), 0600) == 0,
+         "failed to create FIFO fixture");
 
   auto policy = create_policy(directory.path(), 64U);
   auto opened = policy.open_regular_file("evidence", "nested/allowed.log");
