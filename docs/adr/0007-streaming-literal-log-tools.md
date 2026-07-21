@@ -5,25 +5,36 @@
 
 ## Context
 
-The first agent-reachable host tools must demonstrate useful analysis without turning
-the server into a generic file reader or pulling concurrency and regex complexity into
-the security boundary.
+The first host tools must give useful evidence.
+They must not become a generic file reader.
+They must not add regular-expression or concurrency complexity to the first tool boundary.
 
 ## Decision
 
-Phase 3 exposes `logs.search` and `logs.tail` only when a trusted startup policy is
-loaded. Both tools accept a symbolic root plus relative path and obtain their file only
-through `FilesystemPolicy`.
+Expose `logs.search` and `logs.tail` only when a trusted policy is loaded.
+Each tool accepts a root name and a relative path.
+Each tool obtains the file through `FilesystemPolicy`.
 
-Search is literal, returns the first occurrence per matching line, supports optional ASCII-only case folding, and uses streaming KMP. Tail
-scans forward and retains a bounded deque. Files are limited to 16 MiB, chunks to 8
-KiB, queries to 256 bytes, results to 50 lines, and previews to 512 source bytes. File
-growth does not expand the captured read budget. Binary output is escaped. Tool calls
-use a small per-process burst limiter.
+`logs.search` uses literal matching and streaming KMP.
+It returns the first match in each matching line.
+It can use ASCII-only case folding.
+
+`logs.tail` scans forward and keeps a bounded deque.
+
+Use these limits:
+
+- 16 MiB file size
+- 8 KiB read chunk
+- 256-byte query
+- 50 returned lines
+- 512 source bytes for each preview
+
+File growth must not increase the captured read budget.
+Escape binary output.
+Use a small process-wide burst limit.
 
 ## Consequences
 
-The implementation is deterministic, testable, and memory-bounded. It is not a regex
-engine, recursive search service, file watcher, or high-throughput log platform.
-Synchronous scans still lack hard deadlines and cancellation; those require the later
-orchestration phase.
+The tools are deterministic and memory-bounded.
+They are not a regular-expression engine, recursive search service, file watcher, or high-throughput log platform.
+Phase 3 does not provide cancellation or hard deadlines.
