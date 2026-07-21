@@ -1,4 +1,5 @@
 #include "native_mcp/file_policy.hpp"
+#include "native_mcp/json_safety.hpp"
 
 #include <cerrno>
 #include <cctype>
@@ -457,6 +458,16 @@ ConfigParseResult parse_filesystem_policy_config(
     return {.config = std::nullopt,
             .error = error(PolicyErrorCode::kConfigTooLarge,
                            "configuration exceeds the byte limit")};
+  }
+
+  constexpr JsonSafetyLimits kConfigJsonLimits{
+      .max_nesting_depth = 32U,
+      .max_tokens = 4U * 1024U,
+  };
+  if (preflight_json(text, kConfigJsonLimits) != JsonPreflightStatus::kOk) {
+    return {.config = std::nullopt,
+            .error = error(PolicyErrorCode::kInvalidConfig,
+                           "configuration failed bounded JSON validation")};
   }
 
   Json document = Json::parse(text, nullptr, false);

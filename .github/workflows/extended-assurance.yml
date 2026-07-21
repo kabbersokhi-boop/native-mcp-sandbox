@@ -1,0 +1,171 @@
+name: Extended Assurance
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: extended-assurance-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  deterministic-mutation:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install --yes ninja-build nlohmann-json3-dev
+      - name: Configure sanitizers
+        env:
+          CXX: clang++
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON -DNMS_WARNINGS_AS_ERRORS=ON -DNMS_ENABLE_SANITIZERS=ON
+      - name: Build deterministic runner
+        run: cmake --build build --target native_mcp_fuzz_smoke --parallel 2
+      - name: Run two 100k campaigns
+        env:
+          ASAN_OPTIONS: detect_leaks=1:abort_on_error=1:strict_string_checks=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+        run: |
+          ./build/native_mcp_fuzz_smoke --iterations 100000 --seed 828927513140 | tee deterministic-seed-1.log
+          ./build/native_mcp_fuzz_smoke --iterations 100000 --seed 11400714819323198485 | tee deterministic-seed-2.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: deterministic-mutation-logs
+          path: deterministic-seed-*.log
+
+  scheduler-tsan:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install --yes ninja-build nlohmann-json3-dev
+      - name: Configure ThreadSanitizer
+        env:
+          CXX: g++
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=ON -DNMS_WARNINGS_AS_ERRORS=ON -DNMS_ENABLE_THREAD_SANITIZER=ON
+      - name: Build scheduler tests
+        run: cmake --build build --target native_mcp_orchestration_tests native_mcp_orchestration_stress_tests --parallel 2
+      - name: Repeat callback shutdown and stress tests
+        env:
+          TSAN_OPTIONS: halt_on_error=1:second_deadlock_stack=1
+        run: |
+          ctest --test-dir build --output-on-failure --repeat until-fail:50 -R '^orchestration\.unit$' | tee tsan-unit.log
+          ctest --test-dir build --output-on-failure --repeat until-fail:25 -R '^orchestration\.stress$' | tee tsan-stress.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: scheduler-tsan-logs
+          path: tsan-*.log
+
+  strict-integration:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install --yes ninja-build nlohmann-json3-dev
+      - name: Require openat2 and pidfd
+        run: |
+          cat > /tmp/strict_probe.cpp <<'CPP'
+          #include <fcntl.h>
+          #include <linux/openat2.h>
+          #include <sys/syscall.h>
+          #include <unistd.h>
+          int main() {
+            open_how how{};
+            how.flags = O_PATH | O_DIRECTORY | O_CLOEXEC;
+            how.resolve = RESOLVE_NO_SYMLINKS | RESOLVE_NO_MAGICLINKS;
+            int root = static_cast<int>(syscall(SYS_openat2, AT_FDCWD, ".", &how, sizeof(how)));
+            if (root < 0) return 1;
+            close(root);
+          #ifdef SYS_pidfd_open
+            int process = static_cast<int>(syscall(SYS_pidfd_open, getpid(), 0U));
+            if (process < 0) return 2;
+            close(process);
+            return 0;
+          #else
+            return 3;
+          #endif
+          }
+          CPP
+          c++ -std=c++20 -Wall -Wextra -Werror /tmp/strict_probe.cpp -o /tmp/strict_probe
+          /tmp/strict_probe
+      - name: Configure release build
+        env:
+          CXX: clang++
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DNMS_WARNINGS_AS_ERRORS=ON
+      - name: Build
+        run: cmake --build build --parallel 2
+      - name: Repeat real socket, FIFO, openat2, pidfd, and framing tests
+        run: |
+          ctest --test-dir build --output-on-failure --repeat until-fail:50 -R '^policy\.unit$' | tee policy-repeat.log
+          ctest --test-dir build --output-on-failure --repeat until-fail:20 -R '^protocol\.stdio_integration$' | tee integration-repeat.log
+          ./build/native-mcp-sandbox --self-check | tee self-check.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: strict-integration-logs
+          path: |
+            policy-repeat.log
+            integration-repeat.log
+            self-check.log
+
+  libfuzzer-campaign:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: native_mcp_fuzz_protocol
+            corpus: protocol
+            dictionary: json.dict
+            max_len: 1048576
+          - target: native_mcp_fuzz_runtime_config
+            corpus: runtime_config
+            dictionary: json.dict
+            max_len: 65536
+          - target: native_mcp_fuzz_elf
+            corpus: elf
+            dictionary: elf.dict
+            max_len: 1048576
+          - target: native_mcp_fuzz_log
+            corpus: log
+            dictionary: log.dict
+            max_len: 262144
+          - target: native_mcp_fuzz_process
+            corpus: process
+            dictionary: process.dict
+            max_len: 262144
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install --yes ninja-build nlohmann-json3-dev
+      - name: Configure libFuzzer build
+        env:
+          CXX: clang++
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DBUILD_TESTING=ON -DNMS_WARNINGS_AS_ERRORS=ON -DNMS_ENABLE_SANITIZERS=ON -DNMS_BUILD_FUZZERS=ON
+      - name: Build target
+        run: cmake --build build --target ${{ matrix.target }} --parallel 2
+      - name: Replay corpus and run 600-second campaign
+        env:
+          ASAN_OPTIONS: detect_leaks=1:abort_on_error=1:strict_string_checks=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+        run: |
+          mkdir -p campaign/corpus campaign/artifacts
+          cp -a fuzz/corpus/${{ matrix.corpus }}/. campaign/corpus/
+          ./build/${{ matrix.target }} campaign/corpus -runs=0 -timeout=10 -rss_limit_mb=2048 -max_len=${{ matrix.max_len }} -dict=fuzz/dictionaries/${{ matrix.dictionary }} -artifact_prefix=campaign/artifacts/ 2>&1 | tee corpus-replay.log
+          ./build/${{ matrix.target }} campaign/corpus -max_total_time=600 -timeout=10 -rss_limit_mb=2048 -max_len=${{ matrix.max_len }} -dict=fuzz/dictionaries/${{ matrix.dictionary }} -artifact_prefix=campaign/artifacts/ -print_final_stats=1 2>&1 | tee campaign.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fuzz-${{ matrix.corpus }}
+          path: |
+            corpus-replay.log
+            campaign.log
+            campaign/artifacts

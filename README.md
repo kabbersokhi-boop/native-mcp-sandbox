@@ -5,12 +5,12 @@
 Native MCP Sandbox gives an MCP client narrow, read-only access to selected Linux
 evidence without exposing a shell, unrestricted filesystem browser, or raw process
 memory. The project is built in small auditable phases: protocol handling, filesystem
-containment, bounded log and ELF analysis, aggregate process-memory observation, and
-now bounded concurrent orchestration.
+containment, bounded log and ELF analysis, aggregate process-memory observation,
+bounded concurrent orchestration, and native adversarial testing.
 
 ## Project status
 
-**Phase 6 — Coroutine orchestration, cancellation, and backpressure (`v0.7.0`)**
+**Phase 7 candidate — Fuzzing, sanitizer coverage, and security regressions (`v0.8.0`)**
 
 With no arguments, the executable remains host-isolated and advertises no tools. With a
 trusted runtime policy, it exposes only the capabilities explicitly configured:
@@ -171,11 +171,44 @@ complete JSON-RPC lines without byte interleaving. Tool responses may finish out
 request order and are correlated by their JSON-RPC IDs. EOF stops new admission, drains
 already accepted work, and joins the worker pool. MCP task support remains forbidden.
 
+## Phase 7 assurance layer
+
+Phase 7 adds no host authority and no new MCP tool. It strengthens the existing boundary
+by attacking protocol, configuration, log, ELF, and scheduler code with deterministic
+and coverage-guided inputs.
+
+Before a JSON DOM is constructed, a SAX preflight enforces bounded nesting and token
+counts and rejects duplicate object keys. Protocol messages permit at most 64 nested
+containers and 32,768 structural tokens. Runtime-policy documents permit at most 32
+nested containers and 4,096 tokens. Syntax errors remain JSON-RPC parse errors;
+well-formed inputs that violate these safety limits fail as invalid requests or invalid
+configuration.
+
+Five optional Clang libFuzzer targets exercise protocol handling, runtime-policy parsing,
+ELF inspection, streaming log analysis, and the bounded `/proc` text parsers. The process
+fuzzer operates only on supplied bytes; it does not open or discover host processes. A deterministic mutation runner executes the
+same invariants under GCC, Clang, ASan/UBSan, and ordinary CTest, so useful coverage does
+not depend on libFuzzer being installed. Curated corpora preserve valid, malformed,
+duplicate-key, and boundary inputs.
+
+Scheduler regressions inject worker-thread creation failure after a worker has already
+started, call shutdown concurrently, canonicalize equal signed and unsigned numeric
+JSON-RPC IDs, race cancellation against deadlines, and repeatedly test saturation and
+throwing completion callbacks. ThreadSanitizer has a dedicated focused build mode.
+
+Fuzzing and sanitizers increase evidence; they do not prove the absence of vulnerabilities.
+Crashes, hangs, sanitizer findings, and minimized fuzz artifacts are expected to become
+permanent regression cases before release.
+
 ## Fixed limits
 
 | Boundary | Limit |
 | --- | ---: |
 | Runtime policy text | 64 KiB |
+| Protocol JSON nesting | 64 containers |
+| Protocol JSON tokens | 32,768 |
+| Runtime-policy JSON nesting | 32 containers |
+| Runtime-policy JSON tokens | 4,096 |
 | Filesystem roots | 16 |
 | Process aliases | 16 |
 | Process `stat` read | 8 KiB |
@@ -199,7 +232,8 @@ already accepted work, and joins the worker pool. MCP task support remains forbi
 ## MCP behavior
 
 The server targets MCP revision `2025-11-25` over newline-delimited JSON-RPC 2.0 on
-stdin/stdout. It supports `initialize`, `notifications/initialized`, `ping`,
+stdin/stdout. Incoming JSON passes bounded duplicate-key, depth, and token preflight
+before DOM construction. It supports `initialize`, `notifications/initialized`, `ping`,
 `tools/list`, and—in configured mode—`tools/call`.
 
 Tool definitions have closed input schemas, success output schemas, read-only
@@ -226,7 +260,7 @@ MCP_INPUT
 Expected stdout:
 
 ```jsonl
-{"id":1,"jsonrpc":"2.0","result":{"capabilities":{"tools":{}},"protocolVersion":"2025-11-25","serverInfo":{"name":"native-mcp-sandbox","version":"0.7.0"}}}
+{"id":1,"jsonrpc":"2.0","result":{"capabilities":{"tools":{}},"protocolVersion":"2025-11-25","serverInfo":{"name":"native-mcp-sandbox","version":"0.8.0"}}}
 {"id":2,"jsonrpc":"2.0","result":{}}
 {"id":3,"jsonrpc":"2.0","result":{"tools":[]}}
 ```
@@ -254,16 +288,34 @@ ctest --preset release
 
 cmake --preset sanitizers
 cmake --build --preset sanitizers
-ctest --preset sanitizers
+ASAN_OPTIONS=detect_leaks=1 ctest --preset sanitizers
+
+CXX=g++ cmake --preset thread-sanitizer
+cmake --build --preset thread-sanitizer
+TSAN_OPTIONS=halt_on_error=1 ctest --preset thread-sanitizer -R '^orchestration\.(unit|stress)$'
+
+CXX=clang++ cmake --preset fuzzers
+cmake --build --preset fuzzers
 ```
 
-Presets treat warnings as errors and use at most two compilation jobs.
+Run a repeatable extended native stress pass or timed libFuzzer campaigns:
+
+```bash
+NMS_STRESS_ITERATIONS=20000 ./scripts/run_security_stress.sh
+NMS_FUZZ_SECONDS=60 ./scripts/run_fuzz_campaign.sh
+```
+
+The fuzz preset requires Clang and enables libFuzzer with ASan/UBSan. Generated corpora,
+crash artifacts, and build directories stay outside the source package. Presets and
+scripts treat warnings as errors and use at most two compilation jobs. No container
+runtime is required.
 
 ## Architecture
 
 ```mermaid
 flowchart LR
-    A["MCP client"] --> B["bounded stdio and lifecycle"]
+    A["MCP client"] --> P["bounded JSON preflight"]
+    P --> B["bounded stdio and lifecycle"]
     B --> C["admission, duplicate check, backpressure"]
     C --> D["bounded coroutine queue"]
     D --> E["fixed two-worker pool"]
@@ -276,12 +328,14 @@ flowchart LR
 
 ## Deliberate limitations
 
-Phase 6 does not provide regex, recursive search, file watching, arbitrary file reads,
+Phase 7 does not provide regex, recursive search, file watching, arbitrary file reads,
 filesystem mutation, shell execution, networking, ELF sections or symbols, disassembly,
 signature verification, raw process memory, maps, command lines, environments, process
 discovery, forced cancellation, hard real-time preemption, MCP tasks, dynamic worker
 resizing, priorities, or durable queues. Cancellation and deadlines are cooperative.
-These limitations are explicit rather than hidden behind security claims.
+Fuzzing is bounded by the selected corpus, duration, machine, compiler, and sanitizer; it
+is not a proof of memory safety or correctness. These limitations are explicit rather
+than hidden behind security claims.
 
 ## Roadmap
 
@@ -292,7 +346,7 @@ These limitations are explicit rather than hidden behind security claims.
 5. Phase 4 — safe Linux ELF inspection: complete
 6. Phase 5 — bounded `/proc` memory observation: complete
 7. Phase 6 — coroutine orchestration, cancellation, and backpressure: complete
-8. Phase 7 — fuzzing, sanitizer coverage, and security regression suite
+8. Phase 7 — fuzzing, sanitizer coverage, and security regression suite: candidate awaiting audit
 9. Phase 8 — deterministic agent investigation demonstration
 10. Phase 9 — reproducible benchmarks and reference comparison
 11. Phase 10 — release hardening and stable tool interface
@@ -300,20 +354,32 @@ These limitations are explicit rather than hidden behind security claims.
 ## Repository layout
 
 ```text
-include/native_mcp/orchestration.hpp      Bounded coroutine scheduler API
-src/orchestration.cpp                     Worker pool, cancellation, deadlines, backpressure
-include/native_mcp/operation.hpp          Cooperative stop and deadline context
-include/native_mcp/runtime_config.hpp     Versioned runtime-policy parser
-src/runtime_config.cpp                    Closed schema v1/v2 parsing
-include/native_mcp/process_memory.hpp     Process policy and aggregate-memory API
-src/process_memory.cpp                    Same-UID identity pinning and bounded proc reads
-include/native_mcp/file_policy.hpp        Filesystem policy and owned descriptors
-src/file_policy.cpp                       Linux path containment and regular-file checks
-include/native_mcp/log_analysis.hpp       Streaming log-analysis API
-src/log_analysis.cpp                      Literal search and bounded tail
-include/native_mcp/elf_analysis.hpp       Bounded ELF inspection API
-src/elf_analysis.cpp                      Selected ELF metadata parsing
-tests/process_memory_tests.cpp            Process config, identity, and observation tests
+include/native_mcp/json_safety.hpp          Bounded SAX JSON preflight API
+src/json_safety.cpp                         Depth, token, syntax, and duplicate-key gate
+fuzz/fuzz_support.cpp                       Shared protocol, config, ELF, log, and proc invariants
+fuzz/fuzz_smoke.cpp                         Deterministic cross-compiler mutation runner
+fuzz/fuzz_*.cpp                             Optional Clang libFuzzer entry points
+fuzz/corpus/                                Curated regression seeds
+scripts/run_fuzz_campaign.sh                Timed native coverage-guided campaigns
+scripts/run_security_stress.sh              ASan/UBSan, deterministic fuzz, and TSan pass
+docs/FUZZING.md                              Campaign, minimization, and regression workflow
+tests/security_regression_tests.cpp         Hostile JSON and bounded-failure regressions
+tests/orchestration_stress_tests.cpp        Repeated cancellation, deadline, and shutdown races
+include/native_mcp/orchestration.hpp         Bounded coroutine scheduler API
+src/orchestration.cpp                       Worker pool, cancellation, deadlines, backpressure
+include/native_mcp/operation.hpp             Cooperative stop and deadline context
+include/native_mcp/runtime_config.hpp        Versioned runtime-policy parser
+src/runtime_config.cpp                      Closed schema v1/v2 parsing
+include/native_mcp/process_memory.hpp        Process policy and aggregate-memory API
+include/native_mcp/process_parsing.hpp       Pure bounded proc-text parser test surface
+src/process_memory.cpp                       Same-UID identity pinning and bounded proc reads
+tests/process_parsing_tests.cpp              Synthetic proc parser and overflow regressions
+include/native_mcp/file_policy.hpp           Filesystem policy and owned descriptors
+src/file_policy.cpp                          Linux path containment and regular-file checks
+include/native_mcp/log_analysis.hpp          Streaming log-analysis API
+src/log_analysis.cpp                         Literal search and bounded tail
+include/native_mcp/elf_analysis.hpp          Bounded ELF inspection API
+src/elf_analysis.cpp                         Selected ELF metadata parsing
 ```
 
 ## License

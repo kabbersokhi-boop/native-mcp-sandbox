@@ -1,4 +1,5 @@
 #include "native_mcp/process_memory.hpp"
+#include "native_mcp/process_parsing.hpp"
 
 #include <fcntl.h>
 #include <poll.h>
@@ -300,18 +301,37 @@ void assign_status_metric(const std::string_view key,
   bool have_state = false;
   bool have_uid = false;
   bool have_threads = false;
+  std::array<bool, 14U> seen_memory{};
+  static constexpr std::array<std::string_view, 14U> kMemoryKeys{
+      "VmPeak", "VmSize", "VmHWM", "VmRSS", "RssAnon", "RssFile",
+      "RssShmem", "VmData", "VmStk", "VmExe", "VmLib", "VmPTE",
+      "VmSwap", "HugetlbPages"};
   std::size_t start = 0U;
   while (start <= text.size()) {
     const std::size_t newline = text.find('\n', start);
     const std::size_t end = newline == std::string_view::npos ? text.size() : newline;
     const std::string_view line = text.substr(start, end - start);
     if (const auto value = value_after_colon(line, "Name")) {
+      if (have_name || value->empty()) {
+        return std::nullopt;
+      }
       result.name = std::string{*value};
       have_name = true;
     } else if (const auto value = value_after_colon(line, "State")) {
+      static constexpr std::string_view kStates{"RSDTtXZPI"};
+      if (have_state || value->empty() ||
+          kStates.find(value->front()) == std::string_view::npos ||
+          (value->size() != 1U &&
+           (value->size() < 4U || (*value)[1] != ' ' ||
+            (*value)[2] != '(' || value->back() != ')'))) {
+        return std::nullopt;
+      }
       result.state = std::string{*value};
       have_state = true;
     } else if (const auto value = value_after_colon(line, "Threads")) {
+      if (have_threads) {
+        return std::nullopt;
+      }
       const auto parsed = parse_unsigned(*value);
       if (!parsed.has_value()) {
         return std::nullopt;
@@ -319,6 +339,9 @@ void assign_status_metric(const std::string_view key,
       result.threads = *parsed;
       have_threads = true;
     } else if (const auto value = value_after_colon(line, "Uid")) {
+      if (have_uid) {
+        return std::nullopt;
+      }
       std::array<std::string_view, 4U> ids{};
       std::size_t id_count = 0U;
       std::size_t position = 0U;
@@ -351,17 +374,18 @@ void assign_status_metric(const std::string_view key,
       result.effective_uid = static_cast<std::uint32_t>(*uid);
       have_uid = true;
     } else {
-      static constexpr std::array<std::string_view, 14U> kMemoryKeys{
-          "VmPeak", "VmSize", "VmHWM", "VmRSS", "RssAnon", "RssFile",
-          "RssShmem", "VmData", "VmStk", "VmExe", "VmLib", "VmPTE",
-          "VmSwap", "HugetlbPages"};
-      for (const std::string_view key : kMemoryKeys) {
+      for (std::size_t index = 0U; index < kMemoryKeys.size(); ++index) {
+        const std::string_view key = kMemoryKeys[index];
         if (const auto value = value_after_colon(line, key)) {
+          if (seen_memory[index]) {
+            return std::nullopt;
+          }
           const auto parsed = parse_kibibytes(*value);
           if (!parsed.has_value()) {
             return std::nullopt;
           }
           assign_status_metric(key, parsed, result.memory);
+          seen_memory[index] = true;
           break;
         }
       }
@@ -406,7 +430,12 @@ void assign_status_metric(const std::string_view key,
     }
     position = end + 1U;
   }
-  if (count < 7U) {
+  while (position < text.size() &&
+         (text[position] == ' ' || text[position] == '\t' ||
+          text[position] == '\n' || text[position] == '\r')) {
+    ++position;
+  }
+  if (count != pages.size() || position != text.size()) {
     return std::nullopt;
   }
   ProcessStatmMemory result;
@@ -458,6 +487,7 @@ void assign_rollup_metric(const std::string_view key,
     const std::string_view text) {
   ProcessSmapsRollup result;
   bool recognized = false;
+  std::array<bool, 14U> seen{};
   static constexpr std::array<std::string_view, 14U> kKeys{
       "Rss",          "Pss",           "Pss_Anon",      "Pss_File",
       "Pss_Shmem",    "Shared_Clean",  "Shared_Dirty",  "Private_Clean",
@@ -468,13 +498,18 @@ void assign_rollup_metric(const std::string_view key,
     const std::size_t newline = text.find('\n', start);
     const std::size_t end = newline == std::string_view::npos ? text.size() : newline;
     const std::string_view line = text.substr(start, end - start);
-    for (const std::string_view key : kKeys) {
+    for (std::size_t index = 0U; index < kKeys.size(); ++index) {
+      const std::string_view key = kKeys[index];
       if (const auto value = value_after_colon(line, key)) {
+        if (seen[index]) {
+          return std::nullopt;
+        }
         const auto parsed = parse_kibibytes(*value);
         if (!parsed.has_value()) {
           return std::nullopt;
         }
         assign_rollup_metric(key, parsed, result);
+        seen[index] = true;
         recognized = true;
         break;
       }
@@ -533,6 +568,43 @@ void assign_rollup_metric(const std::string_view key,
 }
 
 }  // namespace
+
+namespace process_parsing {
+
+std::optional<ParsedIdentity> parse_stat_identity_text(
+    const std::string_view text) {
+  const auto parsed = parse_stat_identity(text);
+  if (!parsed.has_value()) {
+    return std::nullopt;
+  }
+  return ParsedIdentity{.name = parsed->name,
+                        .state = parsed->state,
+                        .start_time_ticks = parsed->start_time_ticks};
+}
+
+std::optional<ParsedStatus> parse_status_text(const std::string_view text) {
+  const auto parsed = parse_status(text);
+  if (!parsed.has_value()) {
+    return std::nullopt;
+  }
+  return ParsedStatus{.name = parsed->name,
+                      .state = parsed->state,
+                      .effective_uid = parsed->effective_uid,
+                      .threads = parsed->threads,
+                      .memory = parsed->memory};
+}
+
+std::optional<ProcessStatmMemory> parse_statm_text(
+    const std::string_view text, const std::uint64_t page_size) {
+  return parse_statm(text, page_size);
+}
+
+std::optional<ProcessSmapsRollup> parse_smaps_rollup_text(
+    const std::string_view text) {
+  return parse_smaps_rollup(text);
+}
+
+}  // namespace process_parsing
 
 ProcessPolicy::ProcessPolicy(const ProcessPolicyLimits limits) noexcept
     : limits_(limits) {}

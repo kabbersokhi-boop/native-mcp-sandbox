@@ -5,7 +5,9 @@
 #include <condition_variable>
 #include <cstdlib>
 #include <iostream>
+#include <memory>
 #include <mutex>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -234,6 +236,120 @@ void test_invalid_budget_uses_conservative_scheduler_limits() {
   scheduler.shutdown();
 }
 
+void test_worker_creation_failure_joins_started_workers() {
+  std::atomic<int> launches{0};
+  bool threw = false;
+  try {
+    ToolScheduler scheduler{
+        budget(4U, 2U),
+        [](std::string_view, const Json&, const OperationContext&) {
+          return success("unused");
+        },
+        [](const Json&, ToolExecutionResult) {},
+        [&](std::function<void()> callback) -> std::thread {
+          if (launches.fetch_add(1) == 1) {
+            throw std::runtime_error("injected worker creation failure");
+          }
+          return std::thread{std::move(callback)};
+        }};
+  } catch (const std::runtime_error&) {
+    threw = true;
+  }
+  expect(threw, "injected thread creation failure must propagate");
+  expect(launches.load() == 2,
+         "failure must occur after one worker was started for cleanup coverage");
+}
+
+
+void test_null_tool_service_returns_bounded_error() {
+  std::mutex mutex;
+  std::condition_variable cv;
+  bool completed = false;
+  ToolExecutionResult observed;
+  ToolScheduler scheduler{
+      budget(1U, 1U), std::shared_ptr<native_mcp::ToolService>{},
+      [&](const Json&, ToolExecutionResult result) {
+        {
+          std::lock_guard lock{mutex};
+          observed = std::move(result);
+          completed = true;
+        }
+        cv.notify_all();
+      }};
+  expect(scheduler.submit({"null-service", "test", Json::object()}) ==
+             ToolSubmitStatus::kAccepted,
+         "null service test work must be admitted without a crash");
+  {
+    std::unique_lock lock{mutex};
+    expect(cv.wait_for(lock, 1s, [&] { return completed; }),
+           "null service must complete with a bounded error");
+  }
+  scheduler.shutdown();
+  expect(observed.is_error &&
+             observed.structured_content["error"]["code"] == "internal_error",
+         "null tool service must not be dereferenced");
+}
+
+void test_concurrent_shutdown_is_idempotent() {
+  std::atomic<int> completions{0};
+  ToolScheduler scheduler{
+      budget(8U, 2U),
+      [](std::string_view, const Json&, const OperationContext&) {
+        std::this_thread::sleep_for(2ms);
+        return success("done");
+      },
+      [&](const Json&, ToolExecutionResult) { completions.fetch_add(1); }};
+
+  for (int id = 0; id < 8; ++id) {
+    expect(scheduler.submit({id, "test", Json::object()}) ==
+               ToolSubmitStatus::kAccepted,
+           "stress setup calls must be accepted");
+  }
+  std::vector<std::thread> shutdown_callers;
+  for (int index = 0; index < 4; ++index) {
+    shutdown_callers.emplace_back([&] { scheduler.shutdown(); });
+  }
+  for (std::thread& caller : shutdown_callers) {
+    caller.join();
+  }
+  expect(completions.load() == 8,
+         "concurrent shutdown callers must drain accepted work exactly once");
+  expect(scheduler.stats().outstanding == 0U,
+         "concurrent shutdown must leave no outstanding work");
+}
+
+void test_shutdown_from_completion_does_not_self_join() {
+  std::mutex mutex;
+  std::condition_variable cv;
+  bool completed = false;
+  ToolScheduler* scheduler_ptr = nullptr;
+  ToolScheduler scheduler{
+      budget(1U, 1U),
+      [](std::string_view, const Json&, const OperationContext&) {
+        return success("done");
+      },
+      [&](const Json&, ToolExecutionResult) {
+        scheduler_ptr->shutdown();
+        {
+          std::lock_guard lock{mutex};
+          completed = true;
+        }
+        cv.notify_all();
+      }};
+  scheduler_ptr = &scheduler;
+  expect(scheduler.submit({"self-shutdown", "test", Json::object()}) ==
+             ToolSubmitStatus::kAccepted,
+         "self-shutdown test call must be accepted");
+  {
+    std::unique_lock lock{mutex};
+    expect(cv.wait_for(lock, 1s, [&] { return completed; }),
+           "completion callback shutdown must not self-join or terminate");
+  }
+  scheduler.shutdown();
+  expect(scheduler.stats().completed == 1U,
+         "self-shutdown must preserve completed work accounting");
+}
+
 }  // namespace
 
 int main() {
@@ -242,6 +358,10 @@ int main() {
   test_cancellation_suppresses_response();
   test_deadline_error();
   test_invalid_budget_uses_conservative_scheduler_limits();
+  test_worker_creation_failure_joins_started_workers();
+  test_null_tool_service_returns_bounded_error();
+  test_concurrent_shutdown_is_idempotent();
+  test_shutdown_from_completion_does_not_self_join();
   std::cout << "All orchestration tests passed\n";
   return EXIT_SUCCESS;
 }

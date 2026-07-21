@@ -22,3 +22,4 @@ Process lifecycle and local client configuration remain simple, and the initial
 network attack surface is absent. Remote clients are out of scope. Concurrent work
 must send completed responses through the single writer instead of writing directly
 from worker threads.
+

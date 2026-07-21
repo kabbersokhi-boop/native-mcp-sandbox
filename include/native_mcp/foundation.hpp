@@ -31,3 +31,4 @@ struct ResourceBudget final {
 [[nodiscard]] std::string_view project_version() noexcept;
 
 }  // namespace native_mcp
+

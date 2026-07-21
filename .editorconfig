@@ -13,3 +13,4 @@ indent_size = 2
 [{CMakeLists.txt,*.cmake,*.md,*.yml,*.yaml,json}]
 indent_style = space
 indent_size = 2
+
