@@ -1,27 +1,31 @@
-# ADR 0003: Bounded defaults for modest Linux hosts
+# ADR 0003: Bounded defaults for modest Linux computers
 
 - Status: Accepted
 - Date: 2026-07-18
 
 ## Context
 
-The primary development machine has 8 GB of RAM. Agent inputs and inspected files
-can be unexpectedly large, and unrestricted concurrency can turn valid requests into
-denial of service.
+The primary development computer has 8 GB of RAM.
+Agent input and inspected files can be unexpectedly large.
+Unrestricted concurrency can cause denial of service.
 
 ## Decision
 
-The server will use bounded queues, fixed worker counts, request and response byte
-limits, deadlines, and streaming analysis. The initial defaults are two workers, a
-16-item pending queue, 1 MiB request and response limits, and a 30-second operation
-deadline. Configuration values will also have hard upper bounds.
+Use bounded queues, fixed worker counts, byte limits, deadlines, and streaming analysis.
+Use these initial defaults:
 
-Build presets use two jobs. Large benchmarks, extended fuzzing, and expensive
-analysis datasets will be opt-in.
+- two worker threads
+- 16 unfinished calls
+- 1 MiB request limit
+- 1 MiB response limit
+- 30-second operation deadline
+
+Give each configurable value a hard upper limit.
+Use two build jobs in the CMake presets.
+Make large benchmarks and long fuzz campaigns optional.
 
 ## Consequences
 
-The project remains comfortable to build and demonstrate on modest hardware. Some
-workloads will be rejected or truncated. Results must explicitly report truncation
-so an agent does not mistake partial evidence for a complete scan.
-
+The project can build and run on modest hardware.
+The server rejects or truncates some workloads.
+A result must report truncation so that a client does not treat partial evidence as complete evidence.

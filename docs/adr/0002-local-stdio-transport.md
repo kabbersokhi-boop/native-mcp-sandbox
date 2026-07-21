@@ -5,21 +5,21 @@
 
 ## Context
 
-MCP can be transported in different ways. The initial use case is a local client
-launching a local analysis process. A network listener would add authentication,
-port exposure, lifecycle, and deployment concerns unrelated to the first use case.
+MCP supports different transports.
+The first use case starts a local analysis process from a local client.
+A network listener would add authentication, port exposure, lifecycle, and deployment work.
+That work is not necessary for the first use case.
 
 ## Decision
 
-The first server transport will use JSON-RPC-compatible MCP messages over standard
-input and standard output. Standard output will be owned by one response writer.
-All diagnostics will go to standard error. No listening network socket will be
-opened.
+Use JSON-RPC-compatible MCP messages on standard input and standard output.
+Use one serialized writer for standard output.
+Write diagnostics to standard error.
+Do not open a listening network socket.
 
 ## Consequences
 
-Process lifecycle and local client configuration remain simple, and the initial
-network attack surface is absent. Remote clients are out of scope. Concurrent work
-must send completed responses through the single writer instead of writing directly
-from worker threads.
-
+The process lifecycle stays simple.
+The initial network attack surface is absent.
+Remote clients are not in scope.
+Worker threads must send responses through the serialized writer.
