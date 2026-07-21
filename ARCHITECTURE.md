@@ -1,142 +1,221 @@
 # Architecture
 
-## Current boundary
+## System boundary
 
-Phase 7 preserves the four Phase 6 read-only tools and the bounded two-worker execution
-model. It adds parser preflight, native fuzz targets, sanitizer modes, and security
-regressions without adding host authority. Host access still exists only when the
-operator supplies a trusted runtime policy:
+Release `v0.8.0` provides four read-only MCP tools.
+The server enables a tool only when the operator supplies a trusted runtime policy.
 
-- `logs.search` — bounded literal matching in one approved regular file;
-- `logs.tail` — bounded previews of final logical lines;
-- `elf.inspect` — bounded structural inspection of one approved ELF file; and
-- `proc.memory` — bounded aggregate counters for one named same-UID process.
+The tools are:
 
-With no policy configuration the server advertises no tools. Phase 7 adds no new host
-data source, filesystem mutation, process control, shell execution, networking, or MCP
-task execution.
+- `logs.search`
+- `logs.tail`
+- `elf.inspect`
+- `proc.memory`
 
-## Protocol and work path
+The server exposes no tools when it has no runtime policy.
+The server does not add these capabilities:
 
-1. The main thread reads one byte-bounded JSON-RPC line from stdin.
-2. A SAX preflight validates JSON syntax, duplicate keys, nesting depth, and token count
-   before DOM construction.
-3. The reader validates the MCP lifecycle and closed request envelope.
-4. Immediate lifecycle, discovery, and protocol responses remain on the reader path.
-5. A valid `tools/call` reserves one slot in the bounded outstanding-work set.
-6. A small C++20 coroutine suspends and places its handle in pre-reserved queue storage.
-7. One of two worker threads resumes the coroutine and runs the existing policy-gated tool.
-8. The analyzer cooperatively checks cancellation and its steady-clock deadline.
-9. A single mutex-protected writer emits a complete bounded response line.
-10. `notifications/cancelled` requests stop for matching in-flight work and suppresses
-    its normal response.
+- filesystem changes
+- process control
+- raw process memory
+- shell execution
+- networking
+- MCP tasks
 
-Tool responses may complete out of request order. JSON-RPC IDs preserve correlation.
-Lifecycle state remains owned by the stdin reader thread; workers never mutate it.
+Phase 8 will add a demonstration client.
+The client will use the existing tools only.
+It will not change the server boundary.
 
-## JSON safety gate
+## Protocol path
 
-`preflight_json` uses nlohmann/json's SAX interface and does not construct a DOM. It
-counts every scalar, container, and object key; tracks container depth; and stores object
-keys only long enough to reject duplicates in the same object.
+The server processes a request in this sequence:
 
-The protocol path permits:
+1. The main thread reads one size-limited JSON-RPC line from standard input.
+2. The SAX preflight checks JSON syntax, duplicate keys, depth, and token count.
+3. The reader checks the MCP lifecycle and the closed request schema.
+4. The reader writes immediate protocol and discovery responses.
+5. A valid `tools/call` reserves one slot in the unfinished-work set.
+6. A C++20 coroutine suspends and puts its handle in reserved queue storage.
+7. One worker resumes the coroutine.
+8. The selected tool uses the applicable policy gate.
+9. The analyzer checks cancellation and the deadline at bounded points.
+10. The serialized writer writes one complete response line.
 
-- at most 64 nested arrays or objects; and
-- at most 32,768 SAX tokens.
+A tool response can finish before an earlier tool response.
+The JSON-RPC ID identifies the applicable request.
+Worker threads do not change the MCP lifecycle state.
 
-Runtime-policy parsing permits:
+## JSON preflight
 
-- at most 32 nested arrays or objects; and
-- at most 4,096 tokens.
+`preflight_json` uses the nlohmann/json SAX interface.
+It does not construct a DOM.
 
-Existing 1 MiB protocol and 64 KiB configuration byte limits remain in force. Inputs that
-pass preflight are parsed into the existing DOM and then validated against closed schemas.
-The double parse trades bounded CPU for clearer resource and ambiguity controls.
+The preflight counts these items:
 
-## Bounded orchestration
+- scalar values
+- arrays
+- objects
+- object keys
 
-The conservative resource budget fixes:
+It keeps object keys only until the applicable object closes.
+It rejects a duplicate key in the same object.
 
-- 16 accepted but unfinished tool calls, including running work;
-- two worker threads;
-- a 30-second steady-clock deadline per accepted tool call;
-- 1 MiB request and response limits; and
-- 16 tool submissions per one-second rate-limit window.
+Protocol JSON has these limits:
 
-When the outstanding-work limit is full, a new tool call receives a bounded
-`server_busy` execution error. A duplicate in-flight JSON-RPC ID receives
-`duplicate_request_id`. Equal signed and unsigned non-negative numeric IDs share one
-canonical key. String IDs remain distinct from numbers. The server does not grow an
-unbounded queue and does not create one thread per request.
+- 64 nested containers
+- 32,768 tokens
+- 1 MiB of input
 
-The coroutine frame is used only to bridge request admission to a fixed worker pool.
-Coroutine handles are stored in a vector whose capacity is reserved at scheduler
-construction, avoiding queue allocation from the suspension callback.
+Runtime-policy JSON has these limits:
 
-Worker creation is exception safe. If a later thread cannot be created, the constructor
-marks the partial pool as stopping, wakes and joins earlier workers, and then propagates
-the exception. Worker-originated shutdown closes admission and returns without waiting
-or joining. A later non-worker shutdown drains all accepted work, serializes join
-ownership, and joins every worker. Deterministic regressions cover queued work behind a
-callback shutdown and simultaneous callback shutdown from two workers.
+- 32 nested containers
+- 4,096 tokens
+- 64 KiB of input
+
+The normal DOM parser runs after the preflight.
+Closed schema validation runs after DOM construction.
+This double parse uses bounded CPU to reduce ambiguity and resource risk.
+
+## Work control
+
+The scheduler has these fixed limits:
+
+- 16 unfinished tool calls
+- two worker threads
+- a 30-second deadline for each accepted call
+- 16 submissions in one second
+- 1 MiB for each request and response
+
+The unfinished-work limit includes queued and running work.
+The server returns `server_busy` when the limit is full.
+The server rejects a duplicate in-flight request ID.
+
+The scheduler uses one canonical key for equal non-negative signed and unsigned numeric IDs.
+A string ID stays different from a numeric ID.
+
+The scheduler reserves queue capacity during construction.
+A suspension callback does not allocate queue storage.
+The server does not create one thread for each request.
+
+Worker construction is exception-safe.
+If worker creation fails, the constructor stops and joins each worker that already started.
+Then the constructor propagates the exception.
+
+A worker callback can request shutdown.
+This request closes admission and returns without a wait or a join.
+A non-worker shutdown drains accepted work and joins all workers.
+The join operation has one owner.
 
 ## Cancellation and deadlines
 
-MCP `notifications/cancelled` is accepted only as a notification with a valid
-`requestId`. Unknown or already-completed IDs are ignored. A matched cancellation:
+The server accepts `notifications/cancelled` only as a notification.
+The notification must contain a valid `requestId`.
 
-- sets a `std::stop_source`;
-- causes log, ELF, and proc analyzers to stop at explicit bounded checkpoints; and
-- suppresses the normal tool response.
+For matching work, the server does these actions:
 
-Deadlines use `std::chrono::steady_clock`. Expired work produces a bounded
-`deadline_exceeded` tool error unless a client cancellation already suppressed the
-response. Cancellation is cooperative, not forced thread termination. Blocking kernel
-calls already used by the project remain individually bounded by file type and input
-size; Phase 7 does not claim arbitrary preemption.
+- It requests stop through `std::stop_source`.
+- It suppresses the normal tool response.
+- It lets the analyzer stop at its next bounded check.
 
-## Existing security gates
+The server ignores an unknown or completed request ID.
 
-Filesystem tools still resolve symbolic roots through strict `openat2` by default and
-accept only pinned bounded regular files. Process observation still accepts only
-operator-defined aliases, enforces the server effective UID, retains `/proc/<pid>`, and
-requires pidfd pinning in strict mode. Compatibility backends remain explicit opt-in and
-retain their documented limitations.
+Deadlines use `std::chrono::steady_clock`.
+The server returns `deadline_exceeded` when work expires.
+A prior client cancellation keeps response suppression in control.
 
-## Shutdown and output
+Cancellation is cooperative.
+The server does not forcibly terminate a worker.
+It does not claim hard real-time interruption of an arbitrary system call.
 
-EOF drains already accepted work before joining workers. New submissions stop before
-shutdown begins. Protocol writes are serialized under one mutex and contain complete
-JSON-RPC lines only. Generic diagnostics use stderr and do not echo request, file, or
-process contents.
+## Filesystem boundary
 
-## Assurance architecture
+Filesystem tools accept a root name and a relative path.
+The client cannot supply an absolute path.
 
-The `native_mcp_fuzz_support` library centralizes invariants for five surfaces:
+Strict mode uses `openat2` with these controls:
 
-- protocol and JSON safety;
-- runtime-policy parsing;
-- bounded ELF inspection;
-- streaming log search and tail; and
-- pure parsing of bounded `stat`, `status`, `statm`, and `smaps_rollup` bytes.
+- `RESOLVE_BENEATH`
+- `RESOLVE_NO_SYMLINKS`
+- `RESOLVE_NO_MAGICLINKS`
+- `RESOLVE_NO_XDEV`
 
-A deterministic mutation executable invokes these invariants in ordinary CTest, which
-keeps adversarial coverage available under GCC, Clang, and sanitizers. Optional Clang
-libFuzzer entry points reuse exactly the same functions for coverage-guided exploration.
-The process-parser surface accepts only supplied bytes and never opens host procfs.
-Curated corpora and dictionaries live in `fuzz/`; generated crash artifacts live under
-`build/` until they are minimized and deliberately promoted to regression inputs.
+The policy checks the file type, access mode, and size.
+It keeps the accepted inode through an owned descriptor.
 
-Concurrency regressions are separate from byte fuzzing. They repeat admission,
-cancellation, deadline, exception, and simultaneous-shutdown scenarios and run in a
-focused ThreadSanitizer build. The project uses native Linux execution; no container
-runtime is part of the architecture.
+The compatibility descriptor walk is an explicit option.
+It cannot detect every bind-mount boundary.
 
-Phase 7 release assurance completed on Ubuntu 24.04 against source head
-`df576168fd44561254736a60c45188333bd1bc50`: two independent 100,000-iteration
-deterministic campaigns, repeated TSan scheduler tests, strict `openat2`/pidfd and real
-AF_UNIX/FIFO integration, and five parallel 600-second libFuzzer campaigns. The five
-coverage-guided campaigns executed 61,925,751 inputs in total without a crash, sanitizer
-finding, timeout, or generated crash artifact. These results are evidence for the tested
-build and inputs, not a proof of complete correctness or security.
+## Process boundary
+
+The operator configures each process target.
+The MCP client selects a process name only.
+The client cannot supply a raw PID.
+
+The policy requires the same effective UID.
+It keeps the `/proc/<pid>` directory descriptor.
+It records process start time.
+Strict mode also requires a pidfd.
+
+The tool reads only bounded aggregate data from these files:
+
+- `status`
+- `statm`
+- optional `smaps_rollup`
+
+The tool does not read process memory, maps, command lines, environments, or file descriptors.
+It verifies process identity before and after an observation.
+
+## Output and shutdown
+
+EOF stops new admission.
+The server drains accepted work before it joins workers.
+
+One mutex protects the protocol writer.
+Standard output contains complete JSON-RPC lines only.
+Standard error contains generic diagnostics.
+Diagnostics do not echo request, file, or process data.
+
+## Assurance design
+
+`native_mcp_fuzz_support` contains shared invariants for these surfaces:
+
+- protocol and JSON safety
+- runtime-policy parsing
+- ELF analysis
+- log analysis
+- bounded proc-text parsing
+
+The deterministic mutation runner uses these invariants in normal CTest builds.
+The optional Clang libFuzzer targets use the same invariants.
+The proc parser fuzz target accepts supplied bytes only.
+It does not open host procfs.
+
+Curated corpora and dictionaries are in `fuzz/`.
+Generated artifacts stay under `build/` until review and minimization.
+
+Concurrency tests are separate from byte fuzzing.
+They test admission, cancellation, deadlines, callback failures, and shutdown races.
+A focused ThreadSanitizer build runs these tests.
+
+The project runs directly on Linux.
+It does not require a container runtime.
+
+## Recorded Phase 7 evidence
+
+Phase 7 assurance used Ubuntu 24.04.
+It tested source head `df576168fd44561254736a60c45188333bd1bc50`.
+
+The tests included:
+
+- two deterministic campaigns with 100,000 iterations each
+- 50 ThreadSanitizer unit repetitions
+- 25 ThreadSanitizer stress repetitions
+- strict `openat2` and pidfd checks
+- 50 AF_UNIX and FIFO policy repetitions
+- 20 configured standard-I/O integration repetitions
+- five libFuzzer campaigns of 600 seconds each
+
+The libFuzzer campaigns executed 61,925,751 inputs.
+The runs found no crash, sanitizer finding, timeout, or crash artifact.
+This evidence applies to the tested build and inputs only.
+It is not proof of complete correctness or security.
