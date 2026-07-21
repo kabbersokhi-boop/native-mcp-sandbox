@@ -1,55 +1,79 @@
-# Native fuzzing and security-regression workflow
+# Native fuzzing and security regression tests
 
-Phase 7 treats fuzzing as reproducible evidence, not a security proof. Record the exact
-commit, compiler, sanitizer versions, kernel, command, duration, seed corpus, and any
-resource-limit changes when reporting a campaign.
+Fuzzing gives evidence for one tested configuration.
+It does not prove that the implementation is secure.
 
-## Surfaces
+For each campaign, record these items:
 
-The shared harnesses exercise five independent boundaries:
+- commit
+- compiler and version
+- sanitizer and version
+- kernel
+- command
+- duration
+- seed corpus
+- changed resource limits
 
-1. newline-delimited JSON-RPC and MCP dispatch, including bounded JSON preflight;
-2. schema-v1 and schema-v2 runtime-policy parsing;
-3. bounded ELF32/ELF64 structural inspection from an unlinked temporary regular file;
-4. streaming log search and tail from an unlinked temporary regular file; and
-5. pure parsing of supplied `stat`, `status`, `statm`, and `smaps_rollup` bytes.
+## Test surfaces
 
-The process-parser harness never opens `/proc`, discovers a PID, or broadens server
-capabilities. Live pidfd and `openat2` behavior remains covered by strict integration
-tests rather than byte fuzzing.
+The shared harness tests five boundaries:
 
-## Fast deterministic pass
+1. JSON-RPC and MCP dispatch, including JSON preflight.
+2. Runtime-policy schema version 1 and version 2.
+3. Bounded ELF32 and ELF64 analysis.
+4. Streaming log search and tail.
+5. Pure parsing of supplied `stat`, `status`, `statm`, and `smaps_rollup` data.
 
-The deterministic runner is available in every normal test build and uses a fixed
-xorshift mutation stream:
+The proc parser harness does not open `/proc`.
+It does not discover a PID.
+It does not add a server capability.
+
+Strict `openat2` and pidfd behavior use integration tests.
+They do not use byte fuzzing.
+
+## Run a deterministic campaign
+
+Configure and build the sanitizer preset:
 
 ```bash
 cmake --preset sanitizers
 cmake --build --preset sanitizers
+```
+
+Run the deterministic mutation test:
+
+```bash
 ASAN_OPTIONS=detect_leaks=1:abort_on_error=1 \
 UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 \
 ./build/sanitizers/native_mcp_fuzz_smoke \
   --iterations 20000 --seed 828927513140
 ```
 
-A failure must be reproducible with the printed iteration count and seed before it is
-triaged as a project defect.
+The runner uses a fixed xorshift mutation stream.
+Before defect triage, reproduce the failure with the printed seed and iteration.
 
-## Coverage-guided campaigns
+## Run coverage-guided campaigns
 
-Clang and sanitizer instrumentation are mandatory for the optional libFuzzer targets:
+Use Clang with ASan, UBSan, and libFuzzer.
+Run all targets with this command:
 
 ```bash
 NMS_FUZZ_SECONDS=300 ./scripts/run_fuzz_campaign.sh
 ```
 
-The script first configures and builds with warnings as errors, ASan, UBSan, and
-libFuzzer, then runs each curated corpus for the selected bounded duration. Override the
-build and artifact locations with `NMS_FUZZ_BUILD_DIR` and
-`NMS_FUZZ_ARTIFACT_DIR`. Generated artifacts remain under `build/` by default.
+The script does these actions:
 
-For one target, copy the curated seed corpus first because libFuzzer appends newly
-discovered units to the corpus directory:
+1. It configures the fuzz build.
+2. It treats warnings as errors.
+3. It builds with two jobs.
+4. It copies each curated corpus.
+5. It runs each target for the selected time.
+6. It writes generated artifacts under `build/` by default.
+
+Set `NMS_FUZZ_BUILD_DIR` to change the build directory.
+Set `NMS_FUZZ_ARTIFACT_DIR` to change the artifact directory.
+
+To run one protocol target, use these commands:
 
 ```bash
 rm -rf build/fuzz-corpus/protocol
@@ -64,83 +88,100 @@ cp -a fuzz/corpus/protocol/. build/fuzz-corpus/protocol/
   -artifact_prefix=build/fuzz-artifacts/protocol/
 ```
 
-## Triage and minimization
+libFuzzer adds new units to the corpus directory.
+Do not run a campaign directly in the committed corpus directory.
 
-Do not commit an opaque crash file. For each finding:
+## Triage a finding
 
-1. preserve the original artifact outside the source tree;
-2. rerun the exact target with the artifact as its sole input;
-3. confirm the finding under the relevant sanitizer;
-4. minimize it with libFuzzer's `-minimize_crash=1` or `-merge=1` workflow;
-5. determine whether the invariant, implementation, or harness is wrong;
-6. fix the defect without weakening a security boundary;
-7. add a named deterministic unit or integration regression when practical; and
-8. add the minimized input to the appropriate corpus only when it provides durable
-   coverage not already expressed by the named test.
+Do not commit an opaque crash file.
+Use this procedure:
 
-A report should distinguish a crash, sanitizer finding, timeout, out-of-memory event,
-asserted invariant, and environmental failure. Resource exhaustion caused only by
-raising documented fuzz limits is not automatically a server vulnerability.
+1. Keep the original artifact outside the source tree.
+2. Run the target with the artifact as its only input.
+3. Confirm the finding with the applicable sanitizer.
+4. Minimize the artifact with `-minimize_crash=1` or `-merge=1`.
+5. Identify the defect in the implementation, invariant, or harness.
+6. Correct the defect without a weaker security boundary.
+7. Add a named regression test when possible.
+8. Add the minimized input to a corpus only when it gives new durable coverage.
 
-## Concurrency stress
+Classify the finding correctly.
+Use one of these classifications:
 
-Byte fuzzers do not establish thread safety. Run the dedicated native suite:
+- crash
+- sanitizer finding
+- timeout
+- out-of-memory event
+- invariant failure
+- environmental failure
+
+A resource failure after you increase a documented fuzz limit is not automatically a server vulnerability.
+
+## Run concurrency stress
+
+Byte fuzzing does not prove thread safety.
+Run the native stress script:
 
 ```bash
 NMS_STRESS_ITERATIONS=20000 ./scripts/run_security_stress.sh
 ```
 
-It executes the full leak-enabled ASan/UBSan suite, an extended deterministic mutation
-pass, and focused GCC ThreadSanitizer scheduler tests. ThreadSanitizer and
-AddressSanitizer are separate builds because they cannot be combined reliably in one
-binary.
+The script runs these tests:
 
-## Extended Assurance workflow
+- leak-enabled ASan and UBSan tests
+- an extended deterministic mutation campaign
+- focused GCC ThreadSanitizer scheduler tests
 
-`.github/workflows/extended-assurance.yml` is a manual `workflow_dispatch` release gate.
-It requires an Ubuntu 24.04 runner with working strict `openat2` and pidfd support, then
-runs:
+AddressSanitizer and ThreadSanitizer use separate builds.
+Do not combine them in one binary.
 
-- two independent 100,000-iteration deterministic mutation campaigns;
-- 50 repeated TSan orchestration unit passes and 25 repeated stress passes;
-- 50 real AF_UNIX/FIFO policy passes and 20 configured stdio integration passes; and
-- five parallel 600-second libFuzzer campaigns with corpus replay, final statistics,
-  logs, and crash-artifact upload.
+## Run Extended Assurance
 
-The workflow is manual-only because it is intentionally expensive and is not needed for
-every ordinary pull request.
+`.github/workflows/extended-assurance.yml` is a manual release gate.
+It requires Ubuntu 24.04 with strict `openat2` and pidfd support.
 
-## Phase 7 recorded evidence
+The workflow runs these jobs:
 
-Extended Assurance run `29724493408` completed successfully on Ubuntu 24.04 against
-source head `df576168fd44561254736a60c45188333bd1bc50`.
+- two deterministic campaigns with 100,000 iterations each
+- 50 ThreadSanitizer unit repetitions
+- 25 ThreadSanitizer stress repetitions
+- 50 real AF_UNIX and FIFO policy repetitions
+- 20 configured standard-I/O integration repetitions
+- five parallel libFuzzer campaigns of 600 seconds each
 
-The two deterministic seeds completed 100,000 iterations each. The five coverage-guided
-campaigns completed:
+The workflow uploads logs and crash directories.
+The workflow is manual because it uses substantial runner time.
 
-- protocol: 3,035,825 executions;
-- runtime configuration: 9,602,233 executions;
-- ELF: 11,820,395 executions;
-- log analysis: 3,000,495 executions; and
-- process parsing: 34,466,803 executions.
+## Phase 7 evidence
 
-The total was 61,925,751 executions. No crash, sanitizer finding, timeout, or generated
-crash artifact was observed. TSan and strict native integration also completed without a
-report. GitHub Actions retained separate evidence artifacts for deterministic mutation,
-TSan, strict integration, and each fuzzer target.
+Extended Assurance run `29724493408` completed on Ubuntu 24.04.
+It tested source head `df576168fd44561254736a60c45188333bd1bc50`.
+
+The deterministic seeds completed 100,000 iterations each.
+The libFuzzer targets completed these execution counts:
+
+- protocol: 3,035,825
+- runtime policy: 9,602,233
+- ELF: 11,820,395
+- log: 3,000,495
+- process parser: 34,466,803
+
+The total was 61,925,751 executions.
+The recorded jobs found no crash, sanitizer finding, timeout, or crash artifact.
+The ThreadSanitizer and strict integration jobs also completed without a report.
 
 ## Release gate
 
-A Phase 7 release candidate is ready only when:
+Before a release, verify these conditions:
 
-- GCC Debug and Clang Release pass with warnings as errors;
-- ASan/UBSan passes with leak detection enabled on a supported native Linux system;
-- focused ThreadSanitizer tests complete without a report;
-- every curated corpus replays successfully;
-- bounded coverage-guided campaigns complete for all five targets;
-- strict `openat2` and pidfd integration passes without compatibility flags; and
-- all discovered failures are either fixed and retained as regressions or explicitly
-  documented as environmental and independently reproduced.
+- GCC Debug passes with warnings as errors.
+- Clang Release passes with warnings as errors.
+- ASan and UBSan pass with leak detection.
+- Focused ThreadSanitizer tests pass.
+- Each curated corpus replays successfully.
+- Each coverage-guided target completes its campaign.
+- Strict `openat2` and pidfd integration passes without compatibility flags.
+- Each confirmed finding has a correction and a regression test.
 
-A clean campaign means only that no covered failure was observed under the recorded
-conditions.
+A clean campaign means that the tested paths had no observed failure.
+It does not mean that no defect exists.

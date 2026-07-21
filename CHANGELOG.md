@@ -1,167 +1,171 @@
 # Changelog
 
-All notable changes are recorded here. The project follows semantic versioning after
-the first stable release; pre-1.0 versions may change interfaces.
+This file records important project changes.
+The project uses semantic versioning after the first stable release.
+Before version 1.0, an interface can change.
 
-## [Unreleased]
-
-## [0.8.0] - 2026-07-21
-
-### Added
-
-- Bounded SAX JSON preflight for syntax, nesting, token count, and duplicate keys.
-- Five optional Clang libFuzzer targets for protocol, runtime policy, ELF, log, and bounded `/proc` parser paths.
-- Deterministic mutation smoke runner shared by GCC, Clang, CTest, and sanitizer builds.
-- Curated fuzz corpora, target-specific dictionaries, and native campaign scripts.
-- Dedicated ThreadSanitizer build mode and repeated orchestration stress tests.
-- Security regressions for hostile JSON, oversized lines, canonical numeric IDs,
-  cancellation/deadline precedence, callback exceptions, and concurrent shutdown.
-- Synthetic `/proc` parser unit tests for identity, status, page counters, aggregate rollups, and overflow rejection.
-- ADR 0011 and a campaign guide documenting native fuzzing and regression policy.
-- Manual Extended Assurance workflow with strict native integration, repeated TSan,
-  dual deterministic campaigns, and five parallel coverage-guided campaigns.
+## Unreleased
 
 ### Changed
 
-- Project version advanced to `0.8.0`.
-- Runtime-policy JSON is limited to 32 nested containers and 4,096 tokens.
-- Protocol JSON is limited to 64 nested containers and 32,768 tokens.
-- Equal signed and unsigned non-negative JSON-RPC IDs share one in-flight identity.
-- Scheduler construction now joins already-created workers if later thread creation fails.
-- Worker-originated shutdown closes admission without waiting or joining; a later
-  non-worker shutdown drains accepted work and joins every worker.
-- CI adds leak-enabled ASan/UBSan fuzz smoke, focused ThreadSanitizer, and bounded
-  libFuzzer jobs.
+- Rewrote the active technical documentation in an ASD-STE100 Issue 9 aligned style.
+- Added `docs/WRITING_STYLE.md` for future documentation changes.
+- Kept legal, license, and third-party notice text unchanged.
+
+## 0.8.0 - 2026-07-21
+
+### Added
+
+- Added bounded SAX JSON preflight for syntax, depth, token count, and duplicate keys.
+- Added five optional Clang libFuzzer targets for protocol, runtime policy, ELF, log, and proc parser paths.
+- Added one deterministic mutation runner for GCC, Clang, CTest, and sanitizer builds.
+- Added curated corpora, target dictionaries, and native campaign scripts.
+- Added a ThreadSanitizer build mode and repeated scheduler stress tests.
+- Added regressions for hostile JSON, size limits, canonical IDs, cancellation, deadlines, callbacks, and shutdown.
+- Added synthetic proc parser tests for identity, memory counters, page conversion, rollups, and overflow.
+- Added ADR 0011 and the native fuzzing guide.
+- Added the manual Extended Assurance workflow.
+
+### Changed
+
+- Changed the project version to `0.8.0`.
+- Limited runtime-policy JSON to 32 nested containers and 4,096 tokens.
+- Limited protocol JSON to 64 nested containers and 32,768 tokens.
+- Gave equal non-negative signed and unsigned JSON-RPC IDs one in-flight identity.
+- Made scheduler construction join earlier workers after a later worker-creation failure.
+- Made worker-originated shutdown close admission without a wait or a join.
+- Made a non-worker shutdown drain accepted work and join all workers.
+- Added leak-enabled ASan and UBSan fuzz smoke, focused TSan, and bounded libFuzzer CI jobs.
 
 ### Assurance
 
-- Normal GCC, Clang, ASan/UBSan/LSan, TSan, and bounded libFuzzer CI passed.
-- Two fixed-seed deterministic mutation campaigns completed 100,000 iterations each.
-- TSan orchestration unit tests passed 50 repetitions and stress tests passed 25.
-- Strict `openat2`, pidfd, real AF_UNIX/FIFO policy, and configured stdio integration passed.
-- Five 600-second libFuzzer campaigns completed 61,925,751 executions in total without
-  a crash, sanitizer finding, timeout, or generated crash artifact.
+- Normal GCC, Clang, ASan, UBSan, leak, TSan, and bounded libFuzzer CI passed.
+- Two fixed-seed deterministic campaigns completed 100,000 iterations each.
+- TSan unit tests passed 50 repetitions.
+- TSan stress tests passed 25 repetitions.
+- Strict `openat2`, pidfd, AF_UNIX, FIFO, and configured standard-I/O integration passed.
+- Five 600-second libFuzzer campaigns completed 61,925,751 executions.
+- The recorded campaigns found no crash, sanitizer finding, timeout, or crash artifact.
 
-## [0.7.0] - 2026-07-18
+## 0.7.0 - 2026-07-18
 
 ### Added
 
-- Fixed two-thread worker pool and bounded C++20 coroutine scheduling.
-- Sixteen-call outstanding-work cap with explicit backpressure errors.
-- MCP `notifications/cancelled` handling for in-flight tool requests.
-- Cooperative stop contexts in log, ELF, and process analyzers.
-- Thirty-second steady-clock deadlines and bounded timeout errors.
-- Serialized multi-threaded protocol output and EOF draining.
-- Scheduler tests for parallelism, saturation, duplicate IDs, cancellation, and deadlines.
-- ADR 0010 documenting the orchestration boundary.
+- Added a fixed two-thread worker pool and bounded C++20 coroutine scheduling.
+- Added a 16-call unfinished-work limit with explicit backpressure errors.
+- Added MCP `notifications/cancelled` handling.
+- Added cooperative stop checks to log, ELF, and process analyzers.
+- Added 30-second steady-clock deadlines.
+- Added serialized multi-threaded output and EOF draining.
+- Added scheduler tests for parallel work, saturation, duplicate IDs, cancellation, and deadlines.
+- Added ADR 0010.
 
 ### Changed
 
-- Project version advanced to `0.7.0`.
-- Configured tool calls may complete out of request order and remain correlated by ID.
-- MCP task execution remains explicitly forbidden.
+- Changed the project version to `0.7.0`.
+- Permitted configured tool calls to finish out of request order.
+- Kept MCP task execution forbidden.
 
-## [0.6.0] - 2026-07-18
+## 0.6.0 - 2026-07-18
 
 ### Added
 
-- Version-2 runtime policy with explicit symbolic process targets.
-- Policy-gated `proc.memory` MCP tool for bounded aggregate `/proc` counters.
-- Same-effective-UID enforcement and startup process identity capture.
-- Strict pidfd pinning with an explicit old-kernel compatibility option.
-- Pinned `/proc/<pid>` directory and start-time revalidation against PID reuse.
-- Bounded `status`, `statm`, and optional `smaps_rollup` parsing.
-- Process lifecycle, runtime-config, protocol, and real-process regression tests.
-- ADR 0009 documenting the bounded process-memory observation boundary.
+- Added runtime-policy schema version 2 with named process targets.
+- Added the policy-gated `proc.memory` tool.
+- Added same-effective-UID checks and startup process identity capture.
+- Added strict pidfd pinning and an explicit old-kernel compatibility option.
+- Added retained proc-directory descriptors and start-time checks.
+- Added bounded parsing of `status`, `statm`, and optional `smaps_rollup`.
+- Added process, policy, protocol, and integration tests.
+- Added ADR 0009.
 
 ### Changed
 
-- Project version advanced to `0.6.0`.
-- Tool discovery is now capability-dependent for filesystem and process policies.
-- Phase 4 ELF malformed-input and schema regressions are retained in the cumulative suite.
+- Changed the project version to `0.6.0`.
+- Made tool discovery depend on the configured capabilities.
+- Kept the Phase 4 ELF regressions in the cumulative test suite.
 
-## [0.5.0] - 2026-07-18
+## 0.5.0 - 2026-07-18
 
 ### Added
 
-- Policy-gated `elf.inspect` MCP tool for bounded ELF32 and ELF64 metadata.
-- Little- and big-endian ELF parsing without executing or memory-mapping targets.
-- Bounded interpreter, dynamic dependency, GNU build-ID, and segment inspection.
-- Structural stack, RELRO, PIE, and writable-executable segment indicators.
-- Overflow-checked file-range validation and a 1 MiB metadata-read ceiling.
-- Deterministic synthetic and real-process ELF tests.
-- ADR 0008 documenting the safe ELF inspection boundary.
+- Added the policy-gated `elf.inspect` tool.
+- Added little-endian and big-endian ELF32 and ELF64 parsing.
+- Added bounded interpreter, dependency, build-ID, and segment analysis.
+- Added stack, RELRO, PIE, and writable-executable segment indicators.
+- Added checked file-range arithmetic and a 1 MiB metadata-read limit.
+- Added synthetic and real-process ELF tests.
+- Added ADR 0008.
 
 ### Changed
 
-- Project version advanced to `0.5.0`.
-- The generic tool service now advertises log and ELF tools together.
-- Third-party notices cover Phases 1 through 4.
+- Changed the project version to `0.5.0`.
+- Made the tool service advertise log and ELF tools together.
+- Updated the third-party notices for Phases 1 through 4.
 
-## [0.4.0] - 2026-07-18
+## 0.4.0 - 2026-07-18
 
 ### Added
 
-- Configured MCP exposure of `logs.search` and `logs.tail`.
-- Streaming literal matching across read-chunk boundaries.
-- Bounded final-line retention and escaped binary previews.
-- Closed tool schemas, success output schemas, and read-only annotations.
-- Fixed observed-size read budgets and file-change disclosure.
-- Per-process tool-call burst limiting.
-- Unit and real-process tests for configured tool execution.
-- ADR 0007 documenting the Phase 3 log-tool boundary.
+- Added configured MCP access to `logs.search` and `logs.tail`.
+- Added literal matching across read-chunk boundaries.
+- Added bounded final-line retention and escaped binary previews.
+- Added closed tool schemas and read-only annotations.
+- Added fixed read budgets and file-change reporting.
+- Added a tool-call burst limit.
+- Added unit and process integration tests.
+- Added ADR 0007.
 
 ### Changed
 
-- Project version advanced to `0.4.0`.
-- Successful structured tool results conform to advertised output schemas.
-- Compatibility descriptor walking classifies intermediate symlinks as resolution denials.
+- Changed the project version to `0.4.0`.
+- Made successful tool results match the advertised output schemas.
+- Made the compatibility walk report intermediate symbolic links as resolution denials.
 
-## [0.3.0] - 2026-07-18
+## 0.3.0 - 2026-07-18
 
 ### Added
 
-- Bounded schema-v1 filesystem policy configuration parser.
-- Named read-only roots with owned directory descriptors.
-- Strict Linux `openat2` containment for traversal, symlink, magic-link, and mount
-  crossing denial.
-- Regular-file, read-permission, and per-root file-size enforcement.
-- Pinned descriptor reopening through `/proc/self/fd`.
-- Explicit opt-in descriptor-walk compatibility mode for old kernels.
-- Adversarial filesystem policy unit tests.
-- ADR 0006 documenting the descriptor-based security boundary.
+- Added a bounded schema-version-1 filesystem policy parser.
+- Added named read-only roots with owned directory descriptors.
+- Added strict `openat2` containment.
+- Added denial of traversal, symbolic links, magic links, and mount crossings.
+- Added regular-file, read-permission, and file-size checks.
+- Added pinned descriptor reopening through `/proc/self/fd`.
+- Added an explicit descriptor-walk compatibility mode.
+- Added adversarial filesystem policy tests.
+- Added ADR 0006.
 
 ### Changed
 
-- Project version advanced to `0.3.0`.
-- Documentation now distinguishes the implemented policy library from future MCP tools.
+- Changed the project version to `0.3.0`.
+- Clarified the difference between the policy library and later MCP tools.
 
-## [0.2.0] - 2026-07-18
+## 0.2.0 - 2026-07-18
 
 ### Added
 
-- Bounded newline-delimited JSON-RPC 2.0 transport over stdin/stdout.
-- MCP lifecycle support for protocol revision `2025-11-25`.
-- `initialize`, `notifications/initialized`, `ping`, and empty `tools/list` handling.
-- Structured parse, request, method, parameter, lifecycle, and size errors.
-- Protocol unit tests and deterministic process-level stdio coverage.
-- System nlohmann/json dependency documentation and attribution.
-- ADRs for the JSON dependency and synchronous protocol baseline.
+- Added bounded newline-delimited JSON-RPC 2.0 on standard input and standard output.
+- Added MCP lifecycle support for revision `2025-11-25`.
+- Added `initialize`, `notifications/initialized`, `ping`, and empty `tools/list` handling.
+- Added structured protocol and size errors.
+- Added protocol unit tests and process-level standard-I/O tests.
+- Added nlohmann/json dependency documentation and attribution.
+- Added ADRs for the JSON dependency and the synchronous protocol baseline.
 
 ### Changed
 
-- Project version advanced to `0.2.0`.
-- Documentation distinguishes the protocol server from future host tools.
-- CI installs nlohmann/json 3.11 or newer.
+- Changed the project version to `0.2.0`.
+- Clarified the difference between the protocol server and later host tools.
+- Made CI install nlohmann/json 3.11 or newer.
 
-## [0.1.0] - 2026-07-18
+## 0.1.0 - 2026-07-18
 
 ### Added
 
-- C++20 CMake project and low-memory build presets.
-- Foundation executable with version and self-check commands.
-- Validated conservative resource-budget model.
-- Unit and command-level CTest coverage.
-- GCC, Clang, and sanitizer CI jobs.
-- Public architecture, threat model, security, contribution, and roadmap documents.
-- ADRs for read-only scope, local stdio transport, and bounded defaults.
+- Added the C++20 CMake project and low-memory presets.
+- Added the foundation executable with version and self-check commands.
+- Added the resource-budget model and validation.
+- Added unit and command-level CTest tests.
+- Added GCC, Clang, and sanitizer CI jobs.
+- Added public architecture, threat model, security, contribution, roadmap, and ADR documents.
