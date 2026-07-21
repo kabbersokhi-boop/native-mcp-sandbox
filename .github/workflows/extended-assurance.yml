@@ -2,19 +2,16 @@ name: Extended Assurance
 
 on:
   workflow_dispatch:
-  pull_request:
-    types: [synchronize, reopened]
 
 permissions:
   contents: read
 
 concurrency:
-  group: extended-assurance-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  group: extended-assurance-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   deterministic-mutation:
-    if: github.event_name == 'workflow_dispatch' || github.head_ref == 'phase/7-fuzzing-security-assurance'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -41,7 +38,6 @@ jobs:
           path: deterministic-seed-*.log
 
   scheduler-tsan:
-    if: github.event_name == 'workflow_dispatch' || github.head_ref == 'phase/7-fuzzing-security-assurance'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -67,7 +63,6 @@ jobs:
           path: tsan-*.log
 
   strict-integration:
-    if: github.event_name == 'workflow_dispatch' || github.head_ref == 'phase/7-fuzzing-security-assurance'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -121,7 +116,6 @@ jobs:
             self-check.log
 
   libfuzzer-campaign:
-    if: github.event_name == 'workflow_dispatch' || github.head_ref == 'phase/7-fuzzing-security-assurance'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     strategy:
