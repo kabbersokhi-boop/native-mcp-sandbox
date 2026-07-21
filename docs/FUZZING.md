@@ -95,16 +95,50 @@ pass, and focused GCC ThreadSanitizer scheduler tests. ThreadSanitizer and
 AddressSanitizer are separate builds because they cannot be combined reliably in one
 binary.
 
+## Extended Assurance workflow
+
+`.github/workflows/extended-assurance.yml` is a manual `workflow_dispatch` release gate.
+It requires an Ubuntu 24.04 runner with working strict `openat2` and pidfd support, then
+runs:
+
+- two independent 100,000-iteration deterministic mutation campaigns;
+- 50 repeated TSan orchestration unit passes and 25 repeated stress passes;
+- 50 real AF_UNIX/FIFO policy passes and 20 configured stdio integration passes; and
+- five parallel 600-second libFuzzer campaigns with corpus replay, final statistics,
+  logs, and crash-artifact upload.
+
+The workflow is manual-only because it is intentionally expensive and is not needed for
+every ordinary pull request.
+
+## Phase 7 recorded evidence
+
+Extended Assurance run `29724493408` completed successfully on Ubuntu 24.04 against
+source head `df576168fd44561254736a60c45188333bd1bc50`.
+
+The two deterministic seeds completed 100,000 iterations each. The five coverage-guided
+campaigns completed:
+
+- protocol: 3,035,825 executions;
+- runtime configuration: 9,602,233 executions;
+- ELF: 11,820,395 executions;
+- log analysis: 3,000,495 executions; and
+- process parsing: 34,466,803 executions.
+
+The total was 61,925,751 executions. No crash, sanitizer finding, timeout, or generated
+crash artifact was observed. TSan and strict native integration also completed without a
+report. GitHub Actions retained separate evidence artifacts for deterministic mutation,
+TSan, strict integration, and each fuzzer target.
+
 ## Release gate
 
-A Phase 7 release candidate is not ready until:
+A Phase 7 release candidate is ready only when:
 
 - GCC Debug and Clang Release pass with warnings as errors;
 - ASan/UBSan passes with leak detection enabled on a supported native Linux system;
 - focused ThreadSanitizer tests complete without a report;
 - every curated corpus replays successfully;
 - bounded coverage-guided campaigns complete for all five targets;
-- strict `openat2` and pidfd integration still passes without compatibility flags; and
+- strict `openat2` and pidfd integration passes without compatibility flags; and
 - all discovered failures are either fixed and retained as regressions or explicitly
   documented as environmental and independently reproduced.
 
