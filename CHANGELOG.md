@@ -5,7 +5,7 @@ the first stable release; pre-1.0 versions may change interfaces.
 
 ## [Unreleased]
 
-## [0.8.0] - candidate
+## [0.8.0] - 2026-07-21
 
 ### Added
 
@@ -18,6 +18,8 @@ the first stable release; pre-1.0 versions may change interfaces.
   cancellation/deadline precedence, callback exceptions, and concurrent shutdown.
 - Synthetic `/proc` parser unit tests for identity, status, page counters, aggregate rollups, and overflow rejection.
 - ADR 0011 and a campaign guide documenting native fuzzing and regression policy.
+- Manual Extended Assurance workflow with strict native integration, repeated TSan,
+  dual deterministic campaigns, and five parallel coverage-guided campaigns.
 
 ### Changed
 
@@ -26,9 +28,19 @@ the first stable release; pre-1.0 versions may change interfaces.
 - Protocol JSON is limited to 64 nested containers and 32,768 tokens.
 - Equal signed and unsigned non-negative JSON-RPC IDs share one in-flight identity.
 - Scheduler construction now joins already-created workers if later thread creation fails.
-- Scheduler shutdown is serialized and safe for simultaneous callers.
+- Worker-originated shutdown closes admission without waiting or joining; a later
+  non-worker shutdown drains accepted work and joins every worker.
 - CI adds leak-enabled ASan/UBSan fuzz smoke, focused ThreadSanitizer, and bounded
   libFuzzer jobs.
+
+### Assurance
+
+- Normal GCC, Clang, ASan/UBSan/LSan, TSan, and bounded libFuzzer CI passed.
+- Two fixed-seed deterministic mutation campaigns completed 100,000 iterations each.
+- TSan orchestration unit tests passed 50 repetitions and stress tests passed 25.
+- Strict `openat2`, pidfd, real AF_UNIX/FIFO policy, and configured stdio integration passed.
+- Five 600-second libFuzzer campaigns completed 61,925,751 executions in total without
+  a crash, sanitizer finding, timeout, or generated crash artifact.
 
 ## [0.7.0] - 2026-07-18
 
@@ -104,7 +116,6 @@ the first stable release; pre-1.0 versions may change interfaces.
 - Project version advanced to `0.4.0`.
 - Successful structured tool results conform to advertised output schemas.
 - Compatibility descriptor walking classifies intermediate symlinks as resolution denials.
-
 
 ## [0.3.0] - 2026-07-18
 
