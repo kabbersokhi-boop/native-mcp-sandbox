@@ -76,8 +76,10 @@ construction, avoiding queue allocation from the suspension callback.
 
 Worker creation is exception safe. If a later thread cannot be created, the constructor
 marks the partial pool as stopping, wakes and joins earlier workers, and then propagates
-the exception. Shutdown has a separate serialization mutex, so simultaneous callers
-cannot race while joining the same worker objects.
+the exception. Worker-originated shutdown closes admission and returns without waiting
+or joining. A later non-worker shutdown drains all accepted work, serializes join
+ownership, and joins every worker. Deterministic regressions cover queued work behind a
+callback shutdown and simultaneous callback shutdown from two workers.
 
 ## Cancellation and deadlines
 
@@ -115,7 +117,7 @@ The `native_mcp_fuzz_support` library centralizes invariants for five surfaces:
 
 - protocol and JSON safety;
 - runtime-policy parsing;
-- bounded ELF inspection; and
+- bounded ELF inspection;
 - streaming log search and tail; and
 - pure parsing of bounded `stat`, `status`, `statm`, and `smaps_rollup` bytes.
 
@@ -130,3 +132,11 @@ Concurrency regressions are separate from byte fuzzing. They repeat admission,
 cancellation, deadline, exception, and simultaneous-shutdown scenarios and run in a
 focused ThreadSanitizer build. The project uses native Linux execution; no container
 runtime is part of the architecture.
+
+Phase 7 release assurance completed on Ubuntu 24.04 against source head
+`df576168fd44561254736a60c45188333bd1bc50`: two independent 100,000-iteration
+deterministic campaigns, repeated TSan scheduler tests, strict `openat2`/pidfd and real
+AF_UNIX/FIFO integration, and five parallel 600-second libFuzzer campaigns. The five
+coverage-guided campaigns executed 61,925,751 inputs in total without a crash, sanitizer
+finding, timeout, or generated crash artifact. These results are evidence for the tested
+build and inputs, not a proof of complete correctness or security.
