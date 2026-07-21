@@ -6,8 +6,10 @@
 - Phase: 7 — Fuzzing, sanitizer depth, and security regression assurance
 - Version: 0.8.0
 - Prepared: 2026-07-18
+- Assurance completed: 2026-07-20
 - Baseline commit: `f591b4b6553c29dc37fbeabd45e25def400c4378`
 - Baseline tag: `v0.7.0`
+- Assured source head: `df576168fd44561254736a60c45188333bd1bc50`
 - Target: native Linux with C++20 GCC and Clang
 - Protocol revision: `2025-11-25`
 
@@ -23,9 +25,26 @@
 - Repeated orchestration stress covering admission, cancellation, deadlines, callbacks, and shutdown.
 - Worker-thread factory fault injection and partial-construction cleanup tests.
 - Canonical in-flight identity for equal signed/unsigned non-negative JSON-RPC IDs.
+- Worker-safe shutdown initiation with deferred non-worker drain and join.
 - Separate ASan/UBSan and ThreadSanitizer build modes and native campaign scripts.
 - CI jobs for deterministic fuzz smoke, focused race testing, and bounded libFuzzer campaigns.
+- Manual Extended Assurance workflow for strict native release evidence.
 - ADR 0011 and `docs/FUZZING.md` with triage, minimization, and release-gate guidance.
+
+## Completed assurance
+
+Extended Assurance run `29724493408` and normal CI passed against source head
+`df576168fd44561254736a60c45188333bd1bc50` on Ubuntu 24.04.
+
+- Two independent deterministic mutation campaigns completed 100,000 iterations each.
+- TSan orchestration unit tests passed 50 repetitions.
+- TSan orchestration stress passed 25 repetitions.
+- Strict `openat2` and pidfd capability probes passed.
+- Real AF_UNIX/FIFO policy tests passed 50 repetitions.
+- Configured stdio integration passed 20 repetitions.
+- Five 600-second libFuzzer campaigns completed 61,925,751 executions in total.
+- No crash, sanitizer finding, timeout, or generated crash artifact was observed.
+- Separate evidence artifacts were uploaded for all eight extended jobs.
 
 ## Preserved boundaries
 
@@ -50,6 +69,7 @@
 .clang-format
 .editorconfig
 .github/workflows/ci.yml
+.github/workflows/extended-assurance.yml
 .gitignore
 ARCHITECTURE.md
 CHANGELOG.md
