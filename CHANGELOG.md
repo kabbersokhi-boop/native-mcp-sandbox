@@ -12,6 +12,13 @@ Before version 1.0, an interface can change.
 - Added `docs/WRITING_STYLE.md` for future documentation changes.
 - Kept legal, license, and third-party notice text unchanged.
 
+### Phase 8 candidate
+
+- Added a deterministic investigation demonstration for version `0.9.0`.
+- Added committed synthetic evidence and canonical JSON and Markdown reports.
+- Added strict standard-I/O, tool-list, response, schema, and report checks.
+- Final CI assurance is pending.
+
 ## 0.8.0 - 2026-07-21
 
 ### Added

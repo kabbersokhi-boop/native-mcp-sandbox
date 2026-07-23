@@ -9,9 +9,18 @@ The server does not read raw process memory.
 ## Project status
 
 Release `v0.8.0` is complete.
-Phase 8 is in development.
-Phase 8 will add a deterministic investigation demonstration.
+Phase 8 is a `0.9.0` candidate.
+Phase 8 adds a deterministic investigation demonstration.
 It will not add a new MCP tool or new host authority.
+
+The Phase 8 demonstration starts the real server through standard input and
+standard output.
+It uses one committed synthetic log fixture.
+It uses a generated non-executable ELF fixture.
+It uses only the four existing tools.
+It writes canonical JSON and Markdown reports.
+The reports contain stable evidence only.
+The demonstration runs in strict mode.
 
 The server exposes no tools when you start it without a runtime policy.
 A trusted runtime policy can enable these tools:
@@ -314,7 +323,7 @@ MCP_INPUT
 Expected standard output:
 
 ```jsonl
-{"id":1,"jsonrpc":"2.0","result":{"capabilities":{"tools":{}},"protocolVersion":"2025-11-25","serverInfo":{"name":"native-mcp-sandbox","version":"0.8.0"}}}
+{"id":1,"jsonrpc":"2.0","result":{"capabilities":{"tools":{}},"protocolVersion":"2025-11-25","serverInfo":{"name":"native-mcp-sandbox","version":"0.9.0"}}}
 {"id":2,"jsonrpc":"2.0","result":{}}
 {"id":3,"jsonrpc":"2.0","result":{"tools":[]}}
 ```
@@ -440,7 +449,7 @@ A clean fuzzing run is not proof of memory safety or correctness.
 6. Phase 5: bounded `/proc` memory observation — complete.
 7. Phase 6: coroutine orchestration, cancellation, and backpressure — complete.
 8. Phase 7: fuzzing, sanitizers, and security regressions — complete.
-9. Phase 8: deterministic agent investigation demonstration — in development.
+9. Phase 8: deterministic agent investigation demonstration — candidate.
 10. Phase 9: reproducible benchmarks and reference comparison — not started.
 11. Phase 10: release hardening and stable tool interface — not started.
 

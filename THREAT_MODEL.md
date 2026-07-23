@@ -78,6 +78,8 @@ The server uses these controls:
 - exception-safe worker construction
 - serialized shutdown ownership
 - one serialized protocol writer
+- fixed demonstration request IDs and tool arguments
+- canonical reports with stable predicates only
 - no raw process memory or process discovery
 - compiler, sanitizer, fuzz, race, lifecycle, and integration tests
 
@@ -145,6 +147,10 @@ AddressSanitizer and ThreadSanitizer run in separate builds.
 
 Fuzz targets can fail because of host resource exhaustion.
 An environmental failure is not automatically a parser defect.
+
+The Phase 8 demonstration uses synthetic data.
+It does not claim autonomous response or production suitability.
+Its process evidence does not retain runtime counters, PIDs, UIDs, or addresses.
 
 A privileged or compromised kernel can invalidate userspace assumptions.
 The legacy filesystem mode cannot detect every bind mount.

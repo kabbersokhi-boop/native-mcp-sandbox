@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.20)
 
 project(
   native_mcp_sandbox
-  VERSION 0.8.0
+  VERSION 0.9.0
   DESCRIPTION "A security-first, resource-bounded C++20 server for local MCP evidence tools"
   LANGUAGES CXX
 )
@@ -301,6 +301,14 @@ if(BUILD_TESTING)
     NAME protocol.stdio_integration
     COMMAND native_mcp_stdio_integration_tests $<TARGET_FILE:native-mcp-sandbox>
   )
+  find_package(Python3 REQUIRED COMPONENTS Interpreter)
+  add_test(
+    NAME agent.investigation_demo
+    COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/agent_investigation_demo_test.py
+            --server $<TARGET_FILE:native-mcp-sandbox>
+  )
+  set_tests_properties(agent.investigation_demo PROPERTIES TIMEOUT 90)
 endif()
 
 if(NMS_BUILD_FUZZERS)

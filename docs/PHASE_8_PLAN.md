@@ -7,7 +7,7 @@ It will not require an LLM.
 
 ## Release target
 
-- Planned version: `0.9.0`
+- Candidate version: `0.9.0`
 - Base release: `v0.8.0`
 - Base commit: `486a3a7c9fdf90f54e74e87c7ae68a245a9cc53c`
 
@@ -56,6 +56,14 @@ The plan will do these actions:
 6. Convert the structured tool results to a canonical evidence record.
 7. Write deterministic JSON and Markdown reports.
 
+The fixed tool sequence uses these request IDs:
+
+1. Search `INC-042` with case-sensitive matching.
+2. Search `ERROR` with case-sensitive matching.
+3. Read the final three log lines.
+4. Inspect the generated ELF fixture.
+5. Observe the configured `server` process alias.
+
 ## Canonical output
 
 The canonical report must not contain a machine-dependent value.
@@ -100,6 +108,9 @@ A test must fail for one of these conditions:
 - changed finding
 - changed order
 - nondeterministic output
+- non-empty standard error in strict mode
+- a non-zero server exit
+- an output timeout or byte-limit violation
 
 ## Planned files
 
@@ -124,6 +135,9 @@ Phase 8 is complete only when the final branch head passes these gates:
 - two-run Markdown equality
 - golden report equality
 - public audit of the unchanged host boundary
+
+Final assurance remains pending until the required CI jobs pass on the final
+branch head.
 
 ## Non-claims
 

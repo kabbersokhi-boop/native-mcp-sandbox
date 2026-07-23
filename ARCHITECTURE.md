@@ -22,9 +22,15 @@ The server does not add these capabilities:
 - networking
 - MCP tasks
 
-Phase 8 will add a demonstration client.
-The client will use the existing tools only.
-It will not change the server boundary.
+Phase 8 adds a demonstration client.
+The client uses the existing tools only.
+It does not change the server boundary.
+The client starts the real executable through standard input and standard output.
+It uses a temporary root and a version 2 runtime policy.
+It uses the `self` process alias.
+It does not pass legacy compatibility flags.
+It correlates every response by JSON-RPC request ID.
+It writes fixed JSON and Markdown evidence.
 
 ## Protocol path
 
@@ -176,6 +182,13 @@ Standard error contains generic diagnostics.
 Diagnostics do not echo request, file, or process data.
 
 ## Assurance design
+
+The Phase 8 client validates the MCP lifecycle, the exact tool list, each tool
+result, strict pidfd pinning, and the required process counters.
+It rejects a changed file, a protocol error, a schema mismatch, a timeout, a
+non-zero server exit, and non-empty standard error.
+It converts runtime process values to stable predicates before it writes a
+report.
 
 `native_mcp_fuzz_support` contains shared invariants for these surfaces:
 

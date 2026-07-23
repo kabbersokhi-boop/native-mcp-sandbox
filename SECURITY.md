@@ -6,6 +6,7 @@ The project is before version 1.0.
 Only the latest tagged release and the default branch receive security corrections.
 
 Release `v0.8.0` accepts local MCP traffic through standard input and standard output.
+A `0.9.0` Phase 8 candidate adds a read-only demonstration client.
 A trusted policy can enable read-only log, ELF, and process-memory tools.
 
 The security scope includes these areas:
@@ -22,6 +23,7 @@ The security scope includes these areas:
 - output serialization
 - fuzz harnesses
 - dependencies
+- deterministic demonstration output
 
 ## Report a vulnerability
 
@@ -100,6 +102,12 @@ NMS_FUZZ_SECONDS=60 ./scripts/run_fuzz_campaign.sh
 
 A clean test run is evidence for the exact tested build and paths.
 It is not proof that the project has no vulnerability.
+
+The Phase 8 demonstration uses strict `openat2` and pidfd operation.
+It does not pass either legacy compatibility flag.
+It does not execute or import its generated ELF fixture.
+Its reports do not contain PIDs, UIDs, memory totals, addresses, temporary
+paths, or runtime timestamps.
 
 Do not commit these items:
 
