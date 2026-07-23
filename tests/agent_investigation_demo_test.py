@@ -5,14 +5,58 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 import re
 import subprocess
 import sys
 import tempfile
+import time
 
 
 EXPECTED_CONCLUSION = "healthy_final_state_confirmed"
+FORBIDDEN_REPORT_KEYS = {
+    "pid",
+    "uid",
+    "pageSizeBytes",
+    "status",
+    "statm",
+    "smapsRollup",
+    "smapsRollupError",
+    "vmPeakBytes",
+    "vmSizeBytes",
+    "vmHwmBytes",
+    "vmRssBytes",
+    "rssAnonBytes",
+    "rssFileBytes",
+    "rssShmemBytes",
+    "vmDataBytes",
+    "vmStackBytes",
+    "vmExecutableBytes",
+    "vmLibraryBytes",
+    "vmPageTableBytes",
+    "vmSwapBytes",
+    "hugetlbBytes",
+    "virtualBytes",
+    "residentBytes",
+    "sharedBytes",
+    "textBytes",
+    "dataAndStackBytes",
+    "rssBytes",
+    "pssBytes",
+    "pssAnonBytes",
+    "pssFileBytes",
+    "pssShmemBytes",
+    "sharedCleanBytes",
+    "sharedDirtyBytes",
+    "privateCleanBytes",
+    "privateDirtyBytes",
+    "referencedBytes",
+    "anonymousBytes",
+    "swapBytes",
+    "swapPssBytes",
+    "lockedBytes",
+}
 
 
 def fail(message: str) -> None:
@@ -42,6 +86,7 @@ def check_report_safety(data: bytes, label: str) -> dict[str, object]:
         fail(f"{label} is not valid JSON: {error}")
     if not isinstance(value, dict):
         fail(f"{label} is not a JSON object")
+    inspect_report_value(value, label)
     if value.get("conclusion") != EXPECTED_CONCLUSION:
         fail(f"{label} has an unexpected conclusion")
     if value.get("security") != {
@@ -54,6 +99,17 @@ def check_report_safety(data: bytes, label: str) -> dict[str, object]:
     return value
 
 
+def inspect_report_value(value: object, label: str, path: str = "$") -> None:
+    if isinstance(value, dict):
+        for key, child in value.items():
+            if key in FORBIDDEN_REPORT_KEYS:
+                fail(f"{label} contains forbidden field {path}.{key}")
+            inspect_report_value(child, label, f"{path}.{key}")
+    elif isinstance(value, list):
+        for index, child in enumerate(value):
+            inspect_report_value(child, label, f"{path}[{index}]")
+
+
 def check_text_safety(text: str, label: str) -> None:
     forbidden = [
         (r"(?:^|[^A-Za-z])(?:pid|uid)\s*[:=]\s*\d+", "raw process identity"),
@@ -64,6 +120,52 @@ def check_text_safety(text: str, label: str) -> None:
     for pattern, description in forbidden:
         if re.search(pattern, text):
             fail(f"{label} contains {description}")
+
+
+def expect_forbidden_field_rejected(report: dict[str, object], field: str, value: object) -> None:
+    mutated = json.loads(json.dumps(report))
+    mutated["evidence"][0]["finding"][field] = value  # type: ignore[index]
+    try:
+        check_report_safety(json.dumps(mutated).encode("utf-8"), f"field {field}")
+    except AssertionError:
+        return
+    fail(f"field {field} was accepted in a report")
+
+
+def run_output_flood_negative_test(demo: Path, server: Path, fixture: Path) -> None:
+    with tempfile.TemporaryDirectory(prefix="native-mcp-demo-flood-") as directory:
+        output_dir = Path(directory)
+        fake = output_dir / "fake-output-server.py"
+        fake.write_text(
+            "#!" + sys.executable + "\n"
+            "import sys\n"
+            "sys.stdout.buffer.write(b'x' * (256 * 1024 + 1))\n"
+            "sys.stdout.flush()\n",
+            encoding="utf-8",
+            newline="\n",
+        )
+        os.chmod(fake, 0o700)
+        (output_dir / "report.json").write_text("stale", encoding="utf-8")
+        (output_dir / "report.md").write_text("stale", encoding="utf-8")
+        started = time.monotonic()
+        try:
+            result = subprocess.run(
+                [sys.executable, str(demo), "--server", str(fake), "--fixture", str(fixture), "--output-dir", str(output_dir)],
+                check=False,
+                capture_output=True,
+                timeout=10.0,
+                text=True,
+                encoding="utf-8",
+            )
+        except subprocess.TimeoutExpired:
+            fail("the output-flood negative test exceeded its prompt-failure timeout")
+        elapsed = time.monotonic() - started
+        if result.returncode == 0:
+            fail("the output-flood executable was accepted")
+        if elapsed >= 5.0:
+            fail(f"the output-flood executable failed too slowly: {elapsed:.2f} seconds")
+        if (output_dir / "report.json").exists() or (output_dir / "report.md").exists():
+            fail("a failed output-flood run left a stale report")
 
 
 def parse_arguments() -> argparse.Namespace:
@@ -100,6 +202,11 @@ def main() -> int:
         if not first_markdown.endswith(b"\n"):
             fail("Markdown report does not end with one newline")
         check_text_safety(first_markdown.decode("utf-8"), "Markdown report")
+        report_value = json.loads(first_json.decode("utf-8"))
+        expect_forbidden_field_rejected(report_value, "pid", 1234)
+        expect_forbidden_field_rejected(report_value, "uid", 1000)
+        expect_forbidden_field_rejected(report_value, "vmRssBytes", 4096)
+    run_output_flood_negative_test(demo, arguments.server.resolve(), fixture)
     print("Agent investigation demo is deterministic and matches its golden reports")
     return 0
 

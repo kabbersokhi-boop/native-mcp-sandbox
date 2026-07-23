@@ -339,6 +339,7 @@ Requirements:
 - CMake 3.20 or newer
 - Ninja
 - a C++20 GCC or Clang compiler
+- Python 3
 - nlohmann/json 3.11 or newer
 - Linux `openat2` and ELF headers
 - procfs
@@ -357,6 +358,19 @@ cmake --preset release
 cmake --build --preset release
 ctest --preset release
 ```
+
+Run the demonstration:
+
+```bash
+mkdir -p ./build/agent-investigation-output
+python3 scripts/run_agent_investigation_demo.py \
+  --server ./build/dev/native-mcp-sandbox \
+  --fixture ./demo/investigation/application.log \
+  --output-dir ./build/agent-investigation-output
+```
+
+The command writes `report.json` and `report.md` to the output directory.
+The output directory is generated material.
 
 Run the sanitizer build:
 

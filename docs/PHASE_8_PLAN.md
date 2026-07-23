@@ -117,6 +117,7 @@ A test must fail for one of these conditions:
 - `scripts/run_agent_investigation_demo.py`
 - `demo/investigation/application.log`
 - `demo/investigation/expected-report.json`
+- `demo/investigation/expected-report.md`
 - `tests/agent_investigation_demo_test.py`
 - CMake and CTest integration
 - Phase 8 documentation and manifest updates

@@ -7,11 +7,13 @@ import argparse
 import json
 import os
 from pathlib import Path
+import selectors
 import shutil
 import struct
 import subprocess
 import sys
 import tempfile
+import time
 from typing import Any
 
 
@@ -143,6 +145,81 @@ def build_protocol_input() -> tuple[str, list[dict[str, Any]], list[dict[str, An
     return lines, messages, tool_calls
 
 
+def terminate_child(process: subprocess.Popen[bytes]) -> None:
+    """Kill and reap a child after a bounded-read failure."""
+
+    try:
+        process.kill()
+    except ProcessLookupError:
+        pass
+    try:
+        process.wait(timeout=1.0)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait()
+    for stream in (process.stdin, process.stdout, process.stderr):
+        if stream is not None:
+            stream.close()
+
+
+def read_streams_bounded(process: subprocess.Popen[bytes], protocol_input: bytes) -> tuple[bytes, bytes]:
+    """Read both child streams with fixed bounds and a monotonic deadline."""
+
+    require(process.stdin is not None, "server standard input is not available")
+    try:
+        process.stdin.write(protocol_input)
+        process.stdin.close()
+    except (BrokenPipeError, OSError) as error:
+        terminate_child(process)
+        fail(f"failed to write protocol input: {error}")
+
+    selector = selectors.DefaultSelector()
+    stdout_data = bytearray()
+    stderr_data = bytearray()
+    streams = ((process.stdout, stdout_data, PROTOCOL_OUTPUT_LIMIT, "protocol output"),
+               (process.stderr, stderr_data, STDERR_LIMIT, "standard error"))
+    try:
+        for stream, buffer, limit, label in streams:
+            require(stream is not None, f"{label} stream is not available")
+            os.set_blocking(stream.fileno(), False)
+            selector.register(stream, selectors.EVENT_READ, (buffer, limit, label))
+
+        deadline = time.monotonic() + TIMEOUT_SECONDS
+        while selector.get_map() or process.poll() is None:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0.0:
+                fail(f"server timed out after {TIMEOUT_SECONDS:.1f} seconds")
+            events = selector.select(remaining)
+            if not events:
+                if process.poll() is None:
+                    fail(f"server timed out after {TIMEOUT_SECONDS:.1f} seconds")
+                continue
+            for key, _ in events:
+                stream = key.fileobj
+                buffer, limit, label = key.data
+                current_size = len(buffer)
+                read_size = min(8192, max(1, limit - current_size + 1))
+                try:
+                    chunk = os.read(stream.fileno(), read_size)
+                except BlockingIOError:
+                    continue
+                if not chunk:
+                    selector.unregister(stream)
+                    stream.close()
+                    continue
+                if current_size + len(chunk) > limit:
+                    fail(f"{label} exceeded its byte limit")
+                buffer.extend(chunk)
+                if label == "standard error":
+                    fail("strict execution wrote unexpected standard error")
+        return bytes(stdout_data), bytes(stderr_data)
+    except (DemoError, OSError):
+        terminate_child(process)
+        raise
+    finally:
+        selector.close()
+
+
 def run_server(server: Path, policy: Path, protocol_input: str) -> dict[int, dict[str, Any]]:
     command = [str(server), "--policy-config", str(policy)]
     require("--allow-legacy-descriptor-walk" not in command, "legacy filesystem mode was requested")
@@ -151,13 +228,10 @@ def run_server(server: Path, policy: Path, protocol_input: str) -> dict[int, dic
     environment.update({"LC_ALL": "C", "LANG": "C", "LANGUAGE": "C", "TZ": "UTC"})
     process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=environment)
     try:
-        stdout, stderr = process.communicate(protocol_input.encode("utf-8"), timeout=TIMEOUT_SECONDS)
-    except subprocess.TimeoutExpired:
-        process.kill()
-        process.communicate()
-        fail(f"server timed out after {TIMEOUT_SECONDS:.1f} seconds")
-    require(len(stdout) <= PROTOCOL_OUTPUT_LIMIT, "protocol output exceeded its byte limit")
-    require(len(stderr) <= STDERR_LIMIT, "standard error exceeded its byte limit")
+        stdout, stderr = read_streams_bounded(process, protocol_input.encode("utf-8"))
+    except (DemoError, OSError):
+        terminate_child(process)
+        raise
     require(stderr == b"", "strict execution wrote unexpected standard error")
     require(process.returncode == 0, f"server exited with status {process.returncode}")
     try:
@@ -324,7 +398,7 @@ def report(responses: dict[int, dict[str, Any]], messages: list[dict[str, Any]],
 def write_reports(output_dir: Path, canonical: dict[str, Any]) -> None:
     json_path = output_dir / "report.json"
     markdown_path = output_dir / "report.md"
-    json_path.write_text(json.dumps(canonical, ensure_ascii=True, sort_keys=True, indent=2) + "\n", encoding="utf-8")
+    json_text = json.dumps(canonical, ensure_ascii=True, sort_keys=True, indent=2) + "\n"
     markdown = """# Agent investigation report
 
 ## Conclusion
@@ -368,12 +442,37 @@ The client used request IDs `10` through `14` for the fixed tool sequence.
 - This demonstration is not proof of complete correctness or security.
 - This demonstration is one bounded investigation over synthetic data.
 """
-    markdown_path.write_text(markdown, encoding="utf-8", newline="\n")
+    atomic_write_text(json_path, json_text)
+    atomic_write_text(markdown_path, markdown)
+
+
+def atomic_write_text(path: Path, text: str) -> None:
+    descriptor, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as output:
+            output.write(text)
+            output.flush()
+            os.fsync(output.fileno())
+        os.replace(temporary_name, path)
+    finally:
+        try:
+            os.unlink(temporary_name)
+        except FileNotFoundError:
+            pass
+
+
+def remove_old_reports(output_dir: Path) -> None:
+    for name in ("report.json", "report.md"):
+        try:
+            (output_dir / name).unlink()
+        except FileNotFoundError:
+            pass
 
 
 def run_demo(server: Path, fixture: Path, output_dir: Path) -> None:
-    require(server.is_file(), "the server executable is not a regular file")
     require(output_dir.is_dir(), "the output directory is not a directory")
+    remove_old_reports(output_dir)
+    require(server.is_file(), "the server executable is not a regular file")
     root = Path(tempfile.mkdtemp(prefix="native-mcp-investigation-", dir=str(output_dir)))
     try:
         log_path = copy_fixture(fixture, root)
