@@ -132,6 +132,8 @@ Candidate reference paths are:
 
 A reference path must preserve the same result contract for the measured input.
 Tests must verify semantic equivalence before timing begins.
+A comparison must exclude an input class when the reference path cannot preserve the production result contract for that class.
+The report must state each excluded input class.
 
 The report must explain when a reference omits a production control.
 It must not recommend that omission for deployment.
@@ -164,6 +166,27 @@ The canonical summary must include at least these statistics:
 - standard deviation
 - a documented percentile or confidence interval
 
+### Outlier policy
+
+The benchmark specification must define the outlier policy before a measured campaign starts.
+The default policy must retain every valid timing sample.
+A harness must not remove a sample only because it is slower or faster than the other samples.
+
+A sample can be excluded only when a recorded operational condition invalidates the measurement.
+Examples include a harness timeout, a failed semantic check, an interrupted process, or a declared system event that makes the sample incomplete.
+
+A report that excludes a sample must include these values:
+
+- the original sample count
+- the retained sample count
+- the excluded sample count
+- one reason for each exclusion class
+- summary statistics for the retained samples
+- access to the bounded raw sample set when the report retains raw samples
+
+The report must state when no sample was excluded.
+The implementation must not apply an undocumented automatic outlier filter.
+
 The plan does not select a benchmark framework.
 Implementation review must compare a small project-owned harness with an established C++ benchmark library.
 The selected option must support machine-readable output and offline builds.
@@ -176,14 +199,24 @@ The machine-readable output must include these values when available:
 
 - repository commit
 - dirty-worktree status
+- benchmark executable hash
 - compiler name and version
+- compile and link flags
 - build type
 - CMake version
+- CMake preset and relevant cache options
+- benchmark framework name and version
+- relevant dependency versions
 - operating-system name and version
 - kernel version
 - CPU model
 - logical CPU count
+- CPU affinity
+- CPU frequency-scaling governor
+- turbo or boost state
+- virtualization or container status
 - page size
+- monotonic clock name and reported resolution
 - benchmark harness version
 - benchmark schema version
 - fixture-set version
@@ -191,6 +224,11 @@ The machine-readable output must include these values when available:
 
 The report must distinguish missing metadata from an empty value.
 It must not contain secrets, user names, home-directory paths, or unrelated environment variables.
+
+A measured campaign must state which noise controls were used.
+Examples include CPU affinity, a performance governor, a fixed turbo policy, and an idle-system check.
+The report must state when a control is unavailable or was not applied.
+A comparison must not claim a stable small difference when required noise controls are absent.
 
 ## Output and reproducibility
 
