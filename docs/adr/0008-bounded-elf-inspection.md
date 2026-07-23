@@ -5,37 +5,36 @@
 
 ## Context
 
-The next useful agent capability is understanding basic properties of an approved
-Linux binary. Executing an untrusted file, loading it with the dynamic linker, or
-mapping arbitrary file regions would unnecessarily expand the attack surface. A full
-linker-quality ELF implementation would also exceed the phase boundary.
+A local investigation can need basic information about an approved Linux binary.
+Execution, dynamic loading, and arbitrary mapping would increase the attack surface.
+A complete linker-quality parser would exceed the phase boundary.
 
 ## Decision
 
-Phase 4 adds `elf.inspect`. The tool receives a configured root name and relative path,
-then obtains one pinned regular-file descriptor through `FilesystemPolicy`. The
-analyzer uses bounded `pread` calls only. It supports ELF32 and ELF64, both byte orders,
-and selected program-header, dynamic, interpreter, and GNU note metadata.
+Add `elf.inspect` in Phase 4.
+The tool accepts a root name and a relative path.
+It obtains one pinned regular-file descriptor through `FilesystemPolicy`.
 
-Every file range uses overflow-checked arithmetic and must fit inside the policy's
-captured read budget. Metadata reads are capped at 1 MiB with narrower limits for
-program headers, dynamic entries, strings, notes, library names, build IDs, and returned
-segment summaries. The tool never executes, relocates, `dlopen`s, shells out to, or
-memory-maps the target.
+Use bounded `pread` operations only.
+Support ELF32 and ELF64 in both byte orders.
+Read selected program-header, dynamic, interpreter, and GNU note metadata.
 
-The tool reports structural hardening indicators, not a security verdict. Unusual
-extended numbering, duplicate interpreter or dynamic segments, malformed ranges, and
-oversized metadata fail explicitly.
+Check each file range for integer overflow.
+Require each range to fit in the captured read budget.
+Limit selected metadata reads to 1 MiB.
+Use smaller limits for headers, entries, strings, notes, library names, build IDs, and segment summaries.
 
-Primary format references:
+Do not execute, relocate, dynamically load, shell out to, or memory-map the target.
+Report structural hardening indicators only.
+Do not report a security verdict.
 
-- https://man7.org/linux/man-pages/man5/elf.5.html
-- https://docs.kernel.org/next/ELF/ELF.html
+Primary references:
+
+- `https://man7.org/linux/man-pages/man5/elf.5.html`
+- `https://docs.kernel.org/next/ELF/ELF.html`
 
 ## Consequences
 
-The project gains a useful native binary-inspection capability while preserving the
-existing filesystem and resource boundaries. The implementation intentionally omits
-sections, symbols, relocations, DWARF, disassembly, signatures, malware classification,
-and execution tracing. Those omissions keep Phase 4 reviewable and prevent claims the
-code cannot substantiate.
+The project gets a useful binary-inspection tool without a larger host boundary.
+The tool does not read sections, symbols, relocations, DWARF, or disassembly.
+It does not verify signatures or classify malware.

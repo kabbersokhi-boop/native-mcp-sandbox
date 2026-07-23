@@ -1,25 +1,29 @@
-# ADR 0001: Security-first, read-only scope
+# ADR 0001: Security-first read-only scope
 
 - Status: Accepted
 - Date: 2026-07-18
 
 ## Context
 
-An MCP tool runtime receives arguments influenced by a probabilistic model and by
-untrusted content. Arbitrary command execution would make a local demonstration easy
-but would create a broad, poorly defined security boundary.
+An MCP tool receives arguments from a probabilistic model and from untrusted data.
+A generic command tool would make the demonstration easy.
+It would also make the security boundary large and unclear.
 
 ## Decision
 
-The project will expose only named, schema-validated, read-only analysis tools. It
-will not expose a generic shell, command runner, file writer, or binary executor.
-Every new tool must document its permitted data sources, resource bounds, output
-shape, cancellation behavior, and abuse cases.
+Expose named, schema-validated, read-only analysis tools only.
+Do not expose a generic shell, command runner, file writer, or binary executor.
+
+For each new tool, document these items:
+
+- permitted data sources
+- resource limits
+- output schema
+- cancellation behavior
+- abuse cases
 
 ## Consequences
 
-The server will support fewer tasks than a general-purpose agent shell. Tool
-implementations and tests will require more policy work. In return, the system will
-have a smaller attack surface, clearer review criteria, and a defensible educational
-story.
-
+The server supports fewer tasks than a general agent shell.
+Each tool needs more policy work and more negative tests.
+The smaller boundary gives clearer review rules and a smaller attack surface.

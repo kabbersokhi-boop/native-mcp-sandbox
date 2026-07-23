@@ -5,30 +5,35 @@
 
 ## Context
 
-Phases 3 through 5 executed tool calls synchronously on the stdin reader. That kept the
-initial security model simple but prevented concurrent independent work, request
-cancellation, and queue backpressure. Adding concurrency can introduce unbounded memory,
-thread creation, response interleaving, object-lifetime errors, and data races.
+Phases 3 through 5 ran tool calls on the standard-input reader thread.
+This design prevented concurrent independent work, cancellation, and backpressure.
+Concurrency can add unbounded memory, thread creation, output interleaving, lifetime defects, and data races.
 
 ## Decision
 
-Use a fixed-size worker pool and a small C++20 coroutine adapter:
+Use a fixed worker pool and a small C++20 coroutine adapter.
 
-- the reader validates a tool request and reserves one of 16 outstanding slots;
-- a detached coroutine suspends onto pre-reserved handle storage;
-- two persistent workers resume queued coroutine handles;
-- each call owns a stop source and a steady-clock deadline;
-- analyzers check an immutable operation context at bounded checkpoints;
-- valid MCP cancellation requests stop matching work and suppress its response;
-- one serialized writer emits complete response lines; and
-- shutdown stops admission, drains accepted work, then joins workers.
+The work path is:
 
-Reject duplicate in-flight IDs and new work beyond the outstanding cap. Keep MCP task
-support forbidden. Do not add new host capabilities in this phase.
+1. The reader validates a tool request.
+2. The reader reserves one of 16 unfinished-work slots.
+3. A coroutine suspends into reserved handle storage.
+4. One of two workers resumes the coroutine.
+5. The call uses a stop source and a steady-clock deadline.
+6. The analyzer checks an immutable operation context.
+7. A valid cancellation request requests stop and suppresses the response.
+8. One serialized writer writes the complete response line.
+9. Shutdown stops admission, drains accepted work, and joins workers.
+
+Reject duplicate in-flight IDs.
+Reject work above the unfinished-work limit.
+Keep MCP task support forbidden.
+Do not add a host capability in Phase 6.
 
 ## Consequences
 
-Independent tool calls can complete concurrently and responses may arrive out of order.
-Memory and thread use remain bounded. Cancellation is cooperative rather than forceful,
-so deadline precision depends on analyzer checkpoints and bounded system calls. Later
-stress and fuzzing work can target this deliberately small scheduling surface.
+Independent calls can run at the same time.
+Responses can finish out of order.
+Memory and thread use stay bounded.
+Cancellation is cooperative.
+Deadline precision depends on analyzer checks and bounded system calls.

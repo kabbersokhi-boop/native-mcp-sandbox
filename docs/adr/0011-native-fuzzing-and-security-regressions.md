@@ -1,118 +1,129 @@
-# ADR 0011: Native fuzzing and security-regression evidence
+# ADR 0011: Native fuzzing and security regression evidence
 
-- Status: proposed for Phase 7 audit
-- Date: 2026-07-18
+- Status: Accepted
+- Date: 2026-07-20
 
 ## Context
 
-Native MCP Sandbox parses attacker-controlled JSON-RPC, runtime-policy JSON, log bytes,
-and ELF metadata. It also coordinates cancellation, deadlines, worker threads, coroutine
-frames, and serialized output. Unit tests cover intended behavior, but hand-written cases
-alone are weak evidence against malformed structure, rare state transitions, integer
-boundaries, and concurrency races.
+Native MCP Sandbox parses untrusted protocol JSON, policy JSON, log data, and ELF data.
+It also controls cancellation, deadlines, worker threads, coroutine frames, and serialized output.
+Unit tests cover intended behavior.
+Hand-written tests alone give limited evidence for rare malformed input and concurrency states.
 
-The project must remain small, native, reproducible, and honest about assurance. A fuzzing
-campaign is evidence from a particular corpus, duration, compiler, sanitizer, kernel, and
-machine. It is not a proof that the implementation is safe.
+The project must stay small, native, reproducible, and precise about assurance.
+A fuzz campaign applies to one corpus, duration, compiler, sanitizer, kernel, and computer.
+It is not proof that the implementation is secure.
 
 ## Decision
 
-Phase 7 adds three complementary layers.
+Phase 7 adds three assurance layers.
 
-### Bounded JSON preflight
+### JSON preflight
 
-A SAX pass runs before JSON DOM construction. It rejects invalid syntax, duplicate keys,
-excessive nesting, and excessive token counts. Protocol input is capped at 64 nested
-containers and 32,768 tokens. Runtime-policy input is capped at 32 containers and 4,096
-tokens. The byte limits from earlier phases remain authoritative.
+Run a SAX pass before DOM construction.
+Reject invalid syntax, duplicate keys, excessive depth, and excessive token count.
 
-The preflight is intentionally not a second schema language. Existing closed-schema
-validation still decides which fields and values are accepted.
+Use these protocol limits:
+
+- 64 nested containers
+- 32,768 tokens
+
+Use these runtime-policy limits:
+
+- 32 nested containers
+- 4,096 tokens
+
+Keep the earlier byte limits.
+Keep closed schema validation after the preflight.
 
 ### Shared fuzz invariants
 
-One support library exercises protocol, runtime-policy, log, ELF, and pure `/proc` text-parser paths. It checks
-bounded responses, parseable server output, exclusive result/error outcomes, configured
-collection limits, metadata-read budgets, and preview-size limits.
+Use one support library for these surfaces:
 
-The same support code is used by:
+- protocol
+- runtime policy
+- log analysis
+- ELF analysis
+- supplied proc-text parsing
 
-- a deterministic mutation runner built by ordinary GCC and Clang test configurations;
-- ASan/UBSan test and extended smoke runs; and
-- five optional Clang libFuzzer entry points.
+Check bounded responses, valid server output, exclusive result or error states, collection limits, metadata budgets, and preview limits.
 
-Curated corpora contain ordinary valid inputs, truncated structures, duplicate keys,
-configuration variants, log evidence, ELF magic, a minimal ELF64 header, and representative bounded proc text. Any future
-crash or hang must be minimized and retained as a regression seed or deterministic test.
+Use the same support library in these configurations:
 
-### Concurrency and failure regressions
+- deterministic GCC and Clang tests
+- ASan and UBSan tests
+- five optional Clang libFuzzer targets
 
-The scheduler gains a worker-thread factory seam used only to inject construction
-failure. If a later worker cannot be created, already-started workers are stopped and
-joined before the exception escapes. Shutdown calls are serialized so simultaneous
-callers cannot join the same worker concurrently. Stress tests repeat bounded admission,
-cancellation, deadline, completion-exception, and shutdown races. A dedicated
-ThreadSanitizer build runs the focused scheduler tests.
+Keep representative valid and invalid inputs in curated corpora.
+Minimize each confirmed crash or hang.
+Keep the minimized case as a regression input or named test.
+
+### Concurrency and failure tests
+
+Add a worker-factory seam for construction-failure tests.
+When worker creation fails, stop and join each worker that already started.
+Serialize shutdown ownership.
+Test simultaneous shutdown, cancellation, deadlines, callback failures, and admission limits.
+Run the focused scheduler tests with ThreadSanitizer.
 
 ## Native execution
 
-The assurance workflow runs directly on Linux. No container runtime is required. This
-keeps `openat2`, pidfd, procfs, thread scheduling, sanitizer, and filesystem behavior
-visible rather than introducing an unrelated namespace layer.
+Run the assurance workflow directly on Linux.
+Do not require a container runtime.
+This keeps host `openat2`, pidfd, procfs, thread, sanitizer, and filesystem behavior visible.
 
 ## CI policy
 
-Pull requests and `main` run:
+Run these jobs for pull requests and `main`:
 
-- GCC Debug and Clang Release with warnings as errors;
-- Clang ASan/UBSan with leak detection and deterministic fuzz smoke;
-- focused GCC ThreadSanitizer orchestration tests; and
-- bounded Clang libFuzzer corpus and mutation runs.
+- GCC Debug with warnings as errors
+- Clang Release with warnings as errors
+- Clang ASan and UBSan with leak detection
+- deterministic fuzz smoke
+- focused GCC ThreadSanitizer tests
+- bounded Clang libFuzzer smoke
 
-Longer local campaigns remain explicit scripts because CI time is finite. Campaign
-artifacts are not source and must not be committed unless minimized into a deliberate
-regression input.
+Keep longer campaigns as explicit scripts and a manual workflow.
+Do not commit generated campaign artifacts.
+Commit only a reviewed and minimized regression input.
 
 ## Consequences
 
-Positive consequences:
+The change gives these benefits:
 
-- duplicate-key ambiguity and parser depth/token bombs fail before DOM construction;
-- fuzz targets and deterministic tests share assertions instead of drifting;
-- rare scheduler construction and shutdown paths become testable;
-- sanitizer and race-detector expectations are reproducible;
-- newly discovered failures have a defined path into permanent coverage.
+- JSON ambiguity and depth bombs fail before DOM construction.
+- Deterministic and coverage-guided tests share the same invariants.
+- Rare scheduler construction and shutdown states are testable.
+- Sanitizer and race-detector commands are reproducible.
+- Each confirmed failure has a path to permanent coverage.
 
-Costs and limitations:
+The change has these costs and limits:
 
-- JSON is parsed twice: bounded SAX preflight, then DOM construction;
-- duplicate-key tracking allocates bounded memory proportional to accepted key tokens;
-- fuzzing uses temporary regular files for log and ELF paths and is slower than a pure
-  in-memory parser; the proc target remains byte-only and does not access host procfs;
-- coverage is limited by the selected time and corpus;
-- ThreadSanitizer and AddressSanitizer cannot be enabled in one binary;
-- cooperative cancellation still cannot forcibly interrupt an arbitrary blocking kernel
-  call or non-cooperative executor.
+- JSON is parsed two times.
+- Duplicate-key tracking uses bounded memory for accepted keys.
+- File-based fuzz targets are slower than pure in-memory parsers.
+- Coverage depends on time and corpus selection.
+- AddressSanitizer and ThreadSanitizer require separate builds.
+- Cooperative cancellation cannot interrupt every blocking kernel call.
 
 ## Rejected alternatives
 
-### Rely only on libFuzzer
+### Use libFuzzer only
 
-Rejected because GCC builds and ordinary contributors would lose the adversarial smoke
-suite, and libFuzzer availability would become a prerequisite for useful regression
-coverage.
+Reject this option because normal GCC builds would lose adversarial smoke tests.
+It would also make libFuzzer necessary for useful regression coverage.
 
-### Rely only on deterministic mutation
+### Use deterministic mutation only
 
-Rejected because deterministic mutation is reproducible but lacks libFuzzer's
-coverage-guided exploration and minimization.
+Reject this option because it does not give coverage-guided exploration or libFuzzer minimization.
 
-### Add a containerized test environment
+### Require a container test environment
 
-Rejected because it does not solve a current requirement and can obscure the Linux host
-semantics this project is intended to demonstrate.
+Reject this option because it can hide the Linux host behavior that the project must test.
+It does not solve a current requirement.
 
-### Claim sanitizer-clean means secure
+### Treat a clean sanitizer run as proof of security
 
-Rejected. Sanitizers detect specific classes of failures in executed paths. Documentation
-must report exact tools, versions, commands, duration, and limitations.
+Reject this claim.
+A sanitizer detects selected failures on executed paths only.
+Record the exact tool, version, command, duration, and limitation.

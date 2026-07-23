@@ -1,36 +1,43 @@
-# ADR 0009: Bounded `/proc` memory observation
+# ADR 0009: Bounded proc memory observation
 
-## Status
-
-Accepted for Phase 5.
+- Status: Accepted for Phase 5
+- Date: 2026-07-18
 
 ## Context
 
-A useful local investigation can need process memory pressure without granting an AI
-agent arbitrary process discovery, raw memory access, environment access, or unrestricted
-`/proc` browsing. Numeric PIDs can be reused, and detailed mapping interfaces may expose
-sensitive paths or addresses.
+A local investigation can need aggregate process-memory data.
+It does not need raw memory, process discovery, environments, or unrestricted procfs access.
+A numeric PID can be reused.
+Detailed mapping interfaces can expose sensitive paths and addresses.
 
 ## Decision
 
-Phase 5 adds one tool, `proc.memory`, and a version-2 trusted runtime policy. The
-operator assigns symbolic names to specific PIDs or to the server process. The MCP client
-selects only the symbolic name.
+Add `proc.memory` and runtime-policy schema version 2.
+The operator assigns a process name to a PID or to the server process.
+The MCP client selects the process name only.
 
-Each target must share the server's effective UID. Startup opens and retains the process
-`/proc` directory, records the process start-time field, and requires a pidfd on supported
-kernels. Observation reads bounded aggregate counters from `status`, `statm`, and optional
-`smaps_rollup`; it does not read memory, mappings, command lines, environments, or file
-descriptors. Identity is revalidated before and after collection.
+Require the same effective UID.
+At startup, open and keep the process proc-directory descriptor.
+Record the process start-time field.
+Require a pidfd when the kernel supports strict mode.
 
-Old kernels may be used only with the explicit `--allow-legacy-process-pinning` flag.
-That mode retains the proc-directory descriptor and validates start time but cannot claim
-pidfd-backed lifetime pinning.
+Read bounded aggregate counters from these files only:
+
+- `status`
+- `statm`
+- optional `smaps_rollup`
+
+Do not read raw memory, maps, command lines, environments, or file descriptors.
+Verify process identity before and after collection.
+
+Permit old kernels only with `--allow-legacy-process-pinning`.
+The legacy mode keeps the proc-directory descriptor and verifies start time.
+It does not provide pidfd-backed lifetime pinning.
 
 ## Consequences
 
-The tool is useful for memory triage while returning substantially less sensitive data
-than raw maps or memory. Targets must be known when the server starts. A process that
-exits or changes identity produces an error instead of silently following a reused PID.
-`smaps_rollup` may be unavailable because of kernel configuration or ptrace policy; the
-result reports that limitation without trying a more invasive fallback.
+The tool gives memory-triage data with less sensitive detail than raw memory or maps.
+Each target must be known when the server starts.
+The tool returns an error when the process exits or changes identity.
+The result reports when `smaps_rollup` is not available.
+The tool does not use a more invasive fallback.

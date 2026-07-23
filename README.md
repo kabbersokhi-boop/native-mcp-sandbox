@@ -1,31 +1,41 @@
 # Native MCP Sandbox
 
-> A security-first, resource-bounded C++20 server for local AI-agent evidence tools.
+> A security-first C++20 server for bounded, read-only Linux evidence tools.
 
-Native MCP Sandbox gives an MCP client narrow, read-only access to selected Linux
-evidence without exposing a shell, unrestricted filesystem browser, or raw process
-memory. The project is built in small auditable phases: protocol handling, filesystem
-containment, bounded log and ELF analysis, aggregate process-memory observation,
-bounded concurrent orchestration, and native adversarial testing.
+Native MCP Sandbox gives an MCP client access to selected Linux evidence.
+The server does not provide a shell or an unrestricted file browser.
+The server does not read raw process memory.
 
 ## Project status
 
-**Phase 7 candidate — Fuzzing, sanitizer coverage, and security regressions (`v0.8.0`)**
+Release `v0.8.0` is complete.
+Phase 8 is a `0.9.0` candidate.
+Phase 8 adds a deterministic investigation demonstration.
+It will not add a new MCP tool or new host authority.
 
-With no arguments, the executable remains host-isolated and advertises no tools. With a
-trusted runtime policy, it exposes only the capabilities explicitly configured:
+The Phase 8 demonstration starts the real server through standard input and
+standard output.
+It uses one committed synthetic log fixture.
+It uses a generated non-executable ELF fixture.
+It uses only the four existing tools.
+It writes canonical JSON and Markdown reports.
+The reports contain stable evidence only.
+The demonstration runs in strict mode.
 
-- `logs.search` — bounded literal search in one approved regular file;
-- `logs.tail` — bounded previews of final logical lines;
-- `elf.inspect` — bounded structural metadata from one approved ELF file; and
-- `proc.memory` — aggregate memory counters for one named same-UID process.
+The server exposes no tools when you start it without a runtime policy.
+A trusted runtime policy can enable these tools:
 
-The MCP client never supplies an absolute target path or raw PID. It selects an
-operator-defined filesystem root or process alias.
+- `logs.search` searches one approved regular file for literal text.
+- `logs.tail` returns previews of the final lines in one approved regular file.
+- `elf.inspect` reads selected metadata from one approved ELF file.
+- `proc.memory` reads aggregate memory counters for one named same-UID process.
+
+The MCP client selects an operator-defined root name or process name.
+The client cannot supply an absolute target path or a raw PID.
 
 ## Runtime policy
 
-Schema version 1 remains accepted unchanged for filesystem-only operation:
+Use schema version 1 for filesystem tools only:
 
 ```json
 {
@@ -40,8 +50,7 @@ Schema version 1 remains accepted unchanged for filesystem-only operation:
 }
 ```
 
-Schema version 2 adds an exact `processes` array. Either array may be empty, but at least
-one capability must be configured:
+Use schema version 2 for filesystem tools, process tools, or both:
 
 ```json
 {
@@ -66,15 +75,20 @@ one capability must be configured:
 }
 ```
 
+At least one capability must be present.
+Each root name and process name must be unique.
+
 Start the configured server:
 
 ```bash
 ./build/dev/native-mcp-sandbox --policy-config ./policy.json
 ```
 
-Strict mode requires Linux `openat2` for filesystem targets and `pidfd_open` for process
-identity. On an older kernel, startup fails closed unless the relevant compatibility
-flag is explicitly supplied:
+Strict mode requires Linux `openat2` for filesystem targets.
+Strict process mode also requires `pidfd_open`.
+The server stops at startup when a required strict feature is not available.
+
+Use a compatibility mode only when you accept its limits:
 
 ```bash
 ./build/dev/native-mcp-sandbox \
@@ -83,39 +97,81 @@ flag is explicitly supplied:
   --allow-legacy-process-pinning
 ```
 
-Compatibility modes print a warning to stderr. Legacy filesystem walking cannot prove
-every bind-mount boundary. Legacy process pinning retains the `/proc/<pid>` directory
-and revalidates process start time, but does not claim pidfd-backed lifetime pinning.
+The server writes a warning to standard error for each compatibility mode.
+The legacy filesystem mode cannot detect every bind-mount boundary.
+The legacy process mode does not provide pidfd-backed lifetime pinning.
 
 ## Filesystem tools
 
-All filesystem targets pass through the descriptor-based policy gate. Strict mode uses
-`RESOLVE_BENEATH`, `RESOLVE_NO_SYMLINKS`, `RESOLVE_NO_MAGICLINKS`, and
-`RESOLVE_NO_XDEV`. Only bounded regular files become readable.
+The filesystem policy uses directory descriptors.
+Strict mode uses these `openat2` controls:
+
+- `RESOLVE_BENEATH`
+- `RESOLVE_NO_SYMLINKS`
+- `RESOLVE_NO_MAGICLINKS`
+- `RESOLVE_NO_XDEV`
+
+The policy accepts only bounded regular files.
+The policy opens each accepted file through a pinned descriptor.
 
 ### `logs.search`
 
-Required arguments are `root`, `path`, and a literal `query` of 1–256 bytes. Optional
-`caseSensitive` defaults to `true`; `false` folds ASCII letters only. Optional
-`maxMatches` is 1–50 and defaults to 20. Matching streams in 8 KiB chunks and can cross
-a chunk boundary without loading the complete file.
+Required arguments:
+
+- `root`
+- `path`
+- `query`
+
+The query length is from 1 through 256 bytes.
+The optional `caseSensitive` value is `true` by default.
+A `false` value folds ASCII letters only.
+The optional `maxMatches` value is from 1 through 50.
+Its default value is 20.
+
+The analyzer reads the file in 8 KiB chunks.
+A match can cross a chunk boundary.
+The analyzer does not load the complete file.
 
 ### `logs.tail`
 
-Required arguments are `root` and `path`. Optional `maxLines` is 1–50 and defaults to
-20. The analyzer scans incrementally, retains only the requested final bounded previews,
-and marks long lines whose beginning was discarded.
+Required arguments:
+
+- `root`
+- `path`
+
+The optional `maxLines` value is from 1 through 50.
+Its default value is 20.
+The analyzer keeps only the requested final previews.
+The result identifies a preview that does not contain the start of a long line.
 
 ### `elf.inspect`
 
-Required arguments are `root` and `path`. The target is never executed, dynamically
-loaded, relocated, or memory-mapped. The analyzer reads selected ELF32 or ELF64 metadata
-with bounded `pread` operations and reports identity, interpreter, dependencies, GNU
-build ID when present in a program note, bounded segment summaries, and structural
-stack, RELRO, PIE-like, and writable-executable indicators. These fields are
-observations, not a safety or malware verdict.
+Required arguments:
 
-## `proc.memory`
+- `root`
+- `path`
+
+The analyzer does not execute, load, relocate, or memory-map the target.
+It uses bounded `pread` operations.
+It supports selected ELF32 and ELF64 metadata.
+The result can include these items:
+
+- ELF identity
+- interpreter
+- needed libraries
+- GNU build ID
+- bounded segment summaries
+- stack policy
+- RELRO status
+- PIE-like status
+- writable and executable load-segment status
+
+These items are structural observations.
+They are not a malware verdict or a safety verdict.
+
+## Process tool
+
+### `proc.memory`
 
 Required input:
 
@@ -123,82 +179,79 @@ Required input:
 {"process":"server"}
 ```
 
-The alias must have been declared by the operator in a version-2 policy. At startup the
-server:
+The process name must be in the trusted runtime policy.
+At startup, the server does these actions:
 
-1. restricts the target to the server's effective UID;
-2. opens and retains `/proc/<pid>` as a directory descriptor;
-3. records field 22 (`starttime`) from `/proc/<pid>/stat`; and
-4. obtains a pidfd in strict mode.
+1. It verifies that the target has the same effective UID.
+2. It opens and keeps `/proc/<pid>` as a directory descriptor.
+3. It records field 22 from `/proc/<pid>/stat`.
+4. It obtains a pidfd in strict mode.
 
-Identity is checked again before and after each observation. A process exit or identity
-change produces a bounded tool error instead of silently following a reused PID.
+The server verifies process identity before and after each observation.
+The tool returns an error when the process exits or its identity changes.
 
-The tool reads only fixed pseudo-files beneath the pinned process directory:
+The tool reads only these pseudo-files:
 
-- `status` for selected virtual, resident, anonymous, file-backed, shared, stack,
-  executable, library, page-table, swap, and huge-page counters;
-- `statm` for page-based virtual, resident, shared, text, and data-plus-stack totals; and
-- optional `smaps_rollup` for aggregate RSS, PSS, sharing, anonymous, swap, and locked
-  memory.
+- `status`
+- `statm`
+- optional `smaps_rollup`
 
-It never reads `/proc/<pid>/mem`, `maps`, `smaps`, `pagemap`, `cmdline`, `environ`, or
-`fd`. `smaps_rollup` may be absent or denied; the result reports that condition rather
-than falling back to a more invasive source. The counters are non-atomic snapshots, and
-Linux documents some `statm` values as approximate.
+The tool does not read these interfaces:
 
-## Phase 6 orchestration
+- `/proc/<pid>/mem`
+- `maps`
+- `smaps`
+- `pagemap`
+- `cmdline`
+- `environ`
+- `fd`
 
-Configured `tools/call` requests no longer block stdin processing. A fixed pool of two
-worker threads resumes small C++20 coroutines that bridge admitted requests to the
-existing policy-gated tools. At most 16 tool calls may be accepted but unfinished at
-once, including running calls. New work beyond that cap receives a bounded
-`server_busy` tool error; duplicate in-flight JSON-RPC IDs receive
-`duplicate_request_id`. No thread is created per request.
+The counters are non-atomic snapshots.
+Some `statm` values are approximate.
+The result reports when `smaps_rollup` is not available.
+The tool does not use a more invasive fallback.
 
-The server accepts MCP `notifications/cancelled` notifications with a valid `requestId`.
-For matching in-flight tool work it requests cooperative stop and suppresses the normal
-response. Unknown or already-completed IDs are ignored. Log, ELF, and process analyzers
-check the stop context before work and at bounded read or parse checkpoints.
+## Work control
 
-Each accepted call also has a 30-second steady-clock deadline. Expired work returns a
-bounded `deadline_exceeded` execution error unless client cancellation has already
-suppressed the response. Cancellation is cooperative: Phase 6 does not claim forced
-thread termination or hard real-time interruption of arbitrary system calls.
+The server uses two worker threads.
+The server accepts at most 16 unfinished tool calls.
+This limit includes queued and running calls.
 
-Workers and the stdin reader share one serialized protocol writer, so stdout contains
-complete JSON-RPC lines without byte interleaving. Tool responses may finish out of
-request order and are correlated by their JSON-RPC IDs. EOF stops new admission, drains
-already accepted work, and joins the worker pool. MCP task support remains forbidden.
+The server returns `server_busy` when the limit is full.
+The server returns `duplicate_request_id` for a duplicate in-flight ID.
+Equal non-negative signed and unsigned numeric IDs have one internal identity.
+String IDs stay different from numeric IDs.
 
-## Phase 7 assurance layer
+Each accepted call has a 30-second steady-clock deadline.
+The server supports MCP `notifications/cancelled` for in-flight tool calls.
+Cancellation is cooperative.
+The analyzers check for cancellation at bounded points.
+The server does not forcibly terminate a worker thread.
 
-Phase 7 adds no host authority and no new MCP tool. It strengthens the existing boundary
-by attacking protocol, configuration, log, ELF, and scheduler code with deterministic
-and coverage-guided inputs.
+Tool responses can finish in a different order from requests.
+The client must use the JSON-RPC ID to correlate each response.
+One serialized writer writes complete response lines to standard output.
 
-Before a JSON DOM is constructed, a SAX preflight enforces bounded nesting and token
-counts and rejects duplicate object keys. Protocol messages permit at most 64 nested
-containers and 32,768 structural tokens. Runtime-policy documents permit at most 32
-nested containers and 4,096 tokens. Syntax errors remain JSON-RPC parse errors;
-well-formed inputs that violate these safety limits fail as invalid requests or invalid
-configuration.
+A worker callback can request shutdown.
+This request stops new admission and returns without a wait or a join.
+A later non-worker shutdown drains accepted work and joins all workers.
+EOF also stops admission and drains accepted work.
 
-Five optional Clang libFuzzer targets exercise protocol handling, runtime-policy parsing,
-ELF inspection, streaming log analysis, and the bounded `/proc` text parsers. The process
-fuzzer operates only on supplied bytes; it does not open or discover host processes. A deterministic mutation runner executes the
-same invariants under GCC, Clang, ASan/UBSan, and ordinary CTest, so useful coverage does
-not depend on libFuzzer being installed. Curated corpora preserve valid, malformed,
-duplicate-key, and boundary inputs.
+## JSON safety
 
-Scheduler regressions inject worker-thread creation failure after a worker has already
-started, call shutdown concurrently, canonicalize equal signed and unsigned numeric
-JSON-RPC IDs, race cancellation against deadlines, and repeatedly test saturation and
-throwing completion callbacks. ThreadSanitizer has a dedicated focused build mode.
+The server runs a SAX preflight before it constructs a JSON DOM.
+The preflight checks these conditions:
 
-Fuzzing and sanitizers increase evidence; they do not prove the absence of vulnerabilities.
-Crashes, hangs, sanitizer findings, and minimized fuzz artifacts are expected to become
-permanent regression cases before release.
+- valid JSON syntax
+- no duplicate object keys
+- bounded container depth
+- bounded token count
+
+Protocol JSON permits at most 64 nested containers and 32,768 tokens.
+Runtime-policy JSON permits at most 32 nested containers and 4,096 tokens.
+The protocol byte limit is 1 MiB.
+The runtime-policy byte limit is 64 KiB.
+Closed schema validation runs after the preflight.
 
 ## Fixed limits
 
@@ -221,32 +274,42 @@ permanent regression cases before release.
 | Search matches or tail lines | 50 |
 | ELF selected metadata reads | 1 MiB |
 | ELF program headers | 256 |
-| ELF dynamic entries | 4096 |
+| ELF dynamic entries | 4,096 |
 | ELF dynamic string table | 256 KiB |
-| Outstanding tool calls | 16 queued plus running |
+| Unfinished tool calls | 16 |
 | Worker threads | 2 |
 | Tool-call deadline | 30 seconds |
-| Tool-call burst | 16 calls per one-second window |
-| JSON-RPC request and response | 1 MiB each |
+| Tool-call burst | 16 calls in one second |
+| JSON-RPC request | 1 MiB |
+| JSON-RPC response | 1 MiB |
 
 ## MCP behavior
 
-The server targets MCP revision `2025-11-25` over newline-delimited JSON-RPC 2.0 on
-stdin/stdout. Incoming JSON passes bounded duplicate-key, depth, and token preflight
-before DOM construction. It supports `initialize`, `notifications/initialized`, `ping`,
-`tools/list`, and—in configured mode—`tools/call`.
+The server uses MCP revision `2025-11-25`.
+It uses newline-delimited JSON-RPC 2.0 on standard input and standard output.
 
-Tool definitions have closed input schemas, success output schemas, read-only
-annotations, and forbidden task support. `notifications/cancelled` is supported for
-normal in-flight tool requests; experimental MCP tasks are not. Successful calls return
-matching `structuredContent` and text content. Expected execution failures use `isError` and do
-not claim conformance to a success-only output schema. Unknown tools and malformed call
-envelopes are JSON-RPC errors.
+The server supports these methods:
 
-Stdout contains only complete protocol messages. Generic diagnostics and explicit
-legacy-mode warnings go to stderr without echoing request, file, or process contents.
+- `initialize`
+- `notifications/initialized`
+- `ping`
+- `tools/list`
+- `tools/call` when a policy enables tools
+- `notifications/cancelled` for in-flight tool calls
 
-## Reproducible unconfigured transcript
+Tool schemas are closed.
+Tool annotations identify read-only behavior.
+MCP task support is forbidden.
+
+Successful tool calls return equal `structuredContent` and text content.
+Expected tool failures use `isError`.
+Protocol errors use JSON-RPC error objects.
+
+Standard output contains protocol messages only.
+Standard error contains generic diagnostics and compatibility warnings.
+Diagnostics do not echo request data, file data, or process data.
+
+## Unconfigured example
 
 ```bash
 ./build/dev/native-mcp-sandbox <<'MCP_INPUT'
@@ -257,25 +320,34 @@ legacy-mode warnings go to stderr without echoing request, file, or process cont
 MCP_INPUT
 ```
 
-Expected stdout:
+Expected standard output:
 
 ```jsonl
-{"id":1,"jsonrpc":"2.0","result":{"capabilities":{"tools":{}},"protocolVersion":"2025-11-25","serverInfo":{"name":"native-mcp-sandbox","version":"0.8.0"}}}
+{"id":1,"jsonrpc":"2.0","result":{"capabilities":{"tools":{}},"protocolVersion":"2025-11-25","serverInfo":{"name":"native-mcp-sandbox","version":"0.9.0"}}}
 {"id":2,"jsonrpc":"2.0","result":{}}
 {"id":3,"jsonrpc":"2.0","result":{"tools":[]}}
 ```
 
-The initialized notification receives no response, and this normal transcript writes
-nothing to stderr. Process integration tests also launch configured filesystem-only,
-process-only, and combined servers. Configured tool responses are validated by ID rather
-than assuming completion order.
+The initialized notification has no response.
+The normal transcript writes nothing to standard error.
 
-## Build and verify
+## Build and test
 
-Requirements: Linux, CMake 3.20+, Ninja, a C++20 GCC or Clang compiler,
-system-provided nlohmann/json 3.11+, Linux `openat2` and ELF headers, procfs, and a
-kernel with pidfd support for strict process mode. No libelf or procps runtime dependency
-is used.
+Requirements:
+
+- Linux
+- CMake 3.20 or newer
+- Ninja
+- a C++20 GCC or Clang compiler
+- Python 3
+- nlohmann/json 3.11 or newer
+- Linux `openat2` and ELF headers
+- procfs
+- pidfd support for strict process mode
+
+The project does not use a libelf or procps runtime dependency.
+
+Run the normal builds:
 
 ```bash
 cmake --preset dev
@@ -285,103 +357,152 @@ ctest --preset dev
 cmake --preset release
 cmake --build --preset release
 ctest --preset release
+```
 
+Run the demonstration:
+
+```bash
+mkdir -p ./build/agent-investigation-output
+python3 scripts/run_agent_investigation_demo.py \
+  --server ./build/dev/native-mcp-sandbox \
+  --fixture ./demo/investigation/application.log \
+  --output-dir ./build/agent-investigation-output
+```
+
+The command writes `report.json` and `report.md` to the output directory.
+The output directory is generated material.
+
+Run the sanitizer build:
+
+```bash
 cmake --preset sanitizers
 cmake --build --preset sanitizers
 ASAN_OPTIONS=detect_leaks=1 ctest --preset sanitizers
+```
 
+Run the focused ThreadSanitizer tests:
+
+```bash
 CXX=g++ cmake --preset thread-sanitizer
 cmake --build --preset thread-sanitizer
-TSAN_OPTIONS=halt_on_error=1 ctest --preset thread-sanitizer -R '^orchestration\.(unit|stress)$'
+TSAN_OPTIONS=halt_on_error=1 \
+  ctest --preset thread-sanitizer -R '^orchestration\.(unit|stress)$'
+```
 
+Build the optional fuzz targets:
+
+```bash
 CXX=clang++ cmake --preset fuzzers
 cmake --build --preset fuzzers
 ```
 
-Run a repeatable extended native stress pass or timed libFuzzer campaigns:
+Run the native stress and fuzz scripts:
 
 ```bash
 NMS_STRESS_ITERATIONS=20000 ./scripts/run_security_stress.sh
 NMS_FUZZ_SECONDS=60 ./scripts/run_fuzz_campaign.sh
 ```
 
-The fuzz preset requires Clang and enables libFuzzer with ASan/UBSan. Generated corpora,
-crash artifacts, and build directories stay outside the source package. Presets and
-scripts treat warnings as errors and use at most two compilation jobs. No container
-runtime is required.
+The scripts use at most two compilation jobs.
+The project does not require a container runtime.
 
-## Architecture
+## Phase 7 assurance evidence
 
-```mermaid
-flowchart LR
-    A["MCP client"] --> P["bounded JSON preflight"]
-    P --> B["bounded stdio and lifecycle"]
-    B --> C["admission, duplicate check, backpressure"]
-    C --> D["bounded coroutine queue"]
-    D --> E["fixed two-worker pool"]
-    A -. "notifications/cancelled" .-> C
-    E --> F["filesystem or process policy gate"]
-    F --> G["log, ELF, or proc analyzer"]
-    G --> H["serialized complete response line"]
-    H --> A
-```
+Phase 7 assurance used Ubuntu 24.04.
+It tested source head `df576168fd44561254736a60c45188333bd1bc50`.
 
-## Deliberate limitations
+The assurance work completed these tests:
 
-Phase 7 does not provide regex, recursive search, file watching, arbitrary file reads,
-filesystem mutation, shell execution, networking, ELF sections or symbols, disassembly,
-signature verification, raw process memory, maps, command lines, environments, process
-discovery, forced cancellation, hard real-time preemption, MCP tasks, dynamic worker
-resizing, priorities, or durable queues. Cancellation and deadlines are cooperative.
-Fuzzing is bounded by the selected corpus, duration, machine, compiler, and sanitizer; it
-is not a proof of memory safety or correctness. These limitations are explicit rather
-than hidden behind security claims.
+- two deterministic campaigns with 100,000 iterations each
+- repeated ThreadSanitizer scheduler tests
+- strict `openat2` and pidfd integration
+- real AF_UNIX and FIFO integration
+- five parallel libFuzzer campaigns of 600 seconds each
+
+The five libFuzzer campaigns executed 61,925,751 inputs.
+The recorded runs found no crash, sanitizer finding, timeout, or crash artifact.
+These results apply only to the tested build and inputs.
+They do not prove complete correctness or security.
+
+## Limitations
+
+The server does not provide these capabilities:
+
+- regular-expression search
+- recursive search
+- file watching
+- arbitrary file reads
+- filesystem changes
+- shell execution
+- networking
+- ELF sections or symbols
+- disassembly
+- signature verification
+- raw process memory
+- process maps
+- process command lines
+- process environments
+- process discovery
+- forced cancellation
+- hard real-time preemption
+- MCP tasks
+- dynamic worker changes
+- priorities
+- durable queues
+
+Fuzzing has finite time and finite input coverage.
+A clean fuzzing run is not proof of memory safety or correctness.
 
 ## Roadmap
 
-1. Phase 0 — foundation, constraints, build, tests, and CI: complete
-2. Phase 1 — minimal MCP lifecycle and JSON-RPC over stdio: complete
-3. Phase 2 — filesystem policy gate and resource enforcement: complete
-4. Phase 3 — streaming log-analysis tools: complete
-5. Phase 4 — safe Linux ELF inspection: complete
-6. Phase 5 — bounded `/proc` memory observation: complete
-7. Phase 6 — coroutine orchestration, cancellation, and backpressure: complete
-8. Phase 7 — fuzzing, sanitizer coverage, and security regression suite: candidate awaiting audit
-9. Phase 8 — deterministic agent investigation demonstration
-10. Phase 9 — reproducible benchmarks and reference comparison
-11. Phase 10 — release hardening and stable tool interface
+1. Phase 0: foundation, limits, build, tests, and CI — complete.
+2. Phase 1: minimal MCP lifecycle and JSON-RPC over standard I/O — complete.
+3. Phase 2: filesystem policy and resource control — complete.
+4. Phase 3: streaming log tools — complete.
+5. Phase 4: bounded Linux ELF inspection — complete.
+6. Phase 5: bounded `/proc` memory observation — complete.
+7. Phase 6: coroutine orchestration, cancellation, and backpressure — complete.
+8. Phase 7: fuzzing, sanitizers, and security regressions — complete.
+9. Phase 8: deterministic agent investigation demonstration — candidate.
+10. Phase 9: reproducible benchmarks and reference comparison — not started.
+11. Phase 10: release hardening and stable tool interface — not started.
 
-## Repository layout
+## Main files
 
 ```text
-include/native_mcp/json_safety.hpp          Bounded SAX JSON preflight API
-src/json_safety.cpp                         Depth, token, syntax, and duplicate-key gate
-fuzz/fuzz_support.cpp                       Shared protocol, config, ELF, log, and proc invariants
-fuzz/fuzz_smoke.cpp                         Deterministic cross-compiler mutation runner
-fuzz/fuzz_*.cpp                             Optional Clang libFuzzer entry points
-fuzz/corpus/                                Curated regression seeds
-scripts/run_fuzz_campaign.sh                Timed native coverage-guided campaigns
-scripts/run_security_stress.sh              ASan/UBSan, deterministic fuzz, and TSan pass
-docs/FUZZING.md                              Campaign, minimization, and regression workflow
-tests/security_regression_tests.cpp         Hostile JSON and bounded-failure regressions
-tests/orchestration_stress_tests.cpp        Repeated cancellation, deadline, and shutdown races
-include/native_mcp/orchestration.hpp         Bounded coroutine scheduler API
-src/orchestration.cpp                       Worker pool, cancellation, deadlines, backpressure
-include/native_mcp/operation.hpp             Cooperative stop and deadline context
-include/native_mcp/runtime_config.hpp        Versioned runtime-policy parser
-src/runtime_config.cpp                      Closed schema v1/v2 parsing
-include/native_mcp/process_memory.hpp        Process policy and aggregate-memory API
-include/native_mcp/process_parsing.hpp       Pure bounded proc-text parser test surface
-src/process_memory.cpp                       Same-UID identity pinning and bounded proc reads
-tests/process_parsing_tests.cpp              Synthetic proc parser and overflow regressions
-include/native_mcp/file_policy.hpp           Filesystem policy and owned descriptors
-src/file_policy.cpp                          Linux path containment and regular-file checks
-include/native_mcp/log_analysis.hpp          Streaming log-analysis API
-src/log_analysis.cpp                         Literal search and bounded tail
-include/native_mcp/elf_analysis.hpp          Bounded ELF inspection API
-src/elf_analysis.cpp                         Selected ELF metadata parsing
+include/native_mcp/json_safety.hpp          Bounded JSON preflight API
+src/json_safety.cpp                         JSON syntax, depth, token, and duplicate-key checks
+fuzz/fuzz_support.cpp                       Shared fuzz invariants
+fuzz/fuzz_smoke.cpp                         Deterministic mutation runner
+fuzz/fuzz_*.cpp                             Optional Clang libFuzzer targets
+fuzz/corpus/                                Curated regression inputs
+scripts/run_fuzz_campaign.sh                Timed native fuzz campaigns
+scripts/run_security_stress.sh              Sanitizer, deterministic, and TSan tests
+docs/FUZZING.md                             Fuzz campaign and triage instructions
+tests/security_regression_tests.cpp         Security regression tests
+tests/orchestration_stress_tests.cpp        Scheduler stress tests
+include/native_mcp/orchestration.hpp        Scheduler API
+src/orchestration.cpp                       Worker pool and work control
+include/native_mcp/operation.hpp            Stop and deadline context
+include/native_mcp/runtime_config.hpp       Runtime-policy parser API
+src/runtime_config.cpp                      Runtime-policy parser
+include/native_mcp/process_memory.hpp       Process-memory API
+include/native_mcp/process_parsing.hpp      Bounded proc-text parser API
+src/process_memory.cpp                      Process policy and proc reads
+include/native_mcp/file_policy.hpp          Filesystem policy API
+src/file_policy.cpp                         Filesystem containment
+include/native_mcp/log_analysis.hpp         Log-analysis API
+src/log_analysis.cpp                        Log search and tail
+include/native_mcp/elf_analysis.hpp         ELF-analysis API
+src/elf_analysis.cpp                        ELF metadata analysis
 ```
+
+## Documentation style
+
+The active technical documents use an ASD-STE100 Issue 9 aligned style.
+See [`docs/WRITING_STYLE.md`](docs/WRITING_STYLE.md).
 
 ## License
 
-Apache License 2.0. See [`LICENSE`](LICENSE).
+Apache License 2.0.
+See [`LICENSE`](LICENSE).

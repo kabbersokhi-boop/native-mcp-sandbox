@@ -1,94 +1,165 @@
-# Threat Model
+# Threat model
 
 ## Assets
 
-- confidentiality and integrity of host files and processes;
-- privacy of command lines, environments, mappings, descriptors, and memory contents;
-- integrity and framing of MCP stdout;
-- bounded CPU, memory, descriptors, threads, queued work, JSON construction, and response
-  size; and
-- operator control over observable roots and processes.
+The project protects these assets:
+
+- confidentiality and integrity of host files
+- confidentiality and integrity of host processes
+- privacy of command lines, environments, maps, descriptors, and memory
+- integrity and framing of MCP standard output
+- bounded CPU, memory, descriptors, threads, work, JSON, and response size
+- operator control of approved roots and processes
 
 ## Trusted components
 
-- the installed executable and trusted runtime policy file;
-- the operating system, procfs implementation, C++ runtime, and compiler toolchain;
-- the MCP host that launches the process; and
-- operator-selected filesystem roots and process aliases.
+The project trusts these components:
 
-Fuzz corpora, crash artifacts, inspected files, and all MCP client input are untrusted.
+- the installed executable
+- the runtime policy file
+- the operating system and procfs
+- the C++ runtime and compiler toolchain
+- the MCP host that starts the server
+- the operator-selected roots and process aliases
 
-## Untrusted inputs
+The project does not trust these inputs:
 
-- every byte received through stdin;
-- JSON syntax, nesting, token count, duplicate keys, methods, IDs, cancellation IDs, and
-  tool arguments;
-- runtime-policy JSON before schema validation;
-- inspected log and ELF contents;
-- changing procfs data and process lifetime;
-- request timing, concurrency, bursts, cancellation races, and EOF timing; and
-- host resource failures such as thread-creation or allocation failure.
+- MCP client input
+- inspected files
+- fuzz corpora
+- fuzz artifacts
+- runtime-policy text before validation
+
+## Untrusted input surfaces
+
+Treat these items as untrusted:
+
+- each byte from standard input
+- JSON syntax and structure
+- object keys
+- method names
+- request IDs
+- cancellation IDs
+- tool arguments
+- runtime-policy values
+- log data
+- ELF data
+- procfs data
+- process lifetime
+- request timing
+- request concurrency
+- cancellation timing
+- EOF timing
+- thread-creation and allocation failures
 
 ## Controls
 
-- no-argument mode exposes no host tools;
-- bounded SAX JSON preflight before DOM construction;
-- rejection of duplicate object keys;
-- protocol limits of 64 nested containers and 32,768 tokens;
-- runtime-policy limits of 32 containers and 4,096 tokens;
-- closed configuration and tool schemas;
-- strict filesystem containment and same-UID process pinning;
-- fixed pseudo-files and bounded analyzers;
-- a fixed two-thread worker pool instead of per-request threads;
-- at most 16 unfinished tool calls;
-- pre-reserved coroutine-handle queue storage;
-- duplicate in-flight request-ID rejection with canonical non-negative numeric IDs;
-- per-call steady-clock deadlines and cooperative stop tokens;
-- MCP cancellation response suppression;
-- exception-safe worker construction and serialized idempotent shutdown;
-- one serialized protocol writer;
-- no raw memory, mappings, command line, environment, or descriptor enumeration; and
-- GCC, Clang, ASan, UBSan, leak detection, focused ThreadSanitizer, deterministic mutation,
-  libFuzzer smoke, malformed-input, cancellation, saturation, lifecycle, and real-process
-  tests.
+The server uses these controls:
 
-## Adversarial assurance strategy
+- no tools without a runtime policy
+- bounded SAX JSON preflight
+- duplicate-key rejection
+- protocol depth and token limits
+- runtime-policy depth and token limits
+- closed configuration and tool schemas
+- strict filesystem containment
+- same-UID process policy
+- pidfd pinning in strict process mode
+- fixed pseudo-file access
+- bounded analyzers
+- two fixed worker threads
+- at most 16 unfinished calls
+- reserved coroutine queue capacity
+- duplicate in-flight ID rejection
+- canonical non-negative numeric IDs
+- steady-clock deadlines
+- cooperative stop tokens
+- response suppression after client cancellation
+- exception-safe worker construction
+- serialized shutdown ownership
+- one serialized protocol writer
+- fixed demonstration request IDs and tool arguments
+- canonical reports with stable predicates only
+- no raw process memory or process discovery
+- compiler, sanitizer, fuzz, race, lifecycle, and integration tests
 
-The deterministic fuzz runner and five libFuzzer targets share invariants for protocol,
-runtime-policy, log, ELF, and pure bounded `/proc` text-parser paths. The proc harness accepts supplied bytes only and never opens host procfs. Fuzzed outputs must remain bounded; result/error
-states must be exclusive; analyzer collections must respect configured limits; and server
-responses must remain complete valid JSON-RPC objects.
+## Adversarial tests
 
-Scheduler stress repeats concurrent admission, queued and running cancellation,
-deadline/cancellation precedence, throwing completion callbacks, and simultaneous
-shutdown. Thread-creation failure is injected after one worker has started to verify that
-partial construction stops and joins the worker before propagating the failure.
+The deterministic mutation runner and the libFuzzer targets share invariants.
+They cover these surfaces:
 
-Every confirmed crash, hang, sanitizer finding, or race should be minimized and retained
-as a deterministic regression. Fuzzing duration and corpus size are finite, so a clean
-campaign does not establish absence of defects.
+- protocol input
+- runtime-policy input
+- log input
+- ELF input
+- supplied proc-text input
 
-## Residual risks and limitations
+The proc fuzz target does not open host procfs.
+It accepts supplied bytes only.
 
-- Cancellation and deadlines are cooperative. They do not forcibly interrupt an
-  arbitrary blocking system call or terminate a worker thread.
-- A tool can exceed its deadline until its next explicit stop checkpoint. Existing reads
-  are bounded, but Phase 7 does not claim hard real-time enforcement.
-- The outstanding-work cap includes running and queued calls; it is process-wide rather
-  than a per-client fairness policy.
-- JSON preflight parses the input before the DOM parser and adds bounded CPU and memory
-  overhead. It is not a replacement for schema validation.
-- Duplicate-key tracking allocates memory proportional to accepted key tokens, within the
-  byte and token caps.
-- JSON-RPC responses can complete out of order, which clients must correlate by ID.
-- Aggregate process counters remain non-atomic snapshots; some `statm` values are
-  approximate and `smaps_rollup` can be unavailable.
-- Sanitizers observe only executed paths and have their own blind spots. ASan/UBSan and
-  ThreadSanitizer run in separate builds.
-- Fuzz targets use temporary regular files and can encounter host descriptor or storage
-  exhaustion; such environmental failures are not treated as parser defects.
-- A privileged or compromised kernel can violate userspace assumptions.
-- The legacy filesystem backend cannot detect every bind mount. The explicit legacy
-  process mode lacks pidfd pinning.
-- MCP tasks, durable job recovery, dynamic worker resizing, priorities, and distributed
-  cancellation are not implemented.
+The invariants require these properties:
+
+- bounded output
+- valid JSON-RPC output
+- exclusive result or error state
+- bounded collections
+- bounded metadata reads
+- bounded previews
+
+Scheduler stress tests these conditions:
+
+- concurrent admission
+- queued cancellation
+- running cancellation
+- cancellation and deadline order
+- callback exceptions
+- simultaneous shutdown
+- partial worker construction
+
+For each confirmed crash, hang, sanitizer report, or race, add a minimized regression.
+A finite campaign cannot prove that defects are absent.
+
+## Residual risks
+
+Cancellation is cooperative.
+A blocking system call can continue until it returns or reaches a stop check.
+The server does not provide hard real-time enforcement.
+
+The unfinished-work limit is process-wide.
+It is not a fairness policy for multiple clients.
+
+JSON preflight adds a second parse.
+It uses bounded CPU and memory.
+It does not replace schema validation.
+
+Duplicate-key tracking uses memory for accepted keys.
+The byte and token limits bound this memory.
+
+Responses can finish out of order.
+Clients must correlate responses by ID.
+
+Process counters are non-atomic snapshots.
+Some `statm` values are approximate.
+`smaps_rollup` can be unavailable.
+
+Sanitizers observe executed paths only.
+AddressSanitizer and ThreadSanitizer run in separate builds.
+
+Fuzz targets can fail because of host resource exhaustion.
+An environmental failure is not automatically a parser defect.
+
+The Phase 8 demonstration uses synthetic data.
+It does not claim autonomous response or production suitability.
+Its process evidence does not retain runtime counters, PIDs, UIDs, or addresses.
+
+A privileged or compromised kernel can invalidate userspace assumptions.
+The legacy filesystem mode cannot detect every bind mount.
+The legacy process mode does not have pidfd pinning.
+
+The server does not implement these features:
+
+- MCP tasks
+- durable job recovery
+- dynamic worker changes
+- priorities
+- distributed cancellation

@@ -1,0 +1,176 @@
+{
+  "conclusion": "healthy_final_state_confirmed",
+  "evidence": [
+    {
+      "arguments": {
+        "caseSensitive": true,
+        "maxMatches": 10,
+        "path": "application.log",
+        "query": "INC-042",
+        "root": "evidence"
+      },
+      "finding": {
+        "expectedLines": [
+          1,
+          2,
+          3,
+          4,
+          5
+        ],
+        "matchCount": 5
+      },
+      "requestId": 10,
+      "tool": "logs.search"
+    },
+    {
+      "arguments": {
+        "caseSensitive": true,
+        "maxMatches": 10,
+        "path": "application.log",
+        "query": "ERROR",
+        "root": "evidence"
+      },
+      "finding": {
+        "expectedLines": [
+          2
+        ],
+        "matchCount": 1
+      },
+      "requestId": 11,
+      "tool": "logs.search"
+    },
+    {
+      "arguments": {
+        "maxLines": 3,
+        "path": "application.log",
+        "root": "evidence"
+      },
+      "finding": {
+        "expectedLines": [
+          3,
+          4,
+          5
+        ],
+        "finalState": "healthy"
+      },
+      "requestId": 12,
+      "tool": "logs.tail"
+    },
+    {
+      "arguments": {
+        "path": "sample.elf",
+        "root": "evidence"
+      },
+      "finding": {
+        "elfClass": "ELF64",
+        "fileType": "executable",
+        "machine": "x86_64"
+      },
+      "requestId": 13,
+      "tool": "elf.inspect"
+    },
+    {
+      "arguments": {
+        "process": "server"
+      },
+      "finding": {
+        "observed": true,
+        "requiredAggregateCountersPresent": true,
+        "strictPidfdPinning": true
+      },
+      "requestId": 14,
+      "tool": "proc.memory"
+    }
+  ],
+  "investigation": {
+    "correlationId": "INC-042",
+    "scenario": "service_restart_authentication_recovery",
+    "version": "0.9.0"
+  },
+  "requests": [
+    {
+      "arguments": {
+        "capabilities": {},
+        "clientInfo": {
+          "name": "phase-8-demo",
+          "version": "0.9.0"
+        },
+        "protocolVersion": "2025-11-25"
+      },
+      "method": "initialize",
+      "requestId": 1
+    },
+    {
+      "arguments": {},
+      "method": "tools/list",
+      "requestId": 2
+    },
+    {
+      "arguments": {
+        "arguments": {
+          "caseSensitive": true,
+          "maxMatches": 10,
+          "path": "application.log",
+          "query": "INC-042",
+          "root": "evidence"
+        },
+        "name": "logs.search"
+      },
+      "method": "tools/call",
+      "requestId": 10
+    },
+    {
+      "arguments": {
+        "arguments": {
+          "caseSensitive": true,
+          "maxMatches": 10,
+          "path": "application.log",
+          "query": "ERROR",
+          "root": "evidence"
+        },
+        "name": "logs.search"
+      },
+      "method": "tools/call",
+      "requestId": 11
+    },
+    {
+      "arguments": {
+        "arguments": {
+          "maxLines": 3,
+          "path": "application.log",
+          "root": "evidence"
+        },
+        "name": "logs.tail"
+      },
+      "method": "tools/call",
+      "requestId": 12
+    },
+    {
+      "arguments": {
+        "arguments": {
+          "path": "sample.elf",
+          "root": "evidence"
+        },
+        "name": "elf.inspect"
+      },
+      "method": "tools/call",
+      "requestId": 13
+    },
+    {
+      "arguments": {
+        "arguments": {
+          "process": "server"
+        },
+        "name": "proc.memory"
+      },
+      "method": "tools/call",
+      "requestId": 14
+    }
+  ],
+  "schemaVersion": 1,
+  "security": {
+    "legacyFlagsPassed": false,
+    "strictOpenat2": true,
+    "strictPidfdPinning": true
+  }
+}
