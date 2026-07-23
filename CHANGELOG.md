@@ -17,7 +17,7 @@ Before version 1.0, an interface can change.
 - Added a deterministic investigation demonstration for version `0.9.0`.
 - Added committed synthetic evidence and canonical JSON and Markdown reports.
 - Added strict standard-I/O, tool-list, response, schema, and report checks.
-- Final CI assurance is pending.
+- CI assurance passed for implementation head `3db672ee65ebaca048d7e1f9490c6ad43aeb4ec4` in run `30007718678`.
 
 ## 0.8.0 - 2026-07-21
 

@@ -8,8 +8,9 @@
 - Base commit: `486a3a7c9fdf90f54e74e87c7ae68a245a9cc53c`.
 - Implementation branch: `phase/8-deterministic-agent-demo`.
 
-Final assurance is pending.
-This manifest does not claim that assurance passed.
+Phase 8 assurance passed for implementation head
+`3db672ee65ebaca048d7e1f9490c6ad43aeb4ec4`.
+The assurance record covers the exact source head and CI run below.
 
 ## Implemented files
 
@@ -62,6 +63,16 @@ It runs without the legacy descriptor-walk and process-pinning flags.
 - Require equality with both committed golden files.
 - Run `agent.investigation_demo` in GCC, Clang, and sanitizer CTest suites.
 - Pass all five required GitHub Actions jobs.
+
+## Assurance record
+
+- Source head: `3db672ee65ebaca048d7e1f9490c6ad43aeb4ec4`.
+- CI run: `30007718678`.
+- GCC Debug: job `89207709631`, passed.
+- Clang Release: job `89207709564`, passed.
+- ASan and UBSan: job `89207709522`, passed.
+- ThreadSanitizer orchestration: job `89207709779`, passed.
+- libFuzzer corpus and mutation smoke: job `89207709620`, passed.
 
 ## Explicit non-claims
 

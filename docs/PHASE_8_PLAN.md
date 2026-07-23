@@ -137,8 +137,9 @@ Phase 8 is complete only when the final branch head passes these gates:
 - golden report equality
 - public audit of the unchanged host boundary
 
-Final assurance remains pending until the required CI jobs pass on the final
-branch head.
+The required CI jobs passed for implementation head
+`3db672ee65ebaca048d7e1f9490c6ad43aeb4ec4` in run `30007718678`.
+The job results are recorded in `PHASE_8_MANIFEST.md`.
 
 ## Non-claims
 
