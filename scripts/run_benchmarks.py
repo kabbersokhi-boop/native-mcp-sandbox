@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Run bounded Phase 9 benchmark smoke campaigns and write canonical JSON."""
 from __future__ import annotations
-import argparse, hashlib, json, os, platform, selectors, subprocess, sys, time
+import argparse, hashlib, json, os, platform, selectors, subprocess, sys, tempfile, time
 from pathlib import Path
 from statistics import mean, median, pstdev
 
@@ -31,10 +31,13 @@ def bounded_run(command: list[str], data: bytes) -> bytes:
     except BaseException:
       process.kill(); process.wait(); raise
     finally: selector.close()
-def summary(case_id: str, samples: list[float], input_bytes: int, operations: int, concurrency: int=1) -> dict[str,object]:
+def percentile(values: list[float], rank: float) -> float:
+    ordered = sorted(values)
+    return ordered[min(len(ordered) - 1, int((len(ordered) - 1) * rank + 0.999999))]
+def summary(case_id: str, samples: list[float], input_bytes: int, operations: int, unit: str = "nanoseconds_per_operation", concurrency: int=1) -> dict[str,object]:
     if not samples or len(samples)>MAX_SAMPLES: fail("invalid sample count")
     ordered=sorted(samples)
-    return {"caseId":case_id,"unit":"nanoseconds_per_operation","inputBytes":input_bytes,"operationCount":operations,"concurrency":concurrency,"timeoutMilliseconds":int(PROCESS_TIMEOUT*1000),"warmupIterations":1,"sampleCount":len(samples),"originalSampleCount":len(samples),"retainedSampleCount":len(samples),"excludedSampleCount":0,"exclusionClasses":[],"rawSamples":samples,"minimum":ordered[0],"maximum":ordered[-1],"median":median(samples),"p95":ordered[min(len(samples)-1,int(len(samples)*.95))],"mean":mean(samples),"standardDeviation":pstdev(samples),"validationInTimedRegion":True}
+    return {"caseId":case_id,"unit":unit,"inputBytes":input_bytes,"operationCount":operations,"concurrency":concurrency,"timeoutMilliseconds":int(PROCESS_TIMEOUT*1000),"warmupIterations":1,"measuredIterations":operations,"sampleCount":len(samples),"originalSampleCount":len(samples),"retainedSampleCount":len(samples),"excludedSampleCount":0,"exclusionClasses":[],"rawSamples":samples,"minimum":ordered[0],"maximum":ordered[-1],"median":median(samples),"p95":percentile(samples,.95),"mean":mean(samples),"standardDeviation":pstdev(samples),"validationInTimedRegion":True,"noSamplesExcluded":True}
 def requests(configured: bool, root: Path, policy_directory: Path) -> tuple[list[str],bytes,int]:
     messages=[{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"phase-9","version":"1"}}},{"jsonrpc":"2.0","method":"notifications/initialized"},{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}]
     command=[]
@@ -44,29 +47,60 @@ def requests(configured: bool, root: Path, policy_directory: Path) -> tuple[list
       calls=[("logs.search",{"root":"fixtures","path":"log.txt","query":"needle","caseSensitive":True,"maxMatches":10}),("logs.tail",{"root":"fixtures","path":"log.txt","maxLines":2}),("elf.inspect",{"root":"fixtures","path":"minimal.elf"}),("proc.memory",{"process":"server"})]
       for index,(name,args) in enumerate(calls,10): messages.append({"jsonrpc":"2.0","id":index,"method":"tools/call","params":{"name":name,"arguments":args}})
     return command, ("".join(canonical(message) for message in messages)).encode(), len(messages)
+def validate_responses(output: bytes, configured: bool) -> None:
+    try: responses=[json.loads(line) for line in output.decode("utf-8").splitlines()]
+    except (UnicodeDecodeError,json.JSONDecodeError) as error: fail(f"malformed JSON-RPC output: {error}")
+    expected=({1,2}|set(range(10,14))) if configured else {1,2}; found=[]
+    for response in responses:
+      if not isinstance(response,dict) or "id" not in response or response["id"] in found: fail("missing or duplicate response ID")
+      if response["id"] not in expected or "error" in response or not isinstance(response.get("result"),dict): fail("unexpected ID, JSON-RPC error, or malformed result")
+      found.append(response["id"])
+    if set(found)!=expected: fail("incomplete response set")
+    initialize=next(response for response in responses if response["id"]==1); listing=next(response for response in responses if response["id"]==2)
+    if initialize["result"].get("protocolVersion")!="2025-11-25" or not isinstance(initialize["result"].get("capabilities"),dict): fail("invalid initialize result")
+    tools=listing["result"].get("tools")
+    if not isinstance(tools,list) or (not configured and tools!=[]): fail("unexpected unconfigured tools/list surface")
+    if configured and {tool.get("name") for tool in tools}!={"logs.search","logs.tail","elf.inspect","proc.memory"}: fail("unexpected configured tools/list surface")
+    if configured:
+      results={response["id"]:response["result"] for response in responses if response["id"]>=10}
+      for identifier in range(10,14):
+        content=results[identifier].get("content"); structured=results[identifier].get("structuredContent")
+        if not isinstance(content,list) or len(content)!=1 or not isinstance(structured,dict) or not isinstance(content[0],dict) or content[0].get("type")!="text": fail("invalid MCP tool result")
+        try: text_content=json.loads(content[0]["text"])
+        except (KeyError,TypeError,json.JSONDecodeError) as error: fail(f"invalid tool text result: {error}")
+        if text_content!=structured: fail("tool text and structured result differ")
+      search,tail,elf=results[10]["structuredContent"],results[11]["structuredContent"],results[12]["structuredContent"]
+      if len(search.get("matches",[]))!=3 or len(tail.get("lines",[]))!=2: fail("fixture log conclusion mismatch")
+      if elf.get("class")!="ELF64" or elf.get("machine")!="x86_64": fail("fixture ELF conclusion mismatch")
+      process=results[13]["structuredContent"]
+      if process.get("process")!="server" or process.get("pidfdPinned") is not True: fail("invalid configured process alias result")
 def e2e_case(case_id: str, server: Path, configured: bool, fixtures: Path, policy_directory: Path) -> dict[str,object]:
     command, payload, operations=requests(configured,fixtures,policy_directory); samples=[]
     for _ in range(1): bounded_run([str(server),*command],payload)
     for _ in range(5):
       started=time.monotonic_ns(); output=bounded_run([str(server),*command],payload)
-      responses=[json.loads(line) for line in output.decode().splitlines()]
-      expected=({1,2} | set(range(10,14))) if configured else {1,2}
-      if {response.get("id") for response in responses} != expected: fail("response correlation failed")
-      samples.append((time.monotonic_ns()-started)/operations)
-    return summary(case_id,samples,len(payload),operations,4 if configured else 1)
-def metadata(server: Path) -> dict[str,object]:
+      validate_responses(output,configured)
+      samples.append(float(time.monotonic_ns()-started))
+    return summary(case_id,samples,len(payload),1,"nanoseconds_per_scenario",4 if configured else 1)
+def metadata(benchmark: Path, server: Path, argv: list[str]) -> dict[str,object]:
     def value(v: object) -> dict[str,object]: return {"available":True,"value":v}
-    return {"repositoryCommit":value(subprocess.check_output(["git","rev-parse","HEAD"],text=True).strip()),"dirtyWorktree":value(bool(subprocess.check_output(["git","status","--porcelain"],text=True).strip())),"benchmarkExecutableSha256":value(hashlib.sha256(server.read_bytes()).hexdigest()),"operatingSystem":value(platform.platform()),"kernel":value(platform.release()),"logicalCpuCount":value(os.cpu_count()),"pageSize":value(os.sysconf("SC_PAGE_SIZE")),"monotonicClock":value("time.monotonic_ns"),"harnessVersion":value(HARNESS_VERSION),"schemaVersion":value(SCHEMA_VERSION),"fixtureSetVersion":value(FIXTURE_SET_VERSION),"noiseControls":{"cpuAffinity":"unavailable","governor":"unavailable","turbo":"unavailable","idleSystem":"not-applied"}}
+    def unavailable(reason: str) -> dict[str,object]: return {"available":False,"reason":reason}
+    def probe(command: list[str]) -> dict[str,object]:
+      try: return value(subprocess.check_output(command,text=True,stderr=subprocess.DEVNULL).strip())
+      except (OSError,subprocess.CalledProcessError): return unavailable("probe failed")
+    return {"repositoryCommit":probe(["git","rev-parse","HEAD"]),"dirtyWorktree":value(bool(subprocess.check_output(["git","status","--porcelain"],text=True).strip())),"benchmarkExecutableSha256":value(hashlib.sha256(benchmark.read_bytes()).hexdigest()),"serverExecutableSha256":value(hashlib.sha256(server.read_bytes()).hexdigest()),"compilerName":value(os.environ.get("CXX","compiler unavailable")),"compilerVersion":probe([os.environ.get("CXX","c++"),"--version"]),"buildType":value(os.environ.get("CMAKE_BUILD_TYPE","unknown")),"cmakeVersion":probe(["cmake","--version"]),"cmakeGenerator":unavailable("not exposed by runner"),"cmakeCacheOptions":unavailable("not exposed by runner"),"compileFlags":unavailable("not exposed by runner"),"linkFlags":unavailable("not exposed by runner"),"benchmarkFramework":value({"name":"project-owned-cpp","version":"1.0.0"}),"dependencyVersions":unavailable("not exposed by runner"),"operatingSystem":value(platform.platform()),"kernel":value(platform.release()),"cpuModel":probe(["uname","-p"]),"logicalCpuCount":value(os.cpu_count()),"cpuAffinity":value(sorted(os.sched_getaffinity(0))),"frequencyGovernor":unavailable("not readable without host-specific policy"),"turboBoost":unavailable("not readable without host-specific policy"),"virtualization":unavailable("not exposed by runner"),"pageSize":value(os.sysconf("SC_PAGE_SIZE")),"monotonicClock":value(time.get_clock_info("monotonic").implementation),"monotonicResolutionSeconds":value(time.get_clock_info("monotonic").resolution),"schemaVersion":value(SCHEMA_VERSION),"fixtureSetVersion":value(FIXTURE_SET_VERSION),"harnessVersion":value(HARNESS_VERSION),"commandLineArguments":value(argv),"noiseControls":{"cpuAffinity":"observed","frequencyGovernor":"unavailable","turboBoost":"unavailable","idleSystem":"not-applied"}}
 def main() -> int:
  p=argparse.ArgumentParser(); p.add_argument("--benchmark",type=Path,required=True); p.add_argument("--server",type=Path,required=True); p.add_argument("--fixtures",type=Path,required=True); p.add_argument("--output",type=Path,default=Path("build/benchmark-report.json")); args=p.parse_args()
  if args.output.exists(): args.output.unlink()
  if not args.fixtures.is_dir(): fail("fixture directory missing")
- component=json.loads(bounded_run([str(args.benchmark),str(args.fixtures)],b"").decode())
- cases=component["cases"]+[e2e_case("e2e.unconfigured.lifecycle_tools_list",args.server,False,args.fixtures,args.output.parent),e2e_case("e2e.configured.all_tools_concurrent",args.server,True,args.fixtures,args.output.parent)]
- report={"schemaVersion":SCHEMA_VERSION,"fixtureSetVersion":FIXTURE_SET_VERSION,"harnessVersion":HARNESS_VERSION,"framework":component["framework"],"outlierPolicy":"All valid samples are retained; no automatic outlier filter is applied.","metadata":metadata(args.benchmark),"cases":cases,"comparisonNotes":["SAX plus DOM versus DOM alone is measured only on equivalent valid protocol input. Reduced-control references are measurement-only and unsafe as a deployment recommendation."],"complete":True}
+ component=json.loads(bounded_run([str(args.benchmark),str(args.fixtures)],b"",False).decode())
+ cases=component["cases"]+[e2e_case("e2e.unconfigured.lifecycle_tools_list",args.server,False,args.fixtures,args.output.parent),e2e_case("e2e.configured.all_tools",args.server,True,args.fixtures,args.output.parent)]
+ report={"schemaVersion":SCHEMA_VERSION,"fixtureSetVersion":FIXTURE_SET_VERSION,"harnessVersion":HARNESS_VERSION,"framework":component["framework"],"outlierPolicy":"All valid samples are retained; no automatic outlier filter is applied.","metadata":metadata(args.benchmark,args.server,sys.argv),"cases":cases,"comparisonGroups":[{"id":"protocol.parse","question":"SAX preflight plus DOM parse versus DOM parse alone on identical valid input","cases":["component.json_dom.parse","comparison.protocol.sax_plus_dom"],"equivalentInput":True,"equivalentResult":True,"deploymentRecommendation":"measurement-only"}],"complete":True}
  encoded=canonical(report).encode();
  if len(encoded)>OUTPUT_LIMIT: fail("report byte limit exceeded")
- args.output.parent.mkdir(parents=True,exist_ok=True); args.output.write_bytes(encoded); return 0
+ from validate_benchmark_report import validate
+ validate(report,Path(__file__).resolve().parents[1]/"benchmarks/schema/benchmark-report.schema.json")
+ args.output.parent.mkdir(parents=True,exist_ok=True); temporary=args.output.with_suffix(args.output.suffix+".tmp"); temporary.write_bytes(encoded); os.replace(temporary,args.output); return 0
 if __name__=="__main__":
  try: raise SystemExit(main())
  except Exception as error: print(f"benchmark failure: {error}",file=sys.stderr); raise SystemExit(1)

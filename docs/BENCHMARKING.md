@@ -11,7 +11,8 @@ python3 scripts/render_benchmark_report.py --input build/benchmark-report.json
 
 The smoke campaign uses seven component samples and five end-to-end samples. Each
 uses a steady monotonic clock, bounded raw arrays, and fixed fixture inputs. Canonical
-JSON has one final newline and is validated structurally by the supplied schema.
+JSON has one final newline and is validated offline against the supplied schema before
+an atomic replace.
 
 Reports are observations for the recorded build and environment, not universal
 rankings. Shared CI runner timings are informational. Retain all valid samples;
@@ -24,6 +25,9 @@ operations. The stdio harness completes lifecycle messages, correlates IDs, boun
 stdout/stderr, rejects strict-mode stderr, and kills and reaps timeout failures.
 It also calls every existing tool only under the configured server alias.
 
-The documented SAX/DOM and streaming/whole-buffer comparisons are measurement-only.
-They must have equivalent input and result semantics before timing. A reduced-control
-reference is unsafe as a deployment recommendation and is never a server option.
+The paired SAX-preflight-plus-DOM versus DOM-only comparison uses identical valid
+input and parsed-result validation; it is measurement-only and makes no superiority
+claim. Streaming/whole-buffer references are omitted until independent truncation
+equivalence is reviewed. A reduced-control reference is unsafe as a deployment
+recommendation and is never a server option. End-to-end results use
+`nanoseconds_per_scenario`, not an average over heterogeneous messages.

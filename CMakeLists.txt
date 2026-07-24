@@ -324,6 +324,11 @@ if(BUILD_TESTING)
       COMMAND native_mcp_bench ${CMAKE_CURRENT_SOURCE_DIR}/benchmarks/fixtures
     )
     set_tests_properties(benchmarks.component_smoke PROPERTIES TIMEOUT 30)
+    add_test(
+      NAME benchmarks.failure_bounds
+      COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/benchmark_failure_tests.py
+    )
+    set_tests_properties(benchmarks.failure_bounds PROPERTIES TIMEOUT 30)
   endif()
 endif()
 
