@@ -9,7 +9,7 @@ SCHEMA_VERSION="1.0.0"; FIXTURE_SET_VERSION="1.0.0"; HARNESS_VERSION="1.0.0"
 OUTPUT_LIMIT=256*1024; STDERR_LIMIT=64*1024; PROCESS_TIMEOUT=10.0; MAX_SAMPLES=15
 def fail(message: str) -> None: raise RuntimeError(message)
 def canonical(value: object) -> str: return json.dumps(value, sort_keys=True, separators=(",",":"), ensure_ascii=True)+"\n"
-def bounded_run(command: list[str], data: bytes) -> bytes:
+def bounded_run(command: list[str], data: bytes, strict_stderr: bool = True) -> bytes:
     process=subprocess.Popen(command,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
     assert process.stdin and process.stdout and process.stderr
     process.stdin.write(data); process.stdin.close()
@@ -26,7 +26,7 @@ def bounded_run(command: list[str], data: bytes) -> bytes:
           buffers[stream].extend(chunk)
           if len(buffers[stream]) > (OUTPUT_LIMIT if stream is process.stdout else STDERR_LIMIT): fail("subprocess output byte limit exceeded")
       if process.wait(timeout=0.1)!=0: fail("benchmark subprocess failed")
-      if buffers[process.stderr]: fail("strict benchmark subprocess wrote standard error")
+      if strict_stderr and buffers[process.stderr]: fail("strict benchmark subprocess wrote standard error")
       return bytes(buffers[process.stdout])
     except BaseException:
       process.kill(); process.wait(); raise
