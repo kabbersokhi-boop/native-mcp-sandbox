@@ -89,6 +89,7 @@ def summary(
     operations: int,
     unit: str = "nanoseconds_per_operation",
     concurrency: int = 1,
+    validation_in_timed_region: bool = True,
 ) -> dict[str, object]:
     if not samples or len(samples) > MAX_SAMPLES:
         fail("invalid sample count")
@@ -115,11 +116,11 @@ def summary(
         "p95": percentile(samples, 0.95),
         "mean": mean(samples),
         "standardDeviation": pstdev(samples),
-        "validationInTimedRegion": True,
+        "validationInTimedRegion": validation_in_timed_region,
     }
 
 
-def requests(configured: bool, root: Path, policy_directory: Path) -> tuple[list[str], bytes, int]:
+def requests(configured: bool, root: Path, policy_directory: Path) -> tuple[list[str], bytes]:
     messages = [
         {
             "jsonrpc": "2.0",
@@ -179,7 +180,8 @@ def requests(configured: bool, root: Path, policy_directory: Path) -> tuple[list
                     "params": {"name": name, "arguments": arguments},
                 }
             )
-    return command, ("".join(canonical(message) for message in messages)).encode(), len(messages)
+    payload = "".join(canonical(message) for message in messages).encode()
+    return command, payload
 
 
 def validate_responses(output: bytes, configured: bool) -> None:
@@ -192,11 +194,16 @@ def validate_responses(output: bytes, configured: bool) -> None:
     for response in responses:
         if not isinstance(response, dict) or "id" not in response or response["id"] in found:
             fail("missing or duplicate response ID")
-        if response["id"] not in expected or "error" in response or not isinstance(response.get("result"), dict):
+        if (
+            response["id"] not in expected
+            or "error" in response
+            or not isinstance(response.get("result"), dict)
+        ):
             fail("unexpected ID, JSON-RPC error, or malformed result")
         found.append(response["id"])
     if set(found) != expected:
         fail("incomplete response set")
+
     initialize = next(response for response in responses if response["id"] == 1)
     listing = next(response for response in responses if response["id"] == 2)
     if initialize["result"].get("protocolVersion") != "2025-11-25" or not isinstance(
@@ -213,8 +220,13 @@ def validate_responses(output: bytes, configured: bool) -> None:
         "proc.memory",
     }:
         fail("unexpected configured tools/list surface")
+
     if configured:
-        results = {response["id"]: response["result"] for response in responses if response["id"] >= 10}
+        results = {
+            response["id"]: response["result"]
+            for response in responses
+            if response["id"] >= 10
+        }
         for identifier in range(10, 14):
             content = results[identifier].get("content")
             structured = results[identifier].get("structuredContent")
@@ -232,6 +244,7 @@ def validate_responses(output: bytes, configured: bool) -> None:
                 fail(f"invalid tool text result: {error}")
             if text_content != structured:
                 fail("tool text and structured result differ")
+
         search = results[10]["structuredContent"]
         tail = results[11]["structuredContent"]
         elf = results[12]["structuredContent"]
@@ -251,14 +264,16 @@ def e2e_case(
     fixtures: Path,
     policy_directory: Path,
 ) -> dict[str, object]:
-    command, payload, _ = requests(configured, fixtures, policy_directory)
+    command, payload = requests(configured, fixtures, policy_directory)
+    warmup = bounded_run([str(server), *command], payload)
+    validate_responses(warmup, configured)
     samples: list[float] = []
-    bounded_run([str(server), *command], payload)
     for _ in range(5):
         started = time.monotonic_ns()
         output = bounded_run([str(server), *command], payload)
+        elapsed = float(time.monotonic_ns() - started)
         validate_responses(output, configured)
-        samples.append(float(time.monotonic_ns() - started))
+        samples.append(elapsed)
     return summary(
         case_id,
         samples,
@@ -266,6 +281,7 @@ def e2e_case(
         1,
         "nanoseconds_per_scenario",
         4 if configured else 1,
+        validation_in_timed_region=False,
     )
 
 
@@ -282,7 +298,12 @@ def metadata(benchmark: Path, server: Path, argv: list[str]) -> dict[str, object
 
     def probe(command: list[str]) -> dict[str, object]:
         try:
-            return value(subprocess.check_output(command, text=True, stderr=subprocess.DEVNULL).strip())
+            output = subprocess.check_output(
+                command,
+                text=True,
+                stderr=subprocess.DEVNULL,
+            ).strip()
+            return value(output)
         except (OSError, subprocess.CalledProcessError):
             return unavailable("probe failed")
 
@@ -294,11 +315,32 @@ def metadata(benchmark: Path, server: Path, argv: list[str]) -> dict[str, object
                 cpu_model = value(line.split(":", 1)[1].strip())
                 break
 
+    try:
+        dirty = value(
+            bool(
+                subprocess.check_output(
+                    ["git", "status", "--porcelain"],
+                    text=True,
+                ).strip()
+            )
+        )
+    except (OSError, subprocess.CalledProcessError):
+        dirty = unavailable("git status probe failed")
+
+    affinity = (
+        value(sorted(os.sched_getaffinity(0)))
+        if hasattr(os, "sched_getaffinity")
+        else unavailable("not supported")
+    )
     return {
         "repositoryCommit": probe(["git", "rev-parse", "HEAD"]),
-        "dirtyWorktree": value(bool(subprocess.check_output(["git", "status", "--porcelain"], text=True).strip())),
-        "benchmarkExecutableSha256": value(hashlib.sha256(benchmark.read_bytes()).hexdigest()),
-        "serverExecutableSha256": value(hashlib.sha256(server.read_bytes()).hexdigest()),
+        "dirtyWorktree": dirty,
+        "benchmarkExecutableSha256": value(
+            hashlib.sha256(benchmark.read_bytes()).hexdigest()
+        ),
+        "serverExecutableSha256": value(
+            hashlib.sha256(server.read_bytes()).hexdigest()
+        ),
         "compilerName": environment("NMS_BENCHMARK_COMPILER"),
         "compilerVersion": environment("NMS_BENCHMARK_COMPILER_VERSION"),
         "buildType": environment("NMS_BENCHMARK_BUILD_TYPE"),
@@ -307,19 +349,25 @@ def metadata(benchmark: Path, server: Path, argv: list[str]) -> dict[str, object
         "cmakeCacheOptions": environment("NMS_BENCHMARK_CMAKE_OPTIONS"),
         "compileFlags": environment("NMS_BENCHMARK_COMPILE_FLAGS"),
         "linkFlags": environment("NMS_BENCHMARK_LINK_FLAGS"),
-        "benchmarkFramework": value({"name": "project-owned-cpp", "version": "1.0.0"}),
+        "benchmarkFramework": value(
+            {"name": "project-owned-cpp", "version": "1.0.0"}
+        ),
         "dependencyVersions": environment("NMS_BENCHMARK_DEPENDENCIES"),
         "operatingSystem": value(platform.platform()),
         "kernel": value(platform.release()),
         "cpuModel": cpu_model,
         "logicalCpuCount": value(os.cpu_count()),
-        "cpuAffinity": value(sorted(os.sched_getaffinity(0))) if hasattr(os, "sched_getaffinity") else unavailable("not supported"),
-        "frequencyGovernor": unavailable("not read or changed by the benchmark harness"),
+        "cpuAffinity": affinity,
+        "frequencyGovernor": unavailable(
+            "not read or changed by the benchmark harness"
+        ),
         "turboBoost": unavailable("not read or changed by the benchmark harness"),
         "virtualization": unavailable("not probed by the benchmark harness"),
         "pageSize": value(os.sysconf("SC_PAGE_SIZE")),
         "monotonicClock": value(time.get_clock_info("monotonic").implementation),
-        "monotonicResolutionSeconds": value(time.get_clock_info("monotonic").resolution),
+        "monotonicResolutionSeconds": value(
+            time.get_clock_info("monotonic").resolution
+        ),
         "schemaVersion": value(SCHEMA_VERSION),
         "fixtureSetVersion": value(FIXTURE_SET_VERSION),
         "harnessVersion": value(HARNESS_VERSION),
@@ -338,7 +386,11 @@ def main() -> int:
     parser.add_argument("--benchmark", type=Path, required=True)
     parser.add_argument("--server", type=Path, required=True)
     parser.add_argument("--fixtures", type=Path, required=True)
-    parser.add_argument("--output", type=Path, default=Path("build/benchmark-report.json"))
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=Path("build/benchmark-report.json"),
+    )
     args = parser.parse_args()
     if args.output.exists():
         args.output.unlink()
@@ -346,12 +398,20 @@ def main() -> int:
         fail("fixture directory missing")
 
     component = json.loads(
-        bounded_run([str(args.benchmark), str(args.fixtures.resolve())], b"", False).decode()
+        bounded_run(
+            [str(args.benchmark), str(args.fixtures.resolve())],
+            b"",
+            False,
+        ).decode()
     )
     component_cases = component.get("cases")
     if not isinstance(component_cases, list):
         fail("component benchmark did not return a case array")
-    case_ids = {case.get("caseId") for case in component_cases if isinstance(case, dict)}
+    case_ids = {
+        case.get("caseId")
+        for case in component_cases
+        if isinstance(case, dict)
+    }
     required_case_ids = {
         "component.json_sax.valid",
         "component.json_sax.rejected_duplicate",
@@ -392,14 +452,22 @@ def main() -> int:
         "fixtureSetVersion": FIXTURE_SET_VERSION,
         "harnessVersion": HARNESS_VERSION,
         "framework": component["framework"],
-        "outlierPolicy": "All valid samples are retained; no automatic outlier filter is applied.",
+        "outlierPolicy": (
+            "All valid samples are retained; no automatic outlier filter is applied."
+        ),
         "metadata": metadata(args.benchmark, args.server, sys.argv),
         "cases": cases,
         "comparisonGroups": [
             {
                 "id": "protocol.parse",
-                "question": "SAX preflight plus DOM parse versus DOM parse alone on identical valid input",
-                "cases": ["component.json_dom.parse", "comparison.protocol.sax_plus_dom"],
+                "question": (
+                    "SAX preflight plus DOM parse versus DOM parse alone "
+                    "on identical valid input"
+                ),
+                "cases": [
+                    "component.json_dom.parse",
+                    "comparison.protocol.sax_plus_dom",
+                ],
                 "equivalentInput": True,
                 "equivalentResult": True,
                 "deploymentRecommendation": "measurement-only",
@@ -410,6 +478,7 @@ def main() -> int:
     encoded = canonical(report).encode()
     if len(encoded) > OUTPUT_LIMIT:
         fail("report byte limit exceeded")
+
     from validate_benchmark_report import validate
 
     validate(
