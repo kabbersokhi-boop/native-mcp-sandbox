@@ -1,6 +1,6 @@
 # Phase 9 manifest
 
-Framework: project-owned C++20 harness (`1.0.0`) plus bounded Python stdio driver (`1.1.0`).
+Framework: project-owned C++20 harness (`1.0.0`) plus bounded Python stdio driver (`1.0.0`).
 ADR 0012 records the offline-build and dependency trade-off.
 
 Implemented cases: JSON SAX valid/rejected, generic JSON DOM parsing,
@@ -17,10 +17,12 @@ Limits: 256 KiB benchmark stdout/report, 64 KiB stderr, ten-second subprocess li
 retained; the report explicitly records zero exclusions.
 
 Semantic evidence: each measured operation validates its fixed result before its
-sample is recorded and contributes to an atomic benchmark sink. The paired JSON
-comparison uses one identical valid request and validates the identical parsed result;
-the cases are linked by `comparisonGroups` and make no superiority claim. The DOM
-case is intentionally generic because production has no public closed-schema validator.
+sample is recorded and contributes to a benchmark sink that is published outside the
+timed loop. The paired JSON comparison uses one identical valid request and validates
+the identical parsed result; the cases are linked by `comparisonGroups` and make no
+superiority claim. The DOM case is intentionally generic because production has no
+public closed-schema validator. End-to-end response validation occurs after each timed
+scenario and before the sample is retained.
 
 Omitted candidates: scheduler admission/completion/cancellation/saturation and the
 Phase 8 investigation invocation are not yet timed as standalone cases; they remain
