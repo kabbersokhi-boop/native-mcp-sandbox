@@ -1,0 +1,7 @@
+Name:	fixture-process
+State:	S (sleeping)
+Uid:	1000	1000	1000	1000
+Threads:	2
+VmRSS:	12 kB
+RssAnon:	4 kB
+RssFile:	8 kB

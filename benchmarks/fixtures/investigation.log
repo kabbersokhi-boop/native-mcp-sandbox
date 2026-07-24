@@ -1,0 +1,5 @@
+2026-01-15T10:00:00Z service=payments event=restart correlation=INC-042 state=starting
+2026-01-15T10:00:01Z service=payments level=ERROR event=authentication_failure correlation=INC-042
+2026-01-15T10:00:02Z service=payments event=retry correlation=INC-042 attempt=1 limit=2
+2026-01-15T10:00:03Z service=payments event=authentication_recovery correlation=INC-042
+2026-01-15T10:00:04Z service=payments event=health correlation=INC-042 status=healthy

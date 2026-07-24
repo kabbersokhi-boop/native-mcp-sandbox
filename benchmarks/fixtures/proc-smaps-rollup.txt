@@ -1,0 +1,6 @@
+Rss: 12 kB
+Pss: 7 kB
+Pss_Anon: 4 kB
+Pss_File: 3 kB
+Shared_Clean: 2 kB
+Private_Dirty: 4 kB
