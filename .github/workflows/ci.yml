@@ -43,6 +43,7 @@ jobs:
           cmake -S . -B build
           -G Ninja
           -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+          -DNMS_BUILD_BENCHMARKS=ON
           -DNMS_WARNINGS_AS_ERRORS=ON
 
       - name: Build
@@ -53,6 +54,33 @@ jobs:
 
       - name: Run self-check
         run: ./build/native-mcp-sandbox --self-check
+
+      - name: Record Phase 9 build metadata
+        run: |
+          echo "NMS_BENCHMARK_COMPILER=${{ matrix.cxx }}" >> "$GITHUB_ENV"
+          echo "NMS_BENCHMARK_COMPILER_VERSION=$(${{ matrix.cxx }} --version | head -n 1)" >> "$GITHUB_ENV"
+          echo "NMS_BENCHMARK_BUILD_TYPE=${{ matrix.build_type }}" >> "$GITHUB_ENV"
+          echo "NMS_BENCHMARK_CMAKE_GENERATOR=Ninja" >> "$GITHUB_ENV"
+          echo "NMS_BENCHMARK_CMAKE_OPTIONS=-DNMS_BUILD_BENCHMARKS=ON -DNMS_WARNINGS_AS_ERRORS=ON" >> "$GITHUB_ENV"
+          echo "NMS_BENCHMARK_DEPENDENCIES=nlohmann-json3-dev" >> "$GITHUB_ENV"
+          echo "NMS_REQUIRE_STRICT_FILE_CASES=1" >> "$GITHUB_ENV"
+
+      - name: Run Phase 9 benchmark smoke and report validation
+        run: >-
+          python3 scripts/run_benchmarks.py
+          --benchmark ./build/native_mcp_bench
+          --server ./build/native-mcp-sandbox
+          --fixtures benchmarks/fixtures
+          --output build/benchmark-report.json
+
+      - name: Validate Phase 9 schema and invariants
+        run: |
+          python3 scripts/validate_benchmark_report.py build/benchmark-report.json
+          python3 tests/benchmark_invariant_tests.py build/benchmark-report.json
+          python3 scripts/render_benchmark_report.py --input build/benchmark-report.json
+
+      - name: Run Phase 9 bounded failure tests
+        run: python3 tests/benchmark_failure_tests.py
 
   sanitizers:
     name: ASan + UBSan + deterministic fuzz smoke

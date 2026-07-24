@@ -16,6 +16,7 @@ option(NMS_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" OFF)
 option(NMS_ENABLE_SANITIZERS "Enable AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
 option(NMS_ENABLE_THREAD_SANITIZER "Enable ThreadSanitizer" OFF)
 option(NMS_BUILD_FUZZERS "Build Clang libFuzzer targets" OFF)
+option(NMS_BUILD_BENCHMARKS "Build bounded reproducibility benchmark targets" OFF)
 
 if(NMS_ENABLE_SANITIZERS AND NMS_ENABLE_THREAD_SANITIZER)
   message(FATAL_ERROR "Address/UndefinedBehavior sanitizers cannot be combined with ThreadSanitizer")
@@ -171,6 +172,14 @@ target_link_libraries(native-mcp-sandbox PRIVATE native_mcp::protocol)
 nms_set_project_warnings(native-mcp-sandbox)
 nms_enable_runtime_checks(native-mcp-sandbox)
 
+if(NMS_BUILD_BENCHMARKS)
+  add_executable(native_mcp_bench benchmarks/native_mcp_bench.cpp)
+  target_link_libraries(native_mcp_bench PRIVATE native_mcp::protocol nlohmann_json::nlohmann_json Threads::Threads)
+  target_compile_features(native_mcp_bench PRIVATE cxx_std_20)
+  nms_set_project_warnings(native_mcp_bench)
+  nms_enable_runtime_checks(native_mcp_bench)
+endif()
+
 if(BUILD_TESTING)
   add_executable(native_mcp_foundation_tests tests/foundation_tests.cpp)
   target_link_libraries(native_mcp_foundation_tests PRIVATE native_mcp::foundation)
@@ -309,6 +318,18 @@ if(BUILD_TESTING)
             --server $<TARGET_FILE:native-mcp-sandbox>
   )
   set_tests_properties(agent.investigation_demo PROPERTIES TIMEOUT 90)
+  if(NMS_BUILD_BENCHMARKS)
+    add_test(
+      NAME benchmarks.component_smoke
+      COMMAND native_mcp_bench ${CMAKE_CURRENT_SOURCE_DIR}/benchmarks/fixtures
+    )
+    set_tests_properties(benchmarks.component_smoke PROPERTIES TIMEOUT 30)
+    add_test(
+      NAME benchmarks.failure_bounds
+      COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/benchmark_failure_tests.py
+    )
+    set_tests_properties(benchmarks.failure_bounds PROPERTIES TIMEOUT 30)
+  endif()
 endif()
 
 if(NMS_BUILD_FUZZERS)
