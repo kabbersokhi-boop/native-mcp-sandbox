@@ -42,7 +42,7 @@ def requests(configured: bool, root: Path, policy_directory: Path) -> tuple[list
     messages=[{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"phase-9","version":"1"}}},{"jsonrpc":"2.0","method":"notifications/initialized"},{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}]
     command=[]
     if configured:
-      policy_directory.mkdir(parents=True,exist_ok=True); policy=policy_directory/"benchmark-policy.json"; policy.write_text(canonical({"version":2,"roots":[{"name":"fixtures","path":str(root),"maxFileBytes":65536}],"processes":[{"name":"server","pid":"self"}]}),encoding="utf-8")
+      policy_directory.mkdir(parents=True,exist_ok=True); policy=policy_directory/"benchmark-policy.json"; policy.write_text(canonical({"version":2,"roots":[{"name":"fixtures","path":str(root.resolve()),"maxFileBytes":65536}],"processes":[{"name":"server","pid":"self"}]}),encoding="utf-8")
       command=["--policy-config",str(policy)]
       calls=[("logs.search",{"root":"fixtures","path":"log.txt","query":"needle","caseSensitive":True,"maxMatches":10}),("logs.tail",{"root":"fixtures","path":"log.txt","maxLines":2}),("elf.inspect",{"root":"fixtures","path":"minimal.elf"}),("proc.memory",{"process":"server"})]
       for index,(name,args) in enumerate(calls,10): messages.append({"jsonrpc":"2.0","id":index,"method":"tools/call","params":{"name":name,"arguments":args}})
