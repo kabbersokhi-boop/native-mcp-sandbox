@@ -16,6 +16,7 @@ Verified before correction:
 - GitHub connector account: `kabbersokhi-boop`.
 - PR #12: open, draft, mergeable, based on `main`; no review threads.
 - Initial PR head: `c2e8ca19ac21e41c16798209a399f2c6edfac16d`.
+- Current correction head before push: `817d65f22f6e8076602d9bcc5b23c2f25188bc0e`.
 - `origin/main`: `ee989929c490f72513c9cdf9b6180449059c4b65`.
 - `v0.10.0`: `ee989929c490f72513c9cdf9b6180449059c4b65`.
 - The original worktree contained unrelated untracked `scripts/__pycache__/`;
@@ -148,8 +149,9 @@ official upstream tag-to-commit mapping and document its update process.
   benchmarks, Ninja, and compile commands: VERIFIED.
 - GCC benchmark-aware CTest: VERIFIED, 18/18.
 - `NMS_REQUIRE_STRICT_FILE_CASES=1 python3 scripts/run_benchmarks.py ...`:
-  VERIFIED; report generated for commit `c2e8ca19...` before final correction
-  commits and contained executable hashes and normalized build evidence.
+  VERIFIED; final GCC and Clang reports were generated for correction commit
+  `817d65f22f6e8076602d9bcc5b23c2f25188bc0e` and contained executable hashes
+  and normalized build evidence.
 - `python3 scripts/validate_benchmark_report.py ...`: VERIFIED.
 - `python3 tests/benchmark_invariant_tests.py ...`: VERIFIED.
 - `python3 scripts/render_benchmark_report.py ...`: VERIFIED.
