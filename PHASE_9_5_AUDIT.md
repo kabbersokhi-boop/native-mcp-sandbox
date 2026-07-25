@@ -16,7 +16,7 @@ Verified before correction:
 - GitHub connector account: `kabbersokhi-boop`.
 - PR #12: open, draft, mergeable, based on `main`; no review threads.
 - Initial PR head: `c2e8ca19ac21e41c16798209a399f2c6edfac16d`.
-- Current validated correction head: `28fdcbaacb752ce253056cdfd3b6e2deac4d95df`.
+- Current validated correction head: `290dd3087d088f49a4e9d222a08e29fb64042613`.
 - `origin/main`: `ee989929c490f72513c9cdf9b6180449059c4b65`.
 - `v0.10.0`: `ee989929c490f72513c9cdf9b6180449059c4b65`.
 - The original worktree contained unrelated untracked `scripts/__pycache__/`;
@@ -72,8 +72,9 @@ driver now:
   read-only, recording an unavailable reason when absent.
 
 CI benchmark configurations now enable
-`-DCMAKE_EXPORT_COMPILE_COMMANDS=ON`. No guessed flags or host configuration
-changes were introduced. On this EndeavourOS host, `dpkg-query` and
+`-DCMAKE_EXPORT_COMPILE_COMMANDS=ON` and export the installed dependency
+version from `dpkg-query` into the benchmark environment. No guessed flags or
+host configuration changes were introduced. On this EndeavourOS host, `dpkg-query` and
 virtualization identification were unavailable and the generated report
 recorded both honestly. The governor was `powersave` and turbo was observed as
 `enabled`; neither was changed.
@@ -215,13 +216,12 @@ credential-free.
 
 Verified results apply only to the tested revision, host, compilers, tools,
 inputs, and bounded campaign durations. The host is not Ubuntu, package-version
-metadata is unavailable locally, the local `gh` token is invalid, no immutable
-action pin/update process exists yet, and the final pushed-head CI result must
-still be observed after publication. These are recorded limitations rather than
+metadata is unavailable locally, the local `gh` token is invalid, and no immutable
+action pin/update process exists yet. These are recorded limitations rather than
 claims of universal correctness, memory safety, race freedom, security, or
 provider availability.
 
-Exact-head GitHub Actions run `30160988688` for the validated correction head
+Exact-head GitHub Actions run `30161335650` for the validated correction head
 passed all five jobs: GCC Debug, Clang Release, ASan/UBSan, ThreadSanitizer
 orchestration stress, and libFuzzer corpus/mutation smoke. The remaining local
 limitations and the documented action-pinning follow-up do not block Phase 10
