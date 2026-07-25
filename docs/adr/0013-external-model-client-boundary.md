@@ -11,6 +11,14 @@ optional development experiments. The provider is replaceable and must not be a
 required dependency of the server, the deterministic test suite, normal CI, or
 a release gate.
 
+The future client must keep the endpoint and model identifier configurable and
+provider-neutral. It must load an API key only from an environment variable or
+secret store, never from command-line arguments. Its transport must enforce
+connect, read, and total deadlines, bounded request and response sizes, and a
+bounded retry count with backoff. It must handle 401, 403, 404, 408, 429, and
+5xx responses explicitly. Malformed JSON, truncated streaming responses, and
+provider output must be treated as untrusted failures.
+
 ## Context
 
 The server's trust boundary intentionally excludes networking, shell access,
@@ -70,7 +78,11 @@ Normal CI must use deterministic local provider doubles. Tests must cover valid
 responses, malformed JSON, invalid tool calls, unexpected fields, streaming
 fragmentation, rate limits, authentication failure, server errors, timeouts,
 connection loss, oversized output, retry exhaustion, cancellation, and secret
-redaction.
+redaction. Tool-call validation must use a closed schema and an exact
+allowlist of advertised tools. The client must not create raw paths or PIDs,
+execute a shell, or widen the server's advertised MCP surface. Deterministic
+fake-provider tests must cover each of these controls before any optional manual
+live smoke is considered.
 
 A live provider smoke test may be manually triggered and separately gated. It
 must use a repository secret, bounded synthetic input, and no production host
