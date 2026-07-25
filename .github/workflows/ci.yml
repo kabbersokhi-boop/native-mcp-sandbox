@@ -63,7 +63,7 @@ jobs:
           echo "NMS_BENCHMARK_BUILD_TYPE=${{ matrix.build_type }}" >> "$GITHUB_ENV"
           echo "NMS_BENCHMARK_CMAKE_GENERATOR=Ninja" >> "$GITHUB_ENV"
           echo "NMS_BENCHMARK_CMAKE_OPTIONS=-DNMS_BUILD_BENCHMARKS=ON -DNMS_WARNINGS_AS_ERRORS=ON" >> "$GITHUB_ENV"
-          echo "NMS_BENCHMARK_DEPENDENCIES=nlohmann-json3-dev" >> "$GITHUB_ENV"
+          echo "NMS_BENCHMARK_DEPENDENCIES=$(dpkg-query -W -f='${Package}=${Version}\n' nlohmann-json3-dev)" >> "$GITHUB_ENV"
           echo "NMS_REQUIRE_STRICT_FILE_CASES=1" >> "$GITHUB_ENV"
 
       - name: Run Phase 9 benchmark smoke and report validation
