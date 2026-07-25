@@ -44,6 +44,7 @@ jobs:
           -G Ninja
           -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
           -DNMS_BUILD_BENCHMARKS=ON
+          -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
           -DNMS_WARNINGS_AS_ERRORS=ON
 
       - name: Build
@@ -62,7 +63,7 @@ jobs:
           echo "NMS_BENCHMARK_BUILD_TYPE=${{ matrix.build_type }}" >> "$GITHUB_ENV"
           echo "NMS_BENCHMARK_CMAKE_GENERATOR=Ninja" >> "$GITHUB_ENV"
           echo "NMS_BENCHMARK_CMAKE_OPTIONS=-DNMS_BUILD_BENCHMARKS=ON -DNMS_WARNINGS_AS_ERRORS=ON" >> "$GITHUB_ENV"
-          echo "NMS_BENCHMARK_DEPENDENCIES=nlohmann-json3-dev" >> "$GITHUB_ENV"
+          echo "NMS_BENCHMARK_DEPENDENCIES=$(dpkg-query -W -f='${Package}=${Version}\n' nlohmann-json3-dev)" >> "$GITHUB_ENV"
           echo "NMS_REQUIRE_STRICT_FILE_CASES=1" >> "$GITHUB_ENV"
 
       - name: Run Phase 9 benchmark smoke and report validation
@@ -80,7 +81,9 @@ jobs:
           python3 scripts/render_benchmark_report.py --input build/benchmark-report.json
 
       - name: Run Phase 9 bounded failure tests
-        run: python3 tests/benchmark_failure_tests.py
+        run: |
+          python3 tests/benchmark_failure_tests.py
+          python3 tests/benchmark_metadata_tests.py
 
   sanitizers:
     name: ASan + UBSan + deterministic fuzz smoke

@@ -1,9 +1,13 @@
 /build/
 /.cache/
 /compile_commands.json
+.env
+.env.*
+!.env.example
+*.key
+*.pem
 *.o
 *.a
 *.so
 *.swp
 *~
-

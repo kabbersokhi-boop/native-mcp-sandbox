@@ -5,9 +5,15 @@
 The project is before version 1.0.
 Only the latest tagged release and the default branch receive security corrections.
 
-Release `v0.8.0` accepts local MCP traffic through standard input and standard output.
-A `0.9.0` Phase 8 candidate adds a read-only demonstration client.
-A trusted policy can enable read-only log, ELF, and process-memory tools.
+The latest tagged release is `v0.10.0`. It provides the local stdio MCP server,
+the deterministic read-only investigation client, and bounded reproducibility
+benchmarks. A trusted policy can enable read-only log, ELF, and process-memory
+tools.
+
+The immutable `v0.10.0` tag contains a stale compiled version identifier of
+`0.9.0`. The current main-line correction prepares patch release `v0.10.1`;
+that tag must wait until PR #12 is merged and the exact merge commit passes
+push-triggered `main` CI. No tag has been created for `v0.10.1`.
 
 The security scope includes these areas:
 
@@ -24,6 +30,7 @@ The security scope includes these areas:
 - fuzz harnesses
 - dependencies
 - deterministic demonstration output
+- benchmark report integrity
 
 ## Report a vulnerability
 
@@ -93,6 +100,17 @@ Do not add one of these capabilities without a separate threat-model decision:
 - shell access
 - networking
 
+A hosted model provider must remain outside the native MCP server. The provider
+client must be a separate process that treats model output as untrusted, validates
+closed tool-call schemas, uses only symbolic aliases, and communicates with the
+server through the existing stdio MCP interface. The native server must not load
+provider credentials or gain HTTP or other networking support.
+
+Normal CI must not require a live hosted model endpoint. Use deterministic local
+provider doubles for merge and release evidence. A live-provider smoke test must
+be separately gated, use synthetic data, and load credentials only from a secret
+or environment variable.
+
 Run longer native tests with these commands:
 
 ```bash
@@ -111,10 +129,12 @@ paths, or runtime timestamps.
 
 Do not commit these items:
 
-- credentials
+- credentials or API keys
+- environment files that contain secrets
 - confidential data
 - local absolute paths
 - build output
 - release archives
 - raw crash dumps
 - unreviewed fuzz artifacts
+- live-provider request or response captures that contain sensitive evidence

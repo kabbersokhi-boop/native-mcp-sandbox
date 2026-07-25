@@ -1,0 +1,3 @@
+#pragma once
+
+#define NMS_PROJECT_VERSION "@PROJECT_VERSION@"

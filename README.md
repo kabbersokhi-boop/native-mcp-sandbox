@@ -3,7 +3,7 @@
 > A security-first C++20 MCP server that gives AI agents narrow, read-only access to Linux evidence.
 
 [![CI](https://github.com/kabbersokhi-boop/native-mcp-sandbox/actions/workflows/ci.yml/badge.svg)](https://github.com/kabbersokhi-boop/native-mcp-sandbox/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/github/v/release/kabbersokhi-boop/native-mcp-sandbox)](https://github.com/kabbersokhi-boop/native-mcp-sandbox/releases/latest)
+[![Tag](https://img.shields.io/github/v/tag/kabbersokhi-boop/native-mcp-sandbox?label=tag)](https://github.com/kabbersokhi-boop/native-mcp-sandbox/tags)
 [![License](https://img.shields.io/github/license/kabbersokhi-boop/native-mcp-sandbox)](LICENSE)
 [![C++20](https://img.shields.io/badge/C%2B%2B-20-blue.svg)](https://en.cppreference.com/w/cpp/20)
 [![Linux](https://img.shields.io/badge/platform-Linux-lightgrey.svg)](https://www.kernel.org/)
@@ -14,7 +14,9 @@ Native MCP Sandbox explores a practical question:
 
 The answer in this repository is a small native server with a deliberately narrow trust boundary. An operator chooses the files and processes that can be observed. The MCP client can then use four bounded, read-only tools through standard input and standard output.
 
-The current release is **v0.9.0**.
+The latest tagged release is **v0.10.0**. Phases 0–9 are complete and released
+through this tag. The current main-line correction prepares **v0.10.1**.
+Phase 10 has not started.
 
 ## Why this project exists
 
@@ -74,7 +76,8 @@ The test suite covers malformed JSON, duplicate keys, oversized input, policy de
 
 ## Deterministic investigation demonstration
 
-Release v0.9.0 includes a complete investigation client that uses the real server.
+The current main-line correction preparing v0.10.1 includes a complete
+investigation client that uses the real server.
 
 The demonstration:
 
@@ -250,13 +253,20 @@ The project is tested across multiple compilers and analysis modes.
 
 ### Recorded release evidence
 
-For **v0.9.0**:
+For **v0.10.0**:
 
 - all five post-merge GitHub Actions jobs passed;
 - the demonstration passed in GCC, Clang, and sanitizer CTest suites;
 - the strict demonstration used no legacy compatibility flags;
 - deterministic JSON and Markdown reports matched committed golden files;
 - output-flood and forbidden-field negative tests passed.
+- Phase 9 added bounded reproducibility benchmarks with offline report validation
+  and measurement-only comparison groups.
+
+The immutable v0.10.0 tag contained a stale compiled version identifier of
+0.9.0. This main-line correction prepares v0.10.1; that tag must not be created
+until PR #12 is merged and the exact merge commit passes push-triggered `main`
+CI.
 
 For the Phase 7 assurance campaign:
 
@@ -309,9 +319,9 @@ docs/FUZZING.md                         Native fuzzing and triage guide
 
 ## Project roadmap
 
-- Phases 0–8: complete and released through `v0.9.0`.
-- Phase 9: reproducible benchmarks and reference comparison.
-- Phase 10: release hardening and stable tool interface.
+- Phases 0–9: complete and released through the immutable `v0.10.0` tag; the
+  current main-line correction prepares `v0.10.1`.
+- Phase 10: not started; planning follows the separate Phase 9.5 audit.
 
 Each phase is developed as a bounded, reviewable increment. New authority requires an explicit threat-model decision.
 

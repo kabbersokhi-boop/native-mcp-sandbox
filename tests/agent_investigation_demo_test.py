@@ -206,6 +206,11 @@ def main() -> int:
         expect_forbidden_field_rejected(report_value, "pid", 1234)
         expect_forbidden_field_rejected(report_value, "uid", 1000)
         expect_forbidden_field_rejected(report_value, "vmRssBytes", 4096)
+    with tempfile.TemporaryDirectory(prefix="native-mcp-demo-parent-") as parent:
+        missing = Path(parent) / "created-by-demo"
+        run_demo(demo, arguments.server.resolve(), fixture, missing)
+        if not (missing / "report.json").is_file() or not (missing / "report.md").is_file():
+            fail("the demonstration did not create a missing output directory")
     run_output_flood_negative_test(demo, arguments.server.resolve(), fixture)
     print("Agent investigation demo is deterministic and matches its golden reports")
     return 0

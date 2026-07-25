@@ -239,7 +239,7 @@ void test_unconfigured_server(const std::string& executable) {
   const ProcessOutput output = run_server(executable, {}, input);
   const std::string expected =
       "{\"id\":1,\"jsonrpc\":\"2.0\",\"result\":{}}\n"
-      "{\"id\":2,\"jsonrpc\":\"2.0\",\"result\":{\"capabilities\":{\"tools\":{}},\"protocolVersion\":\"2025-11-25\",\"serverInfo\":{\"name\":\"native-mcp-sandbox\",\"version\":\"0.9.0\"}}}\n"
+      "{\"id\":2,\"jsonrpc\":\"2.0\",\"result\":{\"capabilities\":{\"tools\":{}},\"protocolVersion\":\"2025-11-25\",\"serverInfo\":{\"name\":\"native-mcp-sandbox\",\"version\":\"0.10.1\"}}}\n"
       "{\"id\":3,\"jsonrpc\":\"2.0\",\"result\":{\"tools\":[]}}\n";
   expect(output.standard_output == expected,
          "unconfigured stdout must remain deterministic and tool-free");
@@ -293,8 +293,8 @@ void test_configured_tools(const std::string& executable) {
   const Json& tailed = find_message_by_id(messages, 13);
   const Json& inspected = find_message_by_id(messages, 14);
   const Json& observed = find_message_by_id(messages, 15);
-  expect(initialized["result"]["serverInfo"]["version"] == "0.9.0",
-         "configured initialize must report the Phase 8 version");
+  expect(initialized["result"]["serverInfo"]["version"] == "0.10.1",
+         "configured initialize must report the planned v0.10.1 version");
   const Json& tools = listed["result"]["tools"];
   expect(tools.is_array() && tools.size() == 4U &&
              tools[0]["name"] == "logs.search" &&
