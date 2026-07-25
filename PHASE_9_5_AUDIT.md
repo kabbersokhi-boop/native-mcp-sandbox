@@ -16,7 +16,7 @@ Verified before correction:
 - GitHub connector account: `kabbersokhi-boop`.
 - PR #12: open, draft, mergeable, based on `main`; no review threads.
 - Initial PR head: `c2e8ca19ac21e41c16798209a399f2c6edfac16d`.
-- Current correction head before push: `817d65f22f6e8076602d9bcc5b23c2f25188bc0e`.
+- Current validated correction head: `28fdcbaacb752ce253056cdfd3b6e2deac4d95df`.
 - `origin/main`: `ee989929c490f72513c9cdf9b6180449059c4b65`.
 - `v0.10.0`: `ee989929c490f72513c9cdf9b6180449059c4b65`.
 - The original worktree contained unrelated untracked `scripts/__pycache__/`;
@@ -221,5 +221,10 @@ still be observed after publication. These are recorded limitations rather than
 claims of universal correctness, memory safety, race freedom, security, or
 provider availability.
 
-Phase 10 recommendation remains blocked until the final correction head is
-pushed, exact-head CI passes, and the draft PR body records that evidence.
+Exact-head GitHub Actions run `30160988688` for the validated correction head
+passed all five jobs: GCC Debug, Clang Release, ASan/UBSan, ThreadSanitizer
+orchestration stress, and libFuzzer corpus/mutation smoke. The remaining local
+limitations and the documented action-pinning follow-up do not block Phase 10
+planning; they do not authorize Phase 10 implementation in this PR.
+
+Phase 10 recommendation: **GO FOR PHASE 10 PLANNING**.
