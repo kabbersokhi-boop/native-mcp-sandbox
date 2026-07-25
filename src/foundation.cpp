@@ -1,4 +1,5 @@
 #include "native_mcp/foundation.hpp"
+#include "native_mcp/version.hpp"
 
 #include <sstream>
 
@@ -34,6 +35,6 @@ std::string budget_summary(const ResourceBudget& budget) {
 
 std::string_view project_name() noexcept { return "native-mcp-sandbox"; }
 
-std::string_view project_version() noexcept { return "0.9.0"; }
+std::string_view project_version() noexcept { return NMS_PROJECT_VERSION; }
 
 }  // namespace native_mcp

@@ -2,13 +2,20 @@ cmake_minimum_required(VERSION 3.20)
 
 project(
   native_mcp_sandbox
-  VERSION 0.9.0
+  VERSION 0.10.0
   DESCRIPTION "A security-first, resource-bounded C++20 server for local MCP evidence tools"
   LANGUAGES CXX
 )
 
 include(CTest)
 include(GNUInstallDirs)
+
+set(NMS_GENERATED_INCLUDE_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated")
+configure_file(
+  "${CMAKE_CURRENT_SOURCE_DIR}/cmake/native_mcp_version.hpp.in"
+  "${NMS_GENERATED_INCLUDE_DIR}/native_mcp/version.hpp"
+  @ONLY
+)
 
 find_package(Threads REQUIRED)
 
@@ -94,6 +101,9 @@ target_include_directories(native_mcp_foundation
   PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+)
+target_include_directories(native_mcp_foundation PRIVATE
+  "${NMS_GENERATED_INCLUDE_DIR}"
 )
 target_link_libraries(native_mcp_foundation PUBLIC nlohmann_json::nlohmann_json)
 nms_set_project_warnings(native_mcp_foundation)
@@ -290,6 +300,13 @@ if(BUILD_TESTING)
   nms_enable_runtime_checks(native_mcp_fuzz_smoke)
 
   add_test(NAME foundation.unit COMMAND native_mcp_foundation_tests)
+  add_test(
+    NAME foundation.version_output
+    COMMAND ${CMAKE_COMMAND}
+            "-DNMS_EXECUTABLE=$<TARGET_FILE:native-mcp-sandbox>"
+            "-DNMS_EXPECTED=native-mcp-sandbox ${PROJECT_VERSION}"
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/verify_version.cmake
+  )
   add_test(NAME foundation.self_check COMMAND native-mcp-sandbox --self-check)
   add_test(NAME policy.unit COMMAND native_mcp_policy_tests)
   file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/test-tmp")

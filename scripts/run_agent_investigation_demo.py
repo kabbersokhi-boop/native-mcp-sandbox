@@ -17,7 +17,7 @@ import time
 from typing import Any
 
 
-VERSION = "0.9.0"
+VERSION = "0.10.0"
 CORRELATION_ID = "INC-042"
 EXPECTED_TOOLS = ["logs.search", "logs.tail", "elf.inspect", "proc.memory"]
 FIXTURE_SIZE_LIMIT = 64 * 1024
@@ -470,6 +470,7 @@ def remove_old_reports(output_dir: Path) -> None:
 
 
 def run_demo(server: Path, fixture: Path, output_dir: Path) -> None:
+    output_dir.mkdir(parents=True, exist_ok=True)
     require(output_dir.is_dir(), "the output directory is not a directory")
     remove_old_reports(output_dir)
     require(server.is_file(), "the server executable is not a regular file")

@@ -2,7 +2,7 @@
 
 ## System boundary
 
-Release `v0.8.0` provides four read-only MCP tools.
+The `v0.10.0` release provides four read-only MCP tools.
 The server enables a tool only when the operator supplies a trusted runtime policy.
 
 The tools are:

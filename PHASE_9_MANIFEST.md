@@ -1,5 +1,9 @@
 # Phase 9 manifest
 
+Release identity: Phase 9 is complete and released through tag `v0.10.0`,
+which resolves to commit `ee989929c490f72513c9cdf9b6180449059c4b65`.
+Phase 10 has not started.
+
 Framework: project-owned C++20 harness (`1.0.0`) plus bounded Python stdio driver (`1.0.0`).
 ADR 0012 records the offline-build and dependency trade-off.
 
@@ -36,6 +40,11 @@ before an atomic replace. Negative tests cover malformed output, timeouts, outpu
 limits, nonzero exit, semantic response errors, schema violations, and stale-report
 protection. CI enables `NMS_BUILD_BENCHMARKS=ON` in both compiler jobs and runs the
 driver, schema validator, invariant test, renderer, and bounds tests.
+
+Phase 9 added bounded reproducibility benchmarks. They record finite samples,
+actual executable hashes, build and dependency evidence, and honest unavailable
+records for probes that are not exposed by the host. Comparison groups are
+measurement-only and do not establish a performance ranking.
 
 Non-claims: no universal performance, production-readiness, correctness, security,
 or cross-machine ranking claim is made. No reduced-control path is deployable.

@@ -85,7 +85,7 @@
   "investigation": {
     "correlationId": "INC-042",
     "scenario": "service_restart_authentication_recovery",
-    "version": "0.9.0"
+    "version": "0.10.0"
   },
   "requests": [
     {
@@ -93,7 +93,7 @@
         "capabilities": {},
         "clientInfo": {
           "name": "phase-8-demo",
-          "version": "0.9.0"
+          "version": "0.10.0"
         },
         "protocolVersion": "2025-11-25"
       },
