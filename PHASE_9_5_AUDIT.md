@@ -5,9 +5,11 @@ Audit target: draft PR #12, branch
 `ee989929c490f72513c9cdf9b6180449059c4b65` and tag `v0.10.0`.
 
 This audit corrects post-release consistency defects and records a bounded
-native validation campaign. It does not add an agent, a model provider,
-networking, credentials, new MCP tools, or new host authority. Phase 10 has not
-started.
+native validation campaign. The immutable `v0.10.0` tag remains unchanged. The
+current main-line correction prepares patch release `v0.10.1`; it must not be
+tagged until PR #12 is merged and the exact merge commit passes push-triggered
+`main` CI. This audit does not add an agent, a model provider, networking,
+credentials, new MCP tools, or new host authority. Phase 10 has not started.
 
 ## Repository state
 
@@ -34,29 +36,33 @@ network-enabled execution because sandbox DNS was unavailable.
 ### Release-version drift — high priority — VERIFIED/CORRECTED
 
 `CMakeLists.txt`, `native_mcp::project_version()`, and foundation/protocol
-integration tests reported `0.9.0` while the released tag was `v0.10.0`. The
-runtime version was therefore inconsistent with the package identity.
+integration tests reported `0.9.0` while the immutable released tag was
+`v0.10.0`. The runtime version was therefore inconsistent with the package
+identity. This is a defect in the existing tag; this PR does not rewrite that
+tag.
 
-`project(... VERSION 0.10.0)` is now the only project version literal used to
-produce the binary. CMake configures `cmake/native_mcp_version.hpp.in` into a
-private generated include directory used by the foundation target. The new
-`foundation.version_output` CTest invokes the executable directly and requires
-the exact output `native-mcp-sandbox 0.10.0`. The C++ foundation test and MCP
-integration expectations also require `0.10.0`.
+`project(... VERSION 0.10.1)` is now the only project version literal used to
+produce the planned correction binary. CMake configures
+`cmake/native_mcp_version.hpp.in` into a private generated include directory
+used by the foundation target. The `foundation.version_output` CTest invokes
+the executable directly and requires the exact output
+`native-mcp-sandbox 0.10.1`. The C++ foundation test and MCP integration
+expectations also require `0.10.1`.
 
 ### Release documentation drift — medium priority — VERIFIED/CORRECTED
 
 README release text and roadmap were stale, and its GitHub Release badge was
 misleading because `v0.10.0` is an annotated tag without a GitHub Release
 object. The badge now targets tags. README, `PHASE_9_MANIFEST.md`,
-`ARCHITECTURE.md`, and `SECURITY.md` identify `v0.10.0`; Phases 0–9 are marked
-complete, Phase 10 is marked not started, and Phase 9 bounded reproducibility
-benchmarks are described. Historical Phase 8 references in
+`ARCHITECTURE.md`, and `SECURITY.md` identify `v0.10.0` as the immutable
+original Phase 9 tag and `v0.10.1` as the untagged current correction; Phases
+0–9 are marked complete, Phase 10 is marked not started, and Phase 9 bounded
+reproducibility benchmarks are described. Historical Phase 8 references in
 `PHASE_8_MANIFEST.md` and `CHANGELOG.md` remain historical.
 
-The Phase 8 demonstration's current executable expectation was updated to
-`0.10.0`, including its committed golden report. This is current integration
-evidence, not a rewrite of the historical Phase 8 candidate record.
+The demonstration's current executable expectation is now `0.10.1`, including
+its committed golden report. The original `v0.10.0` release sequence and
+historical Phase 8 candidate record are not rewritten.
 
 ### Benchmark metadata — medium priority — VERIFIED/CORRECTED
 
@@ -129,15 +135,23 @@ official upstream tag-to-commit mapping and document its update process.
   ENVIRONMENTAL (`policy.unit` Unix socket: `Operation not permitted`, 15/16);
   the same command outside the restrictive sandbox was VERIFIED, 16/16.
 - `./build/dev/native-mcp-sandbox --version`: VERIFIED, exact
-  `native-mcp-sandbox 0.10.0`.
+  `native-mcp-sandbox 0.10.1`.
 - `./build/dev/native-mcp-sandbox --self-check`: VERIFIED.
+- `python3 tests/benchmark_metadata_tests.py` and
+  `python3 tests/benchmark_failure_tests.py`: VERIFIED after the patch-release
+  correction.
 - `rm -rf build/release; cmake --preset release; cmake --build --preset
   release`: VERIFIED with GCC Release.
 - `ctest --preset release --output-on-failure`: VERIFIED, 16/16 outside the
   restrictive sandbox.
 - `./build/release/native-mcp-sandbox --version`: VERIFIED, exact
-  `native-mcp-sandbox 0.10.0`.
+  `native-mcp-sandbox 0.10.1`.
 - `./build/release/native-mcp-sandbox --self-check`: VERIFIED.
+- `python3 scripts/run_agent_investigation_demo.py --server
+  ./build/release/native-mcp-sandbox --fixture
+  ./demo/investigation/application.log --output-dir
+  ./build/audit-version-demo`: VERIFIED; generated report and committed golden
+  report identify version `0.10.1`.
 - `rm -rf build/sanitizers; cmake --preset sanitizers; cmake --build --preset
   sanitizers`: VERIFIED.
 - ASan/UBSan CTest with
@@ -152,6 +166,9 @@ official upstream tag-to-commit mapping and document its update process.
 - GCC benchmark-aware configure/build with Release, warnings-as-errors,
   benchmarks, Ninja, and compile commands: VERIFIED.
 - GCC benchmark-aware CTest: VERIFIED, 18/18.
+- The current GCC benchmark report recorded turbo `enabled`; the host exposed
+  Intel `no_turbo=0` and did not expose generic `cpufreq/boost`, so the result
+  follows the Intel mapping.
 - `NMS_REQUIRE_STRICT_FILE_CASES=1 python3 scripts/run_benchmarks.py ...`:
   VERIFIED; final GCC and Clang reports were generated for correction commit
   `817d65f22f6e8076602d9bcc5b23c2f25188bc0e` and contained executable hashes

@@ -2,7 +2,8 @@
 
 ## System boundary
 
-The `v0.10.0` release provides four read-only MCP tools.
+The immutable `v0.10.0` release provides four read-only MCP tools. The current
+main-line correction prepares patch release `v0.10.1` with the same boundary.
 The server enables a tool only when the operator supplies a trusted runtime policy.
 
 The tools are:

@@ -4,6 +4,11 @@ Release identity: Phase 9 is complete and released through tag `v0.10.0`,
 which resolves to commit `ee989929c490f72513c9cdf9b6180449059c4b65`.
 Phase 10 has not started.
 
+Phase 9.5 found that the immutable `v0.10.0` tag retained the stale compiled
+version identifier `0.9.0`. The current main-line correction prepares patch
+release `v0.10.1`; it must not be tagged until PR #12 is merged and the exact
+merge commit passes push-triggered `main` CI. The `v0.10.0` tag is unchanged.
+
 Framework: project-owned C++20 harness (`1.0.0`) plus bounded Python stdio driver (`1.0.0`).
 ADR 0012 records the offline-build and dependency trade-off.
 

@@ -14,8 +14,9 @@ Native MCP Sandbox explores a practical question:
 
 The answer in this repository is a small native server with a deliberately narrow trust boundary. An operator chooses the files and processes that can be observed. The MCP client can then use four bounded, read-only tools through standard input and standard output.
 
-The current tagged release is **v0.10.0**. Phases 0–9 are complete and
-released through this tag. Phase 10 has not started.
+The latest tagged release is **v0.10.0**. Phases 0–9 are complete and released
+through this tag. The current main-line correction prepares **v0.10.1**.
+Phase 10 has not started.
 
 ## Why this project exists
 
@@ -75,7 +76,8 @@ The test suite covers malformed JSON, duplicate keys, oversized input, policy de
 
 ## Deterministic investigation demonstration
 
-Release v0.10.0 includes a complete investigation client that uses the real server.
+The current main-line correction preparing v0.10.1 includes a complete
+investigation client that uses the real server.
 
 The demonstration:
 
@@ -261,6 +263,11 @@ For **v0.10.0**:
 - Phase 9 added bounded reproducibility benchmarks with offline report validation
   and measurement-only comparison groups.
 
+The immutable v0.10.0 tag contained a stale compiled version identifier of
+0.9.0. This main-line correction prepares v0.10.1; that tag must not be created
+until PR #12 is merged and the exact merge commit passes push-triggered `main`
+CI.
+
 For the Phase 7 assurance campaign:
 
 - two deterministic campaigns completed 100,000 iterations each;
@@ -312,7 +319,8 @@ docs/FUZZING.md                         Native fuzzing and triage guide
 
 ## Project roadmap
 
-- Phases 0–9: complete and released through `v0.10.0`.
+- Phases 0–9: complete and released through the immutable `v0.10.0` tag; the
+  current main-line correction prepares `v0.10.1`.
 - Phase 10: not started; planning follows the separate Phase 9.5 audit.
 
 Each phase is developed as a bounded, reviewable increment. New authority requires an explicit threat-model decision.

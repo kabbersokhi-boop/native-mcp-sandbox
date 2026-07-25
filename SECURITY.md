@@ -10,6 +10,11 @@ the deterministic read-only investigation client, and bounded reproducibility
 benchmarks. A trusted policy can enable read-only log, ELF, and process-memory
 tools.
 
+The immutable `v0.10.0` tag contains a stale compiled version identifier of
+`0.9.0`. The current main-line correction prepares patch release `v0.10.1`;
+that tag must wait until PR #12 is merged and the exact merge commit passes
+push-triggered `main` CI. No tag has been created for `v0.10.1`.
+
 The security scope includes these areas:
 
 - protocol framing
