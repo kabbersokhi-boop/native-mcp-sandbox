@@ -24,6 +24,48 @@ PROCESS_TIMEOUT = 10.0
 MAX_SAMPLES = 15
 
 
+def decode_turbo_probe(source: str, raw_value: str) -> dict[str, object]:
+    """Decode one read-only Linux turbo probe using that source's polarity."""
+    mappings = {
+        "intel_pstate/no_turbo": {"0": "enabled", "1": "disabled"},
+        "cpufreq/boost": {"0": "disabled", "1": "enabled"},
+    }
+    mapping = mappings.get(source)
+    if mapping is None:
+        return {
+            "available": False,
+            "reason": f"unsupported turbo probe source: {source}",
+        }
+    normalized = raw_value.strip()
+    state = mapping.get(normalized)
+    if state is None:
+        return {
+            "available": False,
+            "reason": (
+                f"{source} returned unexpected value {normalized!r}; "
+                "expected 0 or 1"
+            ),
+        }
+    return {"available": True, "value": state}
+
+
+def select_turbo_probe(
+    primary: dict[str, object], fallback: dict[str, object]
+) -> dict[str, object]:
+    """Prefer Intel pstate, then generic boost, preserving unavailable reasons."""
+    if primary.get("available") is True:
+        return decode_turbo_probe("intel_pstate/no_turbo", str(primary["value"]))
+    if fallback.get("available") is True:
+        return decode_turbo_probe("cpufreq/boost", str(fallback["value"]))
+    return {
+        "available": False,
+        "reason": (
+            "Intel pstate no_turbo and generic cpufreq boost probes were "
+            "not available"
+        ),
+    }
+
+
 def fail(message: str) -> None:
     raise RuntimeError(message)
 
@@ -476,19 +518,15 @@ def metadata(benchmark: Path, server: Path, argv: list[str]) -> dict[str, object
         dependencies = probe(
             ["dpkg-query", "-W", "-f=${Package}=${Version}\\n", "nlohmann-json3-dev"]
         )
-    turbo = read_probe(
+    primary_turbo = read_probe(
         Path("/sys/devices/system/cpu/intel_pstate/no_turbo"),
         "Intel pstate turbo probe was not available",
     )
-    if not turbo["available"]:
-        boost = read_probe(
-            Path("/sys/devices/system/cpu/cpufreq/boost"),
-            "CPU boost probe was not available",
-        )
-        if boost["available"]:
-            turbo = boost
-    if turbo["available"] and turbo["value"] in {"0", "1"}:
-        turbo = value("enabled" if turbo["value"] == "0" else "disabled")
+    fallback_turbo = read_probe(
+        Path("/sys/devices/system/cpu/cpufreq/boost"),
+        "CPU boost probe was not available",
+    )
+    turbo = select_turbo_probe(primary_turbo, fallback_turbo)
     virtualization = probe(["systemd-detect-virt"])
     return {
         "repositoryCommit": probe(["git", "rev-parse", "HEAD"]),

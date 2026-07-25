@@ -15,12 +15,15 @@ Verified before correction:
 
 - GitHub connector account: `kabbersokhi-boop`.
 - PR #12: open, draft, mergeable, based on `main`; no review threads.
-- Initial PR head: `c2e8ca19ac21e41c16798209a399f2c6edfac16d`.
-- Current validated correction head: `290dd3087d088f49a4e9d222a08e29fb64042613`.
 - `origin/main`: `ee989929c490f72513c9cdf9b6180449059c4b65`.
 - `v0.10.0`: `ee989929c490f72513c9cdf9b6180449059c4b65`.
 - The original worktree contained unrelated untracked `scripts/__pycache__/`;
   it was not staged or removed.
+
+This document intentionally does not embed a mutable final PR-head SHA or
+workflow-run identifier. Exact revisions below identify the commits on which
+specific local campaigns ran; the final PR-head checks are recorded in the
+PR checks and body.
 
 The shell `gh auth status` reported the configured token as invalid, while the
 connected GitHub account was usable for PR metadata. Direct shell fetch needed
@@ -153,6 +156,9 @@ official upstream tag-to-commit mapping and document its update process.
   VERIFIED; final GCC and Clang reports were generated for correction commit
   `817d65f22f6e8076602d9bcc5b23c2f25188bc0e` and contained executable hashes
   and normalized build evidence.
+- `python3 tests/benchmark_metadata_tests.py`: VERIFIED; source-aware Intel
+  pstate and generic boost polarity, fallback selection, missing probes, and
+  unexpected values were tested without reading or changing host sysfs state.
 - `python3 scripts/validate_benchmark_report.py ...`: VERIFIED.
 - `python3 tests/benchmark_invariant_tests.py ...`: VERIFIED.
 - `python3 scripts/render_benchmark_report.py ...`: VERIFIED.
@@ -161,8 +167,8 @@ official upstream tag-to-commit mapping and document its update process.
   generation, schema validation, invariants, and rendering: VERIFIED.
 
 The host could not provide the Ubuntu package database, so dependency metadata
-was recorded as unavailable with `dpkg-query` probe failure. Ubuntu CI will use
-the actual installed package query. No timing threshold or speed claim was
+was recorded as unavailable with `dpkg-query` probe failure. Ubuntu CI uses the
+actual installed package query. No timing threshold or speed claim was
 introduced.
 
 ### Determinism, stress, and fuzz
@@ -194,8 +200,8 @@ deterministic golden reports. No `.env.example` is currently committed;
 `.gitignore` explicitly allows one with `!.env.example`.
 
 No reputable local secret scanner (`gitleaks`, `trufflehog`, or
-`detect-secrets`) was installed, so external scanner coverage is UNAVAILABLE.
-No repository content was uploaded.
+`detect-secrets`) was installed, so third-party scanner coverage is
+UNAVAILABLE. No repository content was uploaded.
 
 ## External model-provider boundary and NIM readiness
 
@@ -214,16 +220,16 @@ credential-free.
 
 ## Remaining limitations and Phase 10 gate
 
-Verified results apply only to the tested revision, host, compilers, tools,
-inputs, and bounded campaign durations. The host is not Ubuntu, package-version
-metadata is unavailable locally, the local `gh` token is invalid, and no immutable
-action pin/update process exists yet. These are recorded limitations rather than
+Verified local results apply only to the tested revisions, host, compilers,
+tools, inputs, and bounded campaign durations. The host is not Ubuntu,
+package-version metadata is unavailable locally, the local `gh` token is
+invalid, and no immutable action pin/update process exists yet. These are recorded limitations rather than
 claims of universal correctness, memory safety, race freedom, security, or
 provider availability.
 
-Exact-head GitHub Actions run `30161335650` for the validated correction head
-passed all five jobs: GCC Debug, Clang Release, ASan/UBSan, ThreadSanitizer
-orchestration stress, and libFuzzer corpus/mutation smoke. The remaining local
+GitHub Actions evidence is maintained in the PR checks and PR body for the
+actual pushed head. This audit document intentionally does not call any
+embedded workflow run the final or exact-head run. The remaining local
 limitations and the documented action-pinning follow-up do not block Phase 10
 planning; they do not authorize Phase 10 implementation in this PR.
 

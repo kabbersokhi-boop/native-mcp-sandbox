@@ -81,7 +81,9 @@ jobs:
           python3 scripts/render_benchmark_report.py --input build/benchmark-report.json
 
       - name: Run Phase 9 bounded failure tests
-        run: python3 tests/benchmark_failure_tests.py
+        run: |
+          python3 tests/benchmark_failure_tests.py
+          python3 tests/benchmark_metadata_tests.py
 
   sanitizers:
     name: ASan + UBSan + deterministic fuzz smoke
