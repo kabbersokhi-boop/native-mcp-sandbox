@@ -44,6 +44,7 @@ jobs:
           -G Ninja
           -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
           -DNMS_BUILD_BENCHMARKS=ON
+          -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
           -DNMS_WARNINGS_AS_ERRORS=ON
 
       - name: Build

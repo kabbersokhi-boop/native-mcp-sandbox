@@ -8,6 +8,7 @@ import json
 import os
 import platform
 import selectors
+import shlex
 import subprocess
 import sys
 import time
@@ -303,9 +304,146 @@ def metadata(benchmark: Path, server: Path, argv: list[str]) -> dict[str, object
                 text=True,
                 stderr=subprocess.DEVNULL,
             ).strip()
-            return value(output)
+            return value(output) if output else unavailable("probe returned no value")
         except (OSError, subprocess.CalledProcessError):
             return unavailable("probe failed")
+
+    def read_probe(path: Path, missing_reason: str) -> dict[str, object]:
+        try:
+            output = path.read_text(encoding="utf-8", errors="replace").strip()
+        except OSError:
+            return unavailable(missing_reason)
+        return value(output) if output else unavailable("probe returned no value")
+
+    def cache_entries(build_directory: Path) -> dict[str, str]:
+        cache = build_directory / "CMakeCache.txt"
+        try:
+            lines = cache.read_text(encoding="utf-8", errors="replace").splitlines()
+        except OSError:
+            return {}
+        entries: dict[str, str] = {}
+        for line in lines:
+            if not line or line.startswith("#") or line.startswith("//"):
+                continue
+            if ":" not in line or "=" not in line:
+                continue
+            key_type, item = line.split("=", 1)
+            key, _ = key_type.split(":", 1)
+            entries[key] = item
+        return entries
+
+    def normalize_token(token: str, build_directory: Path) -> str:
+        source_directory = Path(__file__).resolve().parents[1]
+        return token.replace(str(build_directory), "<build>").replace(
+            str(source_directory), "<source>"
+        )
+
+    def build_evidence() -> dict[str, dict[str, object]]:
+        build_directory = benchmark.resolve().parent
+        cache = cache_entries(build_directory)
+        if not cache:
+            return {
+                "compilerName": unavailable("CMakeCache.txt was not available"),
+                "compilerVersion": unavailable("CMakeCache.txt was not available"),
+                "buildType": unavailable("CMakeCache.txt was not available"),
+                "cmakeGenerator": unavailable("CMakeCache.txt was not available"),
+                "cmakeCacheOptions": unavailable("CMakeCache.txt was not available"),
+                "compileFlags": unavailable("compile_commands.json was not available"),
+                "linkFlags": unavailable("generated link commands were not available"),
+                "linkCommands": unavailable("generated link commands were not available"),
+            }
+
+        compiler = cache.get("CMAKE_CXX_COMPILER")
+        compiler_version = cache.get("CMAKE_CXX_COMPILER_VERSION")
+        if compiler:
+            try:
+                compiler_version = subprocess.check_output(
+                    [compiler, "--version"],
+                    text=True,
+                    stderr=subprocess.STDOUT,
+                ).strip()
+            except (OSError, subprocess.CalledProcessError):
+                pass
+
+        relevant = {
+            key: normalize_token(item, build_directory)
+            for key, item in cache.items()
+            if key.startswith("NMS_")
+            or key
+            in {
+                "BUILD_TESTING",
+                "CMAKE_BUILD_TYPE",
+                "CMAKE_CXX_FLAGS",
+                "CMAKE_CXX_FLAGS_DEBUG",
+                "CMAKE_CXX_FLAGS_RELEASE",
+                "CMAKE_CXX_FLAGS_RELWITHDEBINFO",
+                "CMAKE_EXPORT_COMPILE_COMMANDS",
+                "CMAKE_CXX_STANDARD",
+            }
+        }
+
+        compile_commands = build_directory / "compile_commands.json"
+        compile_flags: set[str] = set()
+        try:
+            commands = json.loads(compile_commands.read_text(encoding="utf-8"))
+            for entry in commands:
+                arguments = entry.get("arguments")
+                if arguments is None:
+                    arguments = shlex.split(entry["command"])
+                for argument in arguments[1:]:
+                    normalized = normalize_token(str(argument), build_directory)
+                    if normalized.startswith("-") and normalized not in {"-c", "-o"}:
+                        compile_flags.add(normalized)
+        except (OSError, KeyError, TypeError, ValueError):
+            compile_flags = set()
+
+        link_commands: list[str] = []
+        try:
+            result = subprocess.run(
+                ["ninja", "-C", str(build_directory), "-t", "commands", "native_mcp_bench", "native-mcp-sandbox"],
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            for line in result.stdout.splitlines():
+                if " -o native_mcp_bench" in line or " -o native-mcp-sandbox" in line:
+                    if " -c " not in line:
+                        link_commands.append(normalize_token(line, build_directory))
+        except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
+            link_commands = []
+
+        compiler_name = Path(compiler).name if compiler else None
+        link_flags: set[str] = set()
+        for command in link_commands:
+            for argument in shlex.split(command):
+                if argument.startswith("-") and argument not in {"-o"}:
+                    link_flags.add(argument)
+
+        return {
+            "compilerName": value(compiler_name)
+            if compiler_name
+            else unavailable("compiler identity was not in CMakeCache.txt"),
+            "compilerVersion": value(compiler_version)
+            if compiler_version
+            else unavailable("compiler version was not in CMakeCache.txt"),
+            "buildType": value(cache.get("CMAKE_BUILD_TYPE"))
+            if cache.get("CMAKE_BUILD_TYPE")
+            else unavailable("build type was not in CMakeCache.txt"),
+            "cmakeGenerator": value(cache.get("CMAKE_GENERATOR"))
+            if cache.get("CMAKE_GENERATOR")
+            else unavailable("generator was not in CMakeCache.txt"),
+            "cmakeCacheOptions": value(relevant),
+            "compileFlags": value(sorted(compile_flags))
+            if compile_flags
+            else unavailable("compile_commands.json contained no compile flags"),
+            "linkFlags": value(sorted(link_flags))
+            if link_flags
+            else unavailable("Ninja did not expose bounded link flags"),
+            "linkCommands": value(link_commands)
+            if link_commands
+            else unavailable("Ninja did not expose bounded link commands"),
+        }
 
     cpu_model = unavailable("CPU model was not exposed")
     cpuinfo = Path("/proc/cpuinfo")
@@ -332,6 +470,26 @@ def metadata(benchmark: Path, server: Path, argv: list[str]) -> dict[str, object
         if hasattr(os, "sched_getaffinity")
         else unavailable("not supported")
     )
+    evidence = build_evidence()
+    dependencies = environment("NMS_BENCHMARK_DEPENDENCIES")
+    if not dependencies["available"]:
+        dependencies = probe(
+            ["dpkg-query", "-W", "-f=${Package}=${Version}\\n", "nlohmann-json3-dev"]
+        )
+    turbo = read_probe(
+        Path("/sys/devices/system/cpu/intel_pstate/no_turbo"),
+        "Intel pstate turbo probe was not available",
+    )
+    if not turbo["available"]:
+        boost = read_probe(
+            Path("/sys/devices/system/cpu/cpufreq/boost"),
+            "CPU boost probe was not available",
+        )
+        if boost["available"]:
+            turbo = boost
+    if turbo["available"] and turbo["value"] in {"0", "1"}:
+        turbo = value("enabled" if turbo["value"] == "0" else "disabled")
+    virtualization = probe(["systemd-detect-virt"])
     return {
         "repositoryCommit": probe(["git", "rev-parse", "HEAD"]),
         "dirtyWorktree": dirty,
@@ -341,28 +499,23 @@ def metadata(benchmark: Path, server: Path, argv: list[str]) -> dict[str, object
         "serverExecutableSha256": value(
             hashlib.sha256(server.read_bytes()).hexdigest()
         ),
-        "compilerName": environment("NMS_BENCHMARK_COMPILER"),
-        "compilerVersion": environment("NMS_BENCHMARK_COMPILER_VERSION"),
-        "buildType": environment("NMS_BENCHMARK_BUILD_TYPE"),
+        **evidence,
         "cmakeVersion": probe(["cmake", "--version"]),
-        "cmakeGenerator": environment("NMS_BENCHMARK_CMAKE_GENERATOR"),
-        "cmakeCacheOptions": environment("NMS_BENCHMARK_CMAKE_OPTIONS"),
-        "compileFlags": environment("NMS_BENCHMARK_COMPILE_FLAGS"),
-        "linkFlags": environment("NMS_BENCHMARK_LINK_FLAGS"),
         "benchmarkFramework": value(
             {"name": "project-owned-cpp", "version": "1.0.0"}
         ),
-        "dependencyVersions": environment("NMS_BENCHMARK_DEPENDENCIES"),
+        "dependencyVersions": dependencies,
         "operatingSystem": value(platform.platform()),
         "kernel": value(platform.release()),
         "cpuModel": cpu_model,
         "logicalCpuCount": value(os.cpu_count()),
         "cpuAffinity": affinity,
-        "frequencyGovernor": unavailable(
-            "not read or changed by the benchmark harness"
+        "frequencyGovernor": read_probe(
+            Path("/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor"),
+            "CPU frequency governor probe was not available",
         ),
-        "turboBoost": unavailable("not read or changed by the benchmark harness"),
-        "virtualization": unavailable("not probed by the benchmark harness"),
+        "turboBoost": turbo,
+        "virtualization": virtualization,
         "pageSize": value(os.sysconf("SC_PAGE_SIZE")),
         "monotonicClock": value(time.get_clock_info("monotonic").implementation),
         "monotonicResolutionSeconds": value(
