@@ -5,15 +5,16 @@
 The project is before version 1.0.
 Only the latest tagged release and the default branch receive security corrections.
 
-The latest tagged release is `v0.10.0`. It provides the local stdio MCP server,
-the deterministic read-only investigation client, and bounded reproducibility
-benchmarks. A trusted policy can enable read-only log, ELF, and process-memory
-tools.
+The latest tagged release is `v0.10.1`, at commit
+`2e19b5b6a14f5fbe26c5b4094c1750c6c5205db1`. It provides the local stdio MCP
+server, the deterministic read-only investigation client, and bounded
+reproducibility benchmarks. A trusted policy can enable read-only log, ELF, and
+process-memory tools.
 
-The immutable `v0.10.0` tag contains a stale compiled version identifier of
-`0.9.0`. The current main-line correction prepares patch release `v0.10.1`;
-that tag must wait until PR #12 is merged and the exact merge commit passes
-push-triggered `main` CI. No tag has been created for `v0.10.1`.
+The immutable `v0.10.0` tag contains the historical stale compiled version
+identifier `0.9.0`. `v0.10.1` is the correction release at the tag target above.
+Phase 10 is currently planning-only through PR #13; no Phase 10 implementation,
+provider client, networking, credentials, or new MCP tool exists yet.
 
 The security scope includes these areas:
 
@@ -101,15 +102,46 @@ Do not add one of these capabilities without a separate threat-model decision:
 - networking
 
 A hosted model provider must remain outside the native MCP server. The provider
-client must be a separate process that treats model output as untrusted, validates
+client must be a separate process that treats model output as untrusted, rejects
+unknown fields in production request/response and transcript schemas, validates
 closed tool-call schemas, uses only symbolic aliases, and communicates with the
-server through the existing stdio MCP interface. The native server must not load
-provider credentials or gain HTTP or other networking support.
+server through the existing stdio MCP interface. The native server must remain
+credential-free and must not gain HTTP or other networking support.
 
-Normal CI must not require a live hosted model endpoint. Use deterministic local
-provider doubles for merge and release evidence. A live-provider smoke test must
-be separately gated, use synthetic data, and load credentials only from a secret
-or environment variable.
+Before starting the server or any child, the external agent must build a
+deliberately scrubbed environment from a minimal allowlist. It must not inherit
+provider API keys, authorization tokens or headers, secret-store tokens, proxy
+credentials, live-provider configuration, secret-disclosing debug variables, or
+`HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, and `NO_PROXY` unless a child-specific
+allowlist explicitly requires them. Deterministic sentinel tests must prove
+that secrets do not appear in child environments, arguments, stdout, stderr,
+exceptions, logs, transcripts, reports, or crash artifacts.
+
+Production endpoints must use verified HTTPS, validate scheme and authority,
+reject URL user-info and fragments, verify certificate and hostname, and reject
+disabled verification and ambiguous forms. Redirects are disabled by default;
+future bounded redirects must not forward credentials across origins, downgrade
+HTTPS, or reach disallowed address classes. Plain HTTP is allowed only for an
+explicit loopback-only fake-provider test with no live credential loaded or
+sent.
+
+The agent must use stable request correlation and locally derived action
+identities, deduplicate proposals across attempts and turns, and execute each
+accepted action at most once. Multiple calls are serialized in provider order;
+PRs 10.1–10.3 must not execute them in parallel, and processing stops after
+the first rejection, failure, cancellation, or timeout. Provider retries are
+transport-only and must not repeat an MCP call.
+
+Provider text is guidance, never evidence. Factual report claims must trace to
+validated MCP response IDs, stable local predicates, committed synthetic
+fixture assertions, or local control events. Reports must distinguish
+suggestions, proposals, rejections, validated evidence, derived predicates,
+and supported conclusions.
+
+Normal CI has no internet access or credential requirement and uses deterministic
+local provider doubles. Streaming remains deferred until non-streaming tests
+pass. A live NIM smoke, if later added, must be manual, synthetic, redacted,
+non-gating, and deferred until PRs 10.1–10.3 pass.
 
 Run longer native tests with these commands:
 
