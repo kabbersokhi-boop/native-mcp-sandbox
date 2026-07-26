@@ -2,8 +2,11 @@
 
 ## System boundary
 
-The immutable `v0.10.0` release provides four read-only MCP tools. The current
-main-line correction prepares patch release `v0.10.1` with the same boundary.
+The latest tagged release is `v0.10.1` at commit
+`2e19b5b6a14f5fbe26c5b4094c1750c6c5205db1`. It provides four read-only MCP
+tools with the same boundary as the immutable `v0.10.0` release. The v0.10.0
+tag intentionally remains immutable and contains the historical stale compiled
+identifier; v0.10.1 is the correction release.
 The server enables a tool only when the operator supplies a trusted runtime policy.
 
 The tools are:
@@ -22,6 +25,17 @@ The server does not add these capabilities:
 - shell execution
 - networking
 - MCP tasks
+
+## Phase 10 planning status
+
+Phase 10 is planning-only through PR #13. No Phase 10 implementation,
+provider client, HTTP transport, networking, credentials, fake-provider
+implementation, or new MCP tool exists in this repository. The planned agent
+will remain outside the native server, which stays stdio-only, network-free,
+credential-free, and unchanged in authority. Provider endpoint and model will
+remain configurable. Normal CI will remain offline and credential-free; a live
+provider smoke, if later implemented, will be manual, synthetic, redacted,
+non-gating, and deferred until PRs 10.1–10.3 pass.
 
 Phase 8 adds a demonstration client.
 The client uses the existing tools only.

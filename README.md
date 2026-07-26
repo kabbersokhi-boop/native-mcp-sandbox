@@ -14,9 +14,12 @@ Native MCP Sandbox explores a practical question:
 
 The answer in this repository is a small native server with a deliberately narrow trust boundary. An operator chooses the files and processes that can be observed. The MCP client can then use four bounded, read-only tools through standard input and standard output.
 
-The latest tagged release is **v0.10.0**. Phases 0–9 are complete and released
-through this tag. The current main-line correction prepares **v0.10.1**.
-Phase 10 has not started.
+The latest tagged release is **v0.10.1**, at commit
+`2e19b5b6a14f5fbe26c5b4094c1750c6c5205db1`. Phases 0–9 are complete. The
+immutable **v0.10.0** release remains available as historical context; v0.10.1
+is the correction release. Phase 10 is currently planning-only through PR #13.
+No Phase 10 implementation, provider client, networking, credentials, or new
+MCP tools exist yet.
 
 ## Why this project exists
 
@@ -76,8 +79,8 @@ The test suite covers malformed JSON, duplicate keys, oversized input, policy de
 
 ## Deterministic investigation demonstration
 
-The current main-line correction preparing v0.10.1 includes a complete
-investigation client that uses the real server.
+The released v0.10.1 correction includes a complete investigation client that
+uses the real server.
 
 The demonstration:
 
@@ -263,10 +266,9 @@ For **v0.10.0**:
 - Phase 9 added bounded reproducibility benchmarks with offline report validation
   and measurement-only comparison groups.
 
-The immutable v0.10.0 tag contained a stale compiled version identifier of
-0.9.0. This main-line correction prepares v0.10.1; that tag must not be created
-until PR #12 is merged and the exact merge commit passes push-triggered `main`
-CI.
+The immutable v0.10.0 tag contains a historical stale compiled version
+identifier of 0.9.0. The correction release v0.10.1 is tagged at
+`2e19b5b6a14f5fbe26c5b4094c1750c6c5205db1`.
 
 For the Phase 7 assurance campaign:
 
@@ -319,9 +321,11 @@ docs/FUZZING.md                         Native fuzzing and triage guide
 
 ## Project roadmap
 
-- Phases 0–9: complete and released through the immutable `v0.10.0` tag; the
-  current main-line correction prepares `v0.10.1`.
-- Phase 10: not started; planning follows the separate Phase 9.5 audit.
+- Phases 0–9: complete; `v0.10.0` remains immutable historical release state
+  and `v0.10.1` is the current correction release at
+  `2e19b5b6a14f5fbe26c5b4094c1750c6c5205db1`.
+- Phase 10: planning-only through PR #13. No implementation, provider client,
+  networking, credentials, or new MCP tool has been added.
 
 Each phase is developed as a bounded, reviewable increment. New authority requires an explicit threat-model decision.
 

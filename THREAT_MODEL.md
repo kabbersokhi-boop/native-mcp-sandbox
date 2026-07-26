@@ -163,3 +163,110 @@ The server does not implement these features:
 - dynamic worker changes
 - priorities
 - distributed cancellation
+
+## Phase 10 agent threat model
+
+This section applies only to the planned external agent in PR #13. It does not
+change the native server authority or make the hosted provider trusted.
+
+### Assets
+
+The Phase 10 agent must protect:
+
+- provider credentials, authorization material, and secret-store access;
+- approved and unapproved host evidence;
+- provider prompts and responses;
+- MCP request and response correlation;
+- transcript integrity and redaction;
+- action identity and replay state;
+- operator-selected data-flow policy; and
+- endpoint and model configuration.
+
+### Trusted components
+
+Trust is minimal. The agent may trust only its own bounded control logic, the
+validated local configuration, the existing native server's already-tested
+authority, and validated schemas. The hosted provider, provider response,
+remote network, DNS response, HTTP body, model output, and redirect target are
+not trusted components.
+
+### Untrusted surfaces
+
+The agent must treat these as untrusted:
+
+- provider output;
+- HTTP status, headers, and body;
+- DNS and endpoint configuration;
+- TLS and redirect behavior;
+- streamed or truncated fragments;
+- model tool names and arguments;
+- retry timing;
+- duplicate proposals;
+- prompt-injected evidence;
+- provider text claiming unsupported facts;
+- MCP evidence before schema validation; and
+- transcript fields before redaction.
+
+### Threats
+
+The threat set includes:
+
+- credential disclosure and environment inheritance;
+- SSRF-style endpoint misuse, HTTPS downgrade, and redirect credential leakage;
+- remote-data disclosure and prompt injection;
+- fabricated evidence and invalid tool selection;
+- authority expansion;
+- replay, duplicate execution, and retry amplification;
+- oversized input and output;
+- cancellation races;
+- transcript leakage; and
+- provider instability.
+
+### Controls
+
+The implementation plan requires:
+
+- a deliberately scrubbed, minimal allowlist child environment before every
+  child process, with provider secrets, tokens, proxy credentials, live
+  provider configuration, disallowed proxy variables, and secret-disclosing
+  debug variables excluded;
+- deterministic sentinel tests proving secret absence from child environment,
+  arguments, stdout, stderr, exceptions, logs, transcripts, reports, and crash
+  artifacts;
+- verified HTTPS production endpoints with validated scheme and authority,
+  hostname/certificate verification, no URL user-info or fragments, no
+  disabled verification, and rejection of ambiguous forms;
+- redirects disabled by default, no cross-origin credential forwarding, no
+  HTTPS downgrade, bounded future redirect mode, and rejection of disallowed
+  address classes; loopback-only explicit HTTP for the fake provider with no
+  live credentials;
+- stable provider-request correlation across transport attempts, locally
+  derived action identities, duplicate rejection across attempts and turns,
+  at-most-once MCP execution, and replay state that survives response
+  ambiguity for the bounded investigation;
+- serial execution in provider-declared order, per-turn and total-call
+  budgets, no parallel MCP execution in PRs 10.1–10.3, and stop-on-first
+  rejection, failure, cancellation, or timeout;
+- provenance-typed reports in which provider text is guidance only and every
+  factual claim traces to validated MCP evidence, a local predicate, a
+  synthetic fixture assertion, or a local control event;
+- closed-schema unknown-field rejection in production construction/parsing,
+  proposal parsing, transcript parsing/serialization, fixtures, and tests;
+- the complete classified failure taxonomy, bounded retry eligibility,
+  bounded `Retry-After`, and redacted response diagnostics;
+- deferred streaming, offline credential-free normal CI, a loopback fake
+  provider with test-harness authority only, and a manual synthetic redacted
+  non-gating live NIM smoke only after PRs 10.1–10.3; and
+- independent review before any Phase 10 release, with no native server
+  networking, credentials, provider SDK, or new MCP authority.
+
+### Residual risks
+
+- hosted output remains probabilistic;
+- provider availability is external;
+- redaction can fail if a field is not classified;
+- operator approval can intentionally permit remote data transfer;
+- at-most-once behavior is scoped to one bounded investigation unless durable
+  state is separately designed;
+- deterministic fake-provider tests cannot prove live-provider behavior; and
+- TLS protects transport but does not make provider output trustworthy.
