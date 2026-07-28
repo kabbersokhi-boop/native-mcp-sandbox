@@ -335,6 +335,12 @@ if(BUILD_TESTING)
             --server $<TARGET_FILE:native-mcp-sandbox>
   )
   set_tests_properties(agent.investigation_demo PROPERTIES TIMEOUT 90)
+  add_test(
+    NAME agent.phase_10_1
+    COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/phase_10_1_tests.py
+  )
+  set_tests_properties(agent.phase_10_1 PROPERTIES TIMEOUT 90)
   if(NMS_BUILD_BENCHMARKS)
     add_test(
       NAME benchmarks.component_smoke
