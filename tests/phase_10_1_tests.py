@@ -378,6 +378,25 @@ class TransportTests(unittest.TestCase):
             self.assertEqual(raised.exception.failure.classification, FailureClass.REQUEST_TOO_LARGE)
             self.assertEqual(provider.request_count, 0)
 
+    def test_configured_connect_timeout_reaches_connection_factory(self) -> None:
+        captured = []
+        class TimeoutConnection:
+            sock = None
+            def connect(self):
+                raise socket.timeout
+            def close(self):
+                return None
+        def factory(host, port, timeout):
+            captured.append((host, port, timeout))
+            return TimeoutConnection()
+        endpoint = ValidatedEndpoint("http://127.0.0.1:1234/x", "http", "127.0.0.1", "127.0.0.1", 1234, "/x", True)
+        limits = replace(DEFAULT_LIMITS, provider_connect_timeout_ms=77, provider_total_timeout_ms=1_000, provider_attempt_count=1)
+        with self.assertRaises(ProviderError) as raised:
+            LoopbackFakeTransport(connection_factory=factory).send(endpoint, request(), limits=limits, correlation_id="req-10-1")
+        self.assertEqual(raised.exception.failure.classification, FailureClass.CONNECT_TIMEOUT)
+        self.assertEqual(captured[0][:2], ("127.0.0.1", 1234))
+        self.assertAlmostEqual(captured[0][2], 0.077, places=6)
+
     def test_malformed_declared_lengths_are_classified(self) -> None:
         for case, expected in (
             (FakeCase.MALFORMED_LENGTH, FailureClass.TRUNCATED_RESPONSE),
