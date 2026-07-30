@@ -188,6 +188,11 @@ class ContractTests(unittest.TestCase):
         with self.assertRaises(ProviderError):
             request_with_tools.to_json_bytes(DEFAULT_LIMITS)
         self.assertTrue(request_with_tools.to_json_bytes(replace(DEFAULT_LIMITS, advertised_tool_count=9, provider_request_bytes=8192)))
+        encoded_request = request().to_json_bytes()
+        self.assertEqual(request().to_json_bytes(replace(DEFAULT_LIMITS, provider_request_bytes=len(encoded_request))), encoded_request)
+        with self.assertRaises(ProviderError) as raised:
+            request().to_json_bytes(replace(DEFAULT_LIMITS, provider_request_bytes=len(encoded_request) - 1))
+        self.assertEqual(raised.exception.failure.classification, FailureClass.REQUEST_TOO_LARGE)
         described = AdvertisedTool("described", {"type": "object", "properties": {}, "required": [], "additionalProperties": False}, "x" * 100)
         described_request = ProviderRequest("m", (ProviderMessage(MessageRole.USER, "x"),), (described,), 128, RequestCorrelationId("req-10-1"))
         definition = json.dumps({"name": described.name, "description": described.description, "parameters": described.parameters}, sort_keys=True, separators=(",", ":")).encode()
@@ -201,9 +206,10 @@ class ContractTests(unittest.TestCase):
         self.assertEqual(len(parse_provider_response(raw, advertised_tools=TOOLS, limits=replace(DEFAULT_LIMITS, proposed_tool_call_count=5))), 5)
         large_args = json.dumps({"query": "x" * 100})
         large_raw = json.dumps({"toolCalls": [{"id": "call-1", "name": "logs.search", "arguments": large_args}]}).encode()
+        argument_size = len(large_args.encode())
+        self.assertEqual(len(parse_provider_response(large_raw, advertised_tools=TOOLS, limits=replace(DEFAULT_LIMITS, tool_argument_bytes=argument_size))), 1)
         with self.assertRaises(ProviderError):
-            parse_provider_response(large_raw, advertised_tools=TOOLS, limits=replace(DEFAULT_LIMITS, tool_argument_bytes=99))
-        self.assertEqual(len(parse_provider_response(large_raw, advertised_tools=TOOLS, limits=replace(DEFAULT_LIMITS, tool_argument_bytes=256))), 1)
+            parse_provider_response(large_raw, advertised_tools=TOOLS, limits=replace(DEFAULT_LIMITS, tool_argument_bytes=argument_size - 1))
         transcript = TranscriptEvent("event", "adapter", "model", RequestCorrelationId("req-10-1"), EvidenceProvenance.LOCAL_CONTROL_EVENT, metadata={"mode": "synthetic"})
         transcript_bytes = transcript.to_json_bytes()
         self.assertEqual(parse_transcript(transcript_bytes, replace(DEFAULT_LIMITS, transcript_bytes=len(transcript_bytes))).event, "event")

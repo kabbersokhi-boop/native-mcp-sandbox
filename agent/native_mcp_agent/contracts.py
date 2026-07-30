@@ -367,7 +367,7 @@ def _validate_schema_definition(schema: Any, limits: Limits, *, depth: int = 0) 
             if not _schema_value_matches(item, schema_type):
                 raise _schema_error()
     for key in ("minLength", "maxLength"):
-        if key in schema and (schema_type != "string" or isinstance(schema[key], bool) or not isinstance(schema[key], int) or schema[key] < 0 or schema[key] > limits.tool_argument_bytes):
+        if key in schema and (schema_type != "string" or isinstance(schema[key], bool) or not isinstance(schema[key], int) or schema[key] < 0 or schema[key] > HARD_LIMITS.tool_argument_bytes):
             raise _schema_error()
     if "minLength" in schema and "maxLength" in schema and schema["minLength"] > schema["maxLength"]:
         raise _schema_error()
@@ -409,7 +409,7 @@ def _validate_schema(value: Any, schema: Mapping[str, Any], limits: Limits) -> N
             _validate_schema(child, schema["items"], limits)
     elif schema_type == "string":
         size = len(value.encode("utf-8"))
-        if size < schema.get("minLength", 0) or size > schema.get("maxLength", limits.tool_argument_bytes):
+        if size < schema.get("minLength", 0) or size > min(schema.get("maxLength", limits.tool_argument_bytes), limits.tool_argument_bytes):
             raise ContractError(failure(FailureClass.INVALID_TOOL_PROPOSAL, "tool argument string is outside its bound"))
     elif schema_type in {"integer", "number"}:
         if not math.isfinite(value) or ("minimum" in schema and value < schema["minimum"]) or ("maximum" in schema and value > schema["maximum"]):
