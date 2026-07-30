@@ -29,16 +29,32 @@ def build_child_environment(
     *,
     required: Mapping[str, str] | None = None,
     allow_proxy: bool = False,
+    provider_child: bool = True,
     max_value_bytes: int = 4_096,
 ) -> dict[str, str]:
-    if not isinstance(max_value_bytes, int) or max_value_bytes <= 0 or max_value_bytes > 64 * 1024:
+    if not isinstance(max_value_bytes, int) or isinstance(max_value_bytes, bool) or max_value_bytes <= 0 or max_value_bytes > 64 * 1024:
         raise ProviderError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "environment value limit is invalid"))
+    if not isinstance(provider_child, bool) or (allow_proxy and provider_child):
+        raise ProviderError(failure(FailureClass.LOCAL_POLICY_FAILURE, "proxy allowlisting is only for non-provider children"))
+    if not isinstance(parent, Mapping):
+        raise ProviderError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "parent environment is invalid"))
+    for inherited_name, inherited_value in parent.items():
+        _validate_name(inherited_name)
+        if not isinstance(inherited_value, str) or "\x00" in inherited_value:
+            raise ProviderError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "inherited environment value is invalid"))
+    if not isinstance(allowlist, (tuple, list)) or isinstance(allowlist, str):
+        raise ProviderError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "child environment allowlist is invalid"))
     names = list(allowlist)
     for name in names:
         _validate_name(name)
     if len(set(names)) != len(names):
         raise ProviderError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "allowlist contains duplicate names"))
-    values = dict(required or {})
+    if required is not None and not isinstance(required, Mapping):
+        raise ProviderError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "required environment values are invalid"))
+    try:
+        values = dict(required or {})
+    except (TypeError, ValueError):
+        raise ProviderError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "required environment values are invalid")) from None
     for name in values:
         _validate_name(name)
     if set(values) - set(names):
@@ -54,7 +70,9 @@ def build_child_environment(
         value = values[name] if name in values else parent.get(name)
         if value is None:
             continue
-        if not isinstance(value, str) or len(value.encode("utf-8", "replace")) > max_value_bytes:
+        if not isinstance(value, str) or "\x00" in value:
+            raise ProviderError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "child environment value is invalid or oversized"))
+        if len(value.encode("utf-8")) > max_value_bytes:
             raise ProviderError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "child environment value is invalid or oversized"))
         result[name] = value
     return result

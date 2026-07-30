@@ -65,3 +65,4 @@ class Limits:
 
 
 DEFAULT_LIMITS = Limits()
+HARD_LIMITS = Limits(**Limits.HARD_MAX)
