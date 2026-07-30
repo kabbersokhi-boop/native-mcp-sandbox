@@ -10,7 +10,7 @@ import math
 from typing import Any, Mapping, Sequence
 
 from .errors import FailureClass, ProviderError, failure
-from .limits import DEFAULT_LIMITS, Limits
+from .limits import DEFAULT_LIMITS, HARD_LIMITS, Limits
 from .retry import RetryDecision
 
 
@@ -49,12 +49,27 @@ class MessageRole(str, Enum):
 
 
 def _identifier(value: Any, label: str, classification: FailureClass) -> None:
-    if not isinstance(value, str) or not value or len(value.encode("utf-8", "replace")) > 256:
+    try:
+        size = len(value.encode("utf-8")) if isinstance(value, str) else -1
+    except UnicodeEncodeError:
+        size = -1
+    if (
+        not isinstance(value, str)
+        or not value
+        or size > 64
+        or size < 0
+        or any(char not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-" for char in value)
+        or not value[0].isalnum()
+    ):
         raise ContractError(failure(classification, f"{label} must be a bounded non-empty string"))
 
 
 def _bounded_text(value: Any, label: str, maximum: int, classification: FailureClass = FailureClass.LOCAL_VALIDATION_FAILURE) -> str:
-    if not isinstance(value, str) or not value or len(value.encode("utf-8", "replace")) > maximum:
+    try:
+        size = len(value.encode("utf-8")) if isinstance(value, str) else -1
+    except UnicodeEncodeError:
+        size = -1
+    if not isinstance(value, str) or not value or size > maximum or size < 0:
         raise ContractError(failure(classification, f"{label} is empty, incorrectly typed, or oversized"))
     return value
 
@@ -74,7 +89,13 @@ def _json_value(value: Any, *, depth: int = 0, limits: Limits = DEFAULT_LIMITS) 
             raise ContractError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "JSON array item limit exceeded"))
         for child in value:
             _json_value(child, depth=depth + 1, limits=limits)
-    elif isinstance(value, (str, int, float, bool)) or value is None:
+    elif isinstance(value, str):
+        try:
+            if len(value.encode("utf-8")) > max(limits.message_bytes, limits.tool_argument_bytes, limits.tool_definition_bytes):
+                raise ContractError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "JSON string exceeds byte limit"))
+        except UnicodeEncodeError:
+            raise ContractError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "JSON string is not valid UTF-8")) from None
+    elif isinstance(value, (int, float, bool)) or value is None:
         if isinstance(value, float) and not math.isfinite(value):
             raise ContractError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "non-finite JSON number"))
     else:
@@ -85,26 +106,33 @@ def _pairs_reject_duplicates(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     result: dict[str, Any] = {}
     for key, value in pairs:
         if key in result:
-            raise ContractError(failure(FailureClass.DUPLICATE_KEY_JSON, f"duplicate key {key!r}"))
+            raise ContractError(failure(FailureClass.DUPLICATE_KEY_JSON, "duplicate JSON object key"))
         result[key] = value
     return result
 
 
-def parse_closed_json(raw: bytes | str, limits: Limits = DEFAULT_LIMITS) -> Any:
-    encoded = raw.encode("utf-8") if isinstance(raw, str) else raw
+def parse_closed_json(raw: bytes | str, limits: Limits = DEFAULT_LIMITS, *, byte_limit: int | None = None) -> Any:
+    try:
+        encoded = raw.encode("utf-8") if isinstance(raw, str) else raw
+    except UnicodeEncodeError:
+        raise ContractError(failure(FailureClass.MALFORMED_JSON, "JSON input is not valid UTF-8")) from None
     if not isinstance(encoded, bytes):
         raise ContractError(failure(FailureClass.MALFORMED_JSON, "JSON input is not bytes or text"))
-    if len(encoded) > limits.provider_response_bytes:
+    bound = limits.provider_response_bytes if byte_limit is None else byte_limit
+    if len(encoded) > bound:
         raise ContractError(failure(FailureClass.OVERSIZED_RESPONSE, "JSON input exceeds response limit"))
     try:
-        value = json.loads(encoded.decode("utf-8"), object_pairs_hook=_pairs_reject_duplicates)
+        value = json.loads(encoded.decode("utf-8"), object_pairs_hook=_pairs_reject_duplicates, parse_constant=_reject_nonfinite)
     except ContractError:
         raise
-    except (UnicodeDecodeError, json.JSONDecodeError, RecursionError) as error:
-        detail = str(error).encode("utf-8", "replace")[:128].decode("utf-8", "ignore")
-        raise ContractError(failure(FailureClass.MALFORMED_JSON, detail)) from None
+    except (UnicodeDecodeError, json.JSONDecodeError, RecursionError, ValueError, TypeError):
+        raise ContractError(failure(FailureClass.MALFORMED_JSON, "JSON input is malformed")) from None
     _json_value(value, limits=limits)
     return value
+
+
+def _reject_nonfinite(_value: str) -> None:
+    raise ValueError
 
 
 def _closed_object(value: Any, allowed: set[str], required: set[str], label: str) -> dict[str, Any]:
@@ -144,7 +172,7 @@ class ProviderMessage:
     def __post_init__(self) -> None:
         if not isinstance(self.role, MessageRole):
             raise ContractError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "message role is invalid"))
-        _bounded_text(self.content, "message content", DEFAULT_LIMITS.message_bytes)
+        _bounded_text(self.content, "message content", HARD_LIMITS.message_bytes)
 
 
 @dataclass(frozen=True)
@@ -171,8 +199,10 @@ class AdvertisedTool:
         _identifier(self.name, "tool name", FailureClass.LOCAL_VALIDATION_FAILURE)
         if not isinstance(self.parameters, dict):
             raise ContractError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "tool parameters must be an object"))
-        _json_value(dict(self.parameters))
-        if self.description and len(self.description.encode("utf-8", "replace")) > 1_024:
+        _validate_schema_definition(self.parameters, HARD_LIMITS)
+        if not isinstance(self.description, str):
+            raise ContractError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "tool description is incorrectly typed"))
+        if self.description and len(self.description.encode("utf-8")) > 1_024:
             raise ContractError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "tool description is oversized"))
 
 
@@ -187,10 +217,12 @@ class ProviderRequest:
 
     def __post_init__(self) -> None:
         _bounded_text(self.model, "model identifier", 256)
-        if not 0 < len(self.messages) <= DEFAULT_LIMITS.message_count:
+        if not isinstance(self.messages, tuple) or not 0 < len(self.messages) <= HARD_LIMITS.message_count:
             raise ContractError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "message count is outside its limit"))
-        if len(self.tools) > DEFAULT_LIMITS.advertised_tool_count:
+        if not isinstance(self.tools, tuple) or len(self.tools) > HARD_LIMITS.advertised_tool_count:
             raise ContractError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "advertised tool count exceeded"))
+        if any(not isinstance(message, ProviderMessage) for message in self.messages) or any(not isinstance(tool, AdvertisedTool) for tool in self.tools):
+            raise ContractError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "provider request members are invalid"))
         if len({tool.name for tool in self.tools}) != len(self.tools):
             raise ContractError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "duplicate advertised tool name"))
         if not isinstance(self.max_output_tokens, int) or isinstance(self.max_output_tokens, bool) or not 0 < self.max_output_tokens <= 8_192:
@@ -206,6 +238,8 @@ class ProviderRequest:
         for message in self.messages:
             if len(message.content.encode("utf-8", "replace")) > limits.message_bytes:
                 raise ContractError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "message exceeds configured byte limit"))
+        if len(self.model.encode("utf-8")) > limits.message_bytes:
+            raise ContractError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "model exceeds configured byte limit"))
         value: dict[str, Any] = {
             "correlationId": str(self.correlation_id),
             "model": self.model,
@@ -217,6 +251,8 @@ class ProviderRequest:
             "maxOutputTokens": self.max_output_tokens,
         }
         for item in value["tools"]:
+            _validate_schema_definition(item["parameters"], limits)
+            _json_value(item["parameters"], limits=limits)
             definition_bytes = json.dumps(item, ensure_ascii=True, sort_keys=True, separators=(",", ":")).encode("utf-8")
             if len(definition_bytes) > limits.tool_definition_bytes:
                 raise ContractError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "tool definition exceeds configured byte limit"))
@@ -254,7 +290,13 @@ class ProviderToolCallProposal:
         _identifier(self.name, "tool name", FailureClass.INVALID_TOOL_PROPOSAL)
         if not isinstance(self.arguments, dict):
             raise ContractError(failure(FailureClass.INVALID_TOOL_PROPOSAL, "tool arguments must be an object"))
-        _json_value(dict(self.arguments))
+        _json_value(self.arguments, limits=HARD_LIMITS)
+        try:
+            encoded = json.dumps(self.arguments, ensure_ascii=True, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        except (TypeError, ValueError, OverflowError):
+            raise ContractError(failure(FailureClass.INVALID_TOOL_PROPOSAL, "tool arguments are not canonical JSON")) from None
+        if len(encoded) > HARD_LIMITS.tool_argument_bytes:
+            raise ContractError(failure(FailureClass.INVALID_TOOL_PROPOSAL, "tool arguments exceed their byte limit"))
 
     @property
     def action_identity(self) -> "LocalActionIdentity":
@@ -271,33 +313,107 @@ class LocalActionIdentity:
             raise ContractError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "action identity is not canonical"))
 
 
-def _validate_schema(value: Any, schema: Mapping[str, Any], limits: Limits) -> None:
+_SCHEMA_KEYS = {"type", "properties", "required", "items", "enum", "minLength", "maxLength", "minimum", "maximum", "additionalProperties"}
+_SCHEMA_TYPES = {"object", "array", "string", "boolean", "integer", "number", "null"}
+
+
+def _schema_error(detail: str = "tool schema is malformed") -> ContractError:
+    return ContractError(failure(FailureClass.INVALID_TOOL_PROPOSAL, detail))
+
+
+def _validate_schema_definition(schema: Any, limits: Limits, *, depth: int = 0) -> None:
+    if not isinstance(schema, dict) or depth > limits.json_nesting_depth:
+        raise _schema_error()
+    if any(not isinstance(key, str) or key not in _SCHEMA_KEYS for key in schema):
+        raise _schema_error()
     schema_type = schema.get("type")
+    if not isinstance(schema_type, str) or schema_type not in _SCHEMA_TYPES:
+        raise _schema_error()
+    if "additionalProperties" in schema and schema["additionalProperties"] is not False:
+        raise _schema_error()
     if schema_type == "object":
-        if not isinstance(value, dict):
-            raise ContractError(failure(FailureClass.INVALID_TOOL_PROPOSAL, "tool arguments have the wrong type"))
         properties = schema.get("properties", {})
         required = schema.get("required", [])
-        if not isinstance(properties, dict) or not isinstance(required, list) or any(not isinstance(item, str) for item in required):
-            raise ContractError(failure(FailureClass.INVALID_TOOL_PROPOSAL, "tool schema is malformed"))
-        if any(key not in properties for key in value) and schema.get("additionalProperties", False) is not True:
+        if not isinstance(properties, dict) or len(properties) > limits.object_array_items:
+            raise _schema_error()
+        if "additionalProperties" not in schema and schema_type == "object":
+            # The project subset is closed by default, but emitted schemas are
+            # canonicalized with an explicit false value by callers.
+            pass
+        for name, child in properties.items():
+            try:
+                name_size = len(name.encode("utf-8")) if isinstance(name, str) else -1
+            except UnicodeEncodeError:
+                name_size = -1
+            if not isinstance(name, str) or not name or name_size > 64 or name_size < 0 or any(ord(char) < 0x21 or char in "/\\" for char in name):
+                raise _schema_error()
+            _validate_schema_definition(child, limits, depth=depth + 1)
+        if not isinstance(required, list) or len(required) > limits.object_array_items:
+            raise _schema_error()
+        if any(not isinstance(name, str) for name in required) or len(set(required)) != len(required) or any(name not in properties for name in required):
+            raise _schema_error()
+    elif schema_type == "array":
+        if not isinstance(schema.get("items"), dict):
+            raise _schema_error()
+        _validate_schema_definition(schema["items"], limits, depth=depth + 1)
+    elif any(key in schema for key in ("properties", "required", "items", "additionalProperties")):
+        raise _schema_error()
+    if "enum" in schema:
+        values = schema["enum"]
+        if not isinstance(values, list) or not values or len(values) > limits.object_array_items:
+            raise _schema_error()
+        _json_value(values, limits=limits)
+        for item in values:
+            if not _schema_value_matches(item, schema_type):
+                raise _schema_error()
+    for key in ("minLength", "maxLength"):
+        if key in schema and (schema_type != "string" or isinstance(schema[key], bool) or not isinstance(schema[key], int) or schema[key] < 0 or schema[key] > limits.tool_argument_bytes):
+            raise _schema_error()
+    if "minLength" in schema and "maxLength" in schema and schema["minLength"] > schema["maxLength"]:
+        raise _schema_error()
+    for key in ("minimum", "maximum"):
+        if key in schema and (schema_type not in {"integer", "number"} or isinstance(schema[key], bool) or not isinstance(schema[key], (int, float)) or not math.isfinite(schema[key])):
+            raise _schema_error()
+    if "minimum" in schema and "maximum" in schema and schema["minimum"] > schema["maximum"]:
+        raise _schema_error()
+
+
+def _schema_value_matches(value: Any, schema_type: str) -> bool:
+    if schema_type == "string": return isinstance(value, str)
+    if schema_type == "boolean": return isinstance(value, bool)
+    if schema_type == "integer": return isinstance(value, int) and not isinstance(value, bool)
+    if schema_type == "number": return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+    if schema_type == "object": return isinstance(value, dict)
+    if schema_type == "array": return isinstance(value, list)
+    return value is None
+
+
+def _validate_schema(value: Any, schema: Mapping[str, Any], limits: Limits) -> None:
+    _validate_schema_definition(schema, limits)
+    schema_type = schema["type"]
+    if not _schema_value_matches(value, schema_type):
+        raise ContractError(failure(FailureClass.INVALID_TOOL_PROPOSAL, "tool argument has the wrong type"))
+    if "enum" in schema and not any(type(value) is type(item) and value == item for item in schema["enum"]):
+        raise ContractError(failure(FailureClass.INVALID_TOOL_PROPOSAL, "tool argument is outside its enum"))
+    if schema_type == "object":
+        if len(value) > limits.object_array_items or set(value) - set(schema.get("properties", {})):
             raise ContractError(failure(FailureClass.INVALID_TOOL_PROPOSAL, "tool arguments contain unknown fields"))
-        if any(item not in value for item in required):
+        if any(item not in value for item in schema.get("required", [])):
             raise ContractError(failure(FailureClass.INVALID_TOOL_PROPOSAL, "tool arguments omit required fields"))
         for key, child in value.items():
-            child_schema = properties.get(key)
-            if isinstance(child_schema, dict):
-                _validate_schema(child, child_schema, limits)
-    elif schema_type == "string" and not isinstance(value, str):
-        raise ContractError(failure(FailureClass.INVALID_TOOL_PROPOSAL, "tool argument is not a string"))
-    elif schema_type == "boolean" and not isinstance(value, bool):
-        raise ContractError(failure(FailureClass.INVALID_TOOL_PROPOSAL, "tool argument is not a boolean"))
-    elif schema_type == "integer" and (isinstance(value, bool) or not isinstance(value, int)):
-        raise ContractError(failure(FailureClass.INVALID_TOOL_PROPOSAL, "tool argument is not an integer"))
-    elif schema_type == "number" and (isinstance(value, bool) or not isinstance(value, (int, float))):
-        raise ContractError(failure(FailureClass.INVALID_TOOL_PROPOSAL, "tool argument is not a number"))
-    elif schema_type == "array" and (not isinstance(value, list) or len(value) > limits.object_array_items):
-        raise ContractError(failure(FailureClass.INVALID_TOOL_PROPOSAL, "tool argument is not a bounded array"))
+            _validate_schema(child, schema["properties"][key], limits)
+    elif schema_type == "array":
+        if len(value) > limits.object_array_items:
+            raise ContractError(failure(FailureClass.INVALID_TOOL_PROPOSAL, "tool argument array is oversized"))
+        for child in value:
+            _validate_schema(child, schema["items"], limits)
+    elif schema_type == "string":
+        size = len(value.encode("utf-8"))
+        if size < schema.get("minLength", 0) or size > schema.get("maxLength", limits.tool_argument_bytes):
+            raise ContractError(failure(FailureClass.INVALID_TOOL_PROPOSAL, "tool argument string is outside its bound"))
+    elif schema_type in {"integer", "number"}:
+        if not math.isfinite(value) or ("minimum" in schema and value < schema["minimum"]) or ("maximum" in schema and value > schema["maximum"]):
+            raise ContractError(failure(FailureClass.INVALID_TOOL_PROPOSAL, "tool argument number is outside its bound"))
 
 
 def parse_provider_response(
@@ -333,7 +449,7 @@ def parse_provider_response(
                 raise ContractError(failure(FailureClass.REPLAY_OR_DUPLICATE_PROPOSAL, "duplicate tool call identifier"))
             seen.add(str(call_id))
             name = _bounded_text(call["name"], "tool name", 256, FailureClass.INVALID_TOOL_PROPOSAL)
-            if tools_by_name and name not in tools_by_name:
+            if not tools_by_name or name not in tools_by_name:
                 raise ContractError(failure(FailureClass.INVALID_TOOL_PROPOSAL, "tool is not exactly advertised"))
             if name in tools_by_name:
                 _validate_schema(arguments_value, tools_by_name[name].parameters, limits)
@@ -341,9 +457,8 @@ def parse_provider_response(
         return tuple(calls)
     except ProviderError:
         raise
-    except (KeyError, TypeError, ValueError) as error:
-        detail = str(error).encode("utf-8", "replace")[:128].decode("utf-8", "ignore")
-        raise ContractError(failure(FailureClass.INVALID_TOOL_PROPOSAL, detail)) from None
+    except (AttributeError, KeyError, TypeError, ValueError, UnicodeError, OverflowError, RecursionError):
+        raise ContractError(failure(FailureClass.INVALID_TOOL_PROPOSAL, "provider response is malformed")) from None
 
 
 @dataclass(frozen=True)
