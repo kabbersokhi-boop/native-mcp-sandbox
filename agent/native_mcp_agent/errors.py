@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Mapping
 
+from .redaction import redact_provider_excerpt
+
 
 class FailureClass(str, Enum):
     INVALID_PROVIDER_CONFIGURATION = "invalid_provider_configuration"
@@ -43,6 +45,7 @@ class FailureClass(str, Enum):
     LOCAL_VALIDATION_FAILURE = "local_validation_failure"
     LOCAL_AUTHORIZATION_FAILURE = "local_authorization_failure"
     LOCAL_POLICY_FAILURE = "local_policy_failure"
+    MALFORMED_HTTP_RESPONSE = "malformed_http_response"
 
 
 @dataclass(frozen=True)
@@ -54,14 +57,30 @@ class ClassifiedFailure:
     attempt: int | None = None
 
     def __post_init__(self) -> None:
-        if len(self.detail.encode("utf-8", "replace")) > 256:
-            object.__setattr__(self, "detail", self.detail.encode("utf-8", "replace")[:256].decode("utf-8", "ignore"))
-        if self.status_code is not None and (self.status_code < 100 or self.status_code > 599):
-            raise ValueError("status_code is not a valid HTTP status")
-        if self.retry_after_ms is not None and not 0 <= self.retry_after_ms <= 5_000:
-            raise ValueError("retry_after_ms is outside the bounded diagnostic range")
-        if self.attempt is not None and not 0 <= self.attempt <= 5:
-            raise ValueError("attempt is outside the bounded diagnostic range")
+        if not isinstance(self.classification, FailureClass):
+            object.__setattr__(self, "classification", FailureClass.LOCAL_VALIDATION_FAILURE)
+        detail = self.detail if isinstance(self.detail, str) else ""
+        # Details are project-authored, but this is also the final boundary for
+        # values supplied by adapters and test doubles.  Never retain raw input.
+        object.__setattr__(self, "detail", redact_provider_excerpt(detail))
+        if self.status_code is not None and (
+            isinstance(self.status_code, bool)
+            or not isinstance(self.status_code, int)
+            or not 100 <= self.status_code <= 599
+        ):
+            object.__setattr__(self, "status_code", None)
+        if self.retry_after_ms is not None and (
+            isinstance(self.retry_after_ms, bool)
+            or not isinstance(self.retry_after_ms, int)
+            or not 0 <= self.retry_after_ms <= 5_000
+        ):
+            object.__setattr__(self, "retry_after_ms", None)
+        if self.attempt is not None and (
+            isinstance(self.attempt, bool)
+            or not isinstance(self.attempt, int)
+            or not 0 <= self.attempt <= 5
+        ):
+            object.__setattr__(self, "attempt", None)
 
     @property
     def retryable(self) -> bool:
@@ -88,6 +107,8 @@ class ProviderError(Exception):
     """Exception carrying only a project-owned classified failure."""
 
     def __init__(self, classified: ClassifiedFailure):
+        if not isinstance(classified, ClassifiedFailure):
+            classified = ClassifiedFailure(FailureClass.LOCAL_VALIDATION_FAILURE, "invalid project failure")
         self.failure = classified
         super().__init__(classified.safe_text())
 
@@ -104,6 +125,8 @@ def failure(
 
 
 def http_failure(status: int, *, retry_after_ms: int | None = None) -> ClassifiedFailure:
+    if isinstance(status, bool) or not isinstance(status, int) or not 100 <= status <= 599:
+        return failure(FailureClass.MALFORMED_HTTP_RESPONSE, "HTTP status is invalid")
     mapping = {
         400: FailureClass.HTTP_400_INVALID_REQUEST,
         401: FailureClass.HTTP_401_AUTHENTICATION_FAILURE,
@@ -117,4 +140,4 @@ def http_failure(status: int, *, retry_after_ms: int | None = None) -> Classifie
     classification = mapping.get(status)
     if classification is None:
         classification = FailureClass.TRANSIENT_5XX if 500 <= status <= 599 else FailureClass.OTHER_PERMANENT_4XX
-    return failure(classification, f"HTTP status {status}", status_code=status, retry_after_ms=retry_after_ms)
+    return failure(classification, "HTTP status classified", status_code=status, retry_after_ms=retry_after_ms)
