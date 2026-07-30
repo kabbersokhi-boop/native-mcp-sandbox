@@ -33,6 +33,7 @@ class FakeCase(str, Enum):
     STATUS_408 = "status_408"
     STATUS_413 = "status_413"
     STATUS_422 = "status_422"
+    STATUS_409 = "status_409"
     STATUS_429 = "status_429"
     STATUS_500 = "status_500"
     STATUS_502 = "status_502"
@@ -41,6 +42,15 @@ class FakeCase(str, Enum):
     RETRY_AFTER = "retry_after"
     EXCESSIVE_RETRY_AFTER = "excessive_retry_after"
     REDIRECT = "redirect"
+    REDIRECT_301 = "redirect_301"
+    REDIRECT_302 = "redirect_302"
+    REDIRECT_303 = "redirect_303"
+    REDIRECT_307 = "redirect_307"
+    REDIRECT_308 = "redirect_308"
+    RETRY_SUCCESS = "retry_success"
+    MALFORMED_LENGTH = "malformed_length"
+    NEGATIVE_LENGTH = "negative_length"
+    OVERSIZED_DECLARED_LENGTH = "oversized_declared_length"
     UNEXPECTED_FIELDS = "unexpected_fields"
     MIXED = "mixed"
     DUPLICATE_CALL_IDS = "duplicate_call_ids"
@@ -56,6 +66,7 @@ class FakeProviderServer:
     _thread: threading.Thread | None = None
     request_count: int = 0
     request_bodies: list[bytes] | None = None
+    request_headers: list[dict[str, str]] | None = None
 
     def __enter__(self) -> "FakeProviderServer":
         validate_fake_bind_host(self.host)
@@ -76,6 +87,9 @@ class FakeProviderServer:
                 if owner.request_bodies is None:
                     owner.request_bodies = []
                 owner.request_bodies.append(body)
+                if owner.request_headers is None:
+                    owner.request_headers = []
+                owner.request_headers.append({key.lower(): value for key, value in self.headers.items()})
                 status, response, content_type, declared, delay, close = owner.script()
                 if delay:
                     time.sleep(delay)
@@ -93,7 +107,7 @@ class FakeProviderServer:
                     self.send_header("Retry-After", "0")
                 elif owner.case == FakeCase.EXCESSIVE_RETRY_AFTER:
                     self.send_header("Retry-After", "99")
-                if owner.case == FakeCase.REDIRECT:
+                if owner.case in {FakeCase.REDIRECT, FakeCase.REDIRECT_301, FakeCase.REDIRECT_302, FakeCase.REDIRECT_303, FakeCase.REDIRECT_307, FakeCase.REDIRECT_308}:
                     self.send_header("Location", "https://provider.invalid/redirect")
                 self.send_header("Content-Length", str(declared if declared is not None else len(response)))
                 self.end_headers()
@@ -106,6 +120,7 @@ class FakeProviderServer:
                     self.close_connection = True
 
         self.request_bodies = []
+        self.request_headers = []
         self._server = ThreadingHTTPServer((self.host, 0), Handler)
         self._server.daemon_threads = True
         self._thread = threading.Thread(target=self._server.serve_forever, name="phase10-fake-provider", daemon=True)
@@ -159,18 +174,32 @@ class FakeProviderServer:
             return 200, final, "application/json", None, 1.0, False
         if case == FakeCase.CONNECTION_CLOSE:
             return 200, b"", "application/json", None, 0.0, True
+        if case == FakeCase.RETRY_SUCCESS:
+            if self.request_count == 1:
+                return 503, b'{"error":"bounded"}', "application/json", None, 0.0, False
+            return 200, final, "application/json", None, 0.0, False
+        if case == FakeCase.MALFORMED_LENGTH:
+            return 200, final, "application/json", "not-a-length", 0.0, False
+        if case == FakeCase.NEGATIVE_LENGTH:
+            return 200, final, "application/json", -1, 0.0, False
+        if case == FakeCase.OVERSIZED_DECLARED_LENGTH:
+            return 200, final, "application/json", 999999, 0.0, False
         status_cases = {
             FakeCase.STATUS_400: 400, FakeCase.STATUS_401: 401, FakeCase.STATUS_403: 403,
             FakeCase.STATUS_404: 404, FakeCase.STATUS_408: 408, FakeCase.STATUS_413: 413,
-            FakeCase.STATUS_422: 422, FakeCase.STATUS_429: 429, FakeCase.STATUS_500: 500,
+            FakeCase.STATUS_422: 422, FakeCase.STATUS_409: 409, FakeCase.STATUS_429: 429, FakeCase.STATUS_500: 500,
             FakeCase.STATUS_502: 502, FakeCase.STATUS_503: 503, FakeCase.STATUS_504: 504,
         }
         if case in status_cases:
             return status_cases[case], b'{"error":"bounded"}', "application/json", None, 0.0, False
         if case in {FakeCase.RETRY_AFTER, FakeCase.EXCESSIVE_RETRY_AFTER}:
             return 429, b'{"error":"bounded"}', "application/json", None, 0.0, False
-        if case == FakeCase.REDIRECT:
-            return 302, b"", "text/plain", None, 0.0, False
+        redirect_cases = {
+            FakeCase.REDIRECT: 302, FakeCase.REDIRECT_301: 301, FakeCase.REDIRECT_302: 302,
+            FakeCase.REDIRECT_303: 303, FakeCase.REDIRECT_307: 307, FakeCase.REDIRECT_308: 308,
+        }
+        if case in redirect_cases:
+            return redirect_cases[case], b"", "text/plain", None, 0.0, False
         if case == FakeCase.UNEXPECTED_FIELDS:
             return 200, b'{"message":{"role":"assistant","content":"a"},"extra":1}', "application/json", None, 0.0, False
         if case == FakeCase.MIXED:
