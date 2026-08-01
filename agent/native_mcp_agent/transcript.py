@@ -7,7 +7,7 @@ import re
 import json
 from typing import Any, Mapping
 
-from .contracts import EvidenceProvenance, RequestCorrelationId, ToolCallId, parse_closed_json
+from .contracts import EvidenceProvenance, ModelIdentifier, RequestCorrelationId, ToolCallId, _FrozenDict, parse_closed_json
 from .errors import FailureClass, ProviderError, failure
 from .limits import DEFAULT_LIMITS, HARD_LIMITS, Limits
 from .redaction import redact_json
@@ -31,8 +31,8 @@ def _safe_identity(value: Any, label: str) -> str:
     return value
 
 
-def _metadata(value: Any, *, limit: int) -> dict[str, str]:
-    if not isinstance(value, dict) or len(value) > limit:
+def _metadata(value: Any, *, limit: int) -> Mapping[str, str]:
+    if not isinstance(value, Mapping) or len(value) > limit:
         raise ProviderError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "transcript metadata is invalid"))
     result: dict[str, str] = {}
     for key, item in value.items():
@@ -48,14 +48,17 @@ def _metadata(value: Any, *, limit: int) -> dict[str, str]:
         if any(marker in lowered for marker in _SUSPICIOUS) or item.startswith("/") or any(char.isspace() for char in item):
             raise ProviderError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "transcript metadata is invalid"))
         result[key] = item
-    return result
+    frozen = _FrozenDict()
+    for key, item in result.items():
+        dict.__setitem__(frozen, key, item)
+    return frozen
 
 
 @dataclass(frozen=True)
 class TranscriptEvent:
     event: str
     adapter: str
-    model: str
+    model: ModelIdentifier | str
     correlation_id: RequestCorrelationId
     provenance: EvidenceProvenance
     proposal_ids: tuple[ToolCallId, ...] = ()
@@ -67,7 +70,11 @@ class TranscriptEvent:
     def __post_init__(self) -> None:
         _safe_identity(self.event, "event")
         _safe_identity(self.adapter, "adapter")
-        _safe_identity(self.model, "model")
+        try:
+            model = self.model if isinstance(self.model, ModelIdentifier) else ModelIdentifier(self.model)
+        except ProviderError as error:
+            raise ProviderError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "transcript model is invalid")) from error
+        object.__setattr__(self, "model", model)
         if not isinstance(self.correlation_id, RequestCorrelationId) or not isinstance(self.provenance, EvidenceProvenance):
             raise ProviderError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "transcript identity is not project-owned"))
         if not isinstance(self.proposal_ids, tuple) or len(self.proposal_ids) > HARD_LIMITS.proposed_tool_call_count or any(not isinstance(item, ToolCallId) for item in self.proposal_ids) or len(set(self.proposal_ids)) != len(self.proposal_ids):
@@ -78,9 +85,29 @@ class TranscriptEvent:
             raise ProviderError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "transcript retry flag is invalid"))
         if not isinstance(self.byte_count, int) or isinstance(self.byte_count, bool) or not 0 <= self.byte_count <= 512 * 1024:
             raise ProviderError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "transcript byte count is invalid"))
-        _metadata(self.metadata, limit=HARD_LIMITS.object_array_items)
+        object.__setattr__(self, "metadata", _metadata(self.metadata, limit=HARD_LIMITS.object_array_items))
 
     def to_json_bytes(self, limits: Limits = DEFAULT_LIMITS) -> bytes:
+        _safe_identity(self.event, "event")
+        _safe_identity(self.adapter, "adapter")
+        model = ModelIdentifier(self.model)
+        if not isinstance(self.correlation_id, RequestCorrelationId):
+            raise ProviderError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "transcript correlation ID is invalid"))
+        RequestCorrelationId(str(self.correlation_id))
+        if not isinstance(self.provenance, EvidenceProvenance):
+            raise ProviderError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "transcript provenance is invalid"))
+        if not isinstance(self.proposal_ids, tuple):
+            raise ProviderError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "transcript proposal IDs are invalid"))
+        for item in self.proposal_ids:
+            if not isinstance(item, ToolCallId):
+                raise ProviderError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "transcript proposal IDs are invalid"))
+            ToolCallId.require_canonical(str(item))
+        if self.failure_class is not None and not isinstance(self.failure_class, FailureClass):
+            raise ProviderError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "transcript failure class is invalid"))
+        if self.retry_eligible is not None and not isinstance(self.retry_eligible, bool):
+            raise ProviderError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "transcript retry flag is invalid"))
+        if not isinstance(self.byte_count, int) or isinstance(self.byte_count, bool) or not 0 <= self.byte_count <= 512 * 1024:
+            raise ProviderError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "transcript byte count is invalid"))
         if len(self.proposal_ids) > limits.proposed_tool_call_count:
             raise ProviderError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "transcript proposal count exceeds configured limit"))
         metadata = _metadata(self.metadata, limit=limits.object_array_items)
@@ -90,7 +117,7 @@ class TranscriptEvent:
             "schemaVersion": 1,
             "event": self.event,
             "adapter": self.adapter,
-            "model": self.model,
+            "model": str(model),
             "correlationId": str(self.correlation_id),
             "provenance": self.provenance.value,
             "proposalIds": [str(item) for item in self.proposal_ids],
@@ -131,7 +158,7 @@ def parse_transcript(raw: bytes | str, limits: Limits = DEFAULT_LIMITS) -> Trans
         if not isinstance(value["byteCount"], int) or isinstance(value["byteCount"], bool) or value["byteCount"] < 0:
             raise ProviderError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "transcript byte count is invalid"))
         metadata = _metadata(value["metadata"], limit=limits.object_array_items)
-        proposals = tuple(ToolCallId(item) for item in value["proposalIds"])
+        proposals = tuple(ToolCallId.require_canonical(item) for item in value["proposalIds"])
         failure_class = None if "failureClass" not in value else FailureClass(value["failureClass"])
         retry_eligible = value.get("retryEligible")
         return TranscriptEvent(

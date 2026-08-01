@@ -40,6 +40,7 @@ class FakeCase(str, Enum):
     STATUS_503 = "status_503"
     STATUS_504 = "status_504"
     RETRY_AFTER = "retry_after"
+    MALFORMED_RETRY_AFTER = "malformed_retry_after"
     EXCESSIVE_RETRY_AFTER = "excessive_retry_after"
     REDIRECT = "redirect"
     REDIRECT_301 = "redirect_301"
@@ -105,6 +106,8 @@ class FakeProviderServer:
                     self.send_header("Content-Type", content_type)
                 if owner.case == FakeCase.RETRY_AFTER:
                     self.send_header("Retry-After", "0")
+                elif owner.case == FakeCase.MALFORMED_RETRY_AFTER:
+                    self.send_header("Retry-After", "not-a-delay")
                 elif owner.case == FakeCase.EXCESSIVE_RETRY_AFTER:
                     self.send_header("Retry-After", "99")
                 if owner.case in {FakeCase.REDIRECT, FakeCase.REDIRECT_301, FakeCase.REDIRECT_302, FakeCase.REDIRECT_303, FakeCase.REDIRECT_307, FakeCase.REDIRECT_308}:
@@ -192,7 +195,7 @@ class FakeProviderServer:
         }
         if case in status_cases:
             return status_cases[case], b'{"error":"bounded"}', "application/json", None, 0.0, False
-        if case in {FakeCase.RETRY_AFTER, FakeCase.EXCESSIVE_RETRY_AFTER}:
+        if case in {FakeCase.RETRY_AFTER, FakeCase.MALFORMED_RETRY_AFTER, FakeCase.EXCESSIVE_RETRY_AFTER}:
             return 429, b'{"error":"bounded"}', "application/json", None, 0.0, False
         redirect_cases = {
             FakeCase.REDIRECT: 302, FakeCase.REDIRECT_301: 301, FakeCase.REDIRECT_302: 302,

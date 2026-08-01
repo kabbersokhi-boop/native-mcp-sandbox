@@ -6,9 +6,6 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Mapping
 
-from .redaction import redact_provider_excerpt
-
-
 class FailureClass(str, Enum):
     INVALID_PROVIDER_CONFIGURATION = "invalid_provider_configuration"
     CREDENTIAL_UNAVAILABLE = "credential_unavailable"
@@ -59,10 +56,9 @@ class ClassifiedFailure:
     def __post_init__(self) -> None:
         if not isinstance(self.classification, FailureClass):
             object.__setattr__(self, "classification", FailureClass.LOCAL_VALIDATION_FAILURE)
-        detail = self.detail if isinstance(self.detail, str) else ""
-        # Details are project-authored, but this is also the final boundary for
-        # values supplied by adapters and test doubles.  Never retain raw input.
-        object.__setattr__(self, "detail", redact_provider_excerpt(detail))
+        # Keep the field for source compatibility, but never retain adapter or
+        # provider text at the classified-failure boundary.
+        object.__setattr__(self, "detail", "")
         if self.status_code is not None and (
             isinstance(self.status_code, bool)
             or not isinstance(self.status_code, int)
@@ -98,8 +94,6 @@ class ClassifiedFailure:
             pieces.append(f"status={self.status_code}")
         if self.attempt is not None:
             pieces.append(f"attempt={self.attempt}")
-        if self.detail:
-            pieces.append(self.detail)
         return ": ".join(pieces)
 
 

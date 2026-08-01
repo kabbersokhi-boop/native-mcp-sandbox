@@ -7,6 +7,8 @@ from enum import Enum
 import hashlib
 import json
 import math
+import re
+import threading
 from typing import Any, Mapping, Sequence
 
 from .errors import FailureClass, ProviderError, failure
@@ -18,15 +20,88 @@ class ContractError(ProviderError):
     pass
 
 
+_CORRELATION_ID = re.compile(r"^req-[0-9]+(?:-[0-9]+)*$")
+_CANONICAL_CALL_ID = re.compile(r"^call-[0-9]+$")
+_LEGACY_CALL_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
+_PROJECT_ID_MARKERS = (
+    "authorization", "proxy-authorization", "bearer", "api-key", "apikey",
+    "credential", "password", "secret", "token", "header", "path", "userinfo",
+    "user-info", "://", "http", "ftp",
+)
+_REQUEST_ID_COUNTER = 0
+_REQUEST_ID_LOCK = threading.Lock()
+
+
+def _has_project_id_marker(value: str) -> bool:
+    lowered = value.lower()
+    return any(marker in lowered for marker in _PROJECT_ID_MARKERS) or any(
+        marker in value for marker in ("/", "\\", "@", "?", "#")
+    )
+
+
+def _canonical_correlation_id(value: Any) -> str:
+    if not isinstance(value, str) or not value.isascii() or len(value.encode("ascii", "strict")) > 64 or not _CORRELATION_ID.fullmatch(value):
+        raise ContractError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "request correlation ID is not project-owned"))
+    return value
+
+
 class RequestCorrelationId(str):
     def __new__(cls, value: str) -> "RequestCorrelationId":
-        _identifier(value, "request correlation ID", FailureClass.LOCAL_VALIDATION_FAILURE)
-        return str.__new__(cls, value)
+        return str.__new__(cls, _canonical_correlation_id(value))
+
+    @classmethod
+    def new(cls) -> "RequestCorrelationId":
+        global _REQUEST_ID_COUNTER
+        with _REQUEST_ID_LOCK:
+            _REQUEST_ID_COUNTER += 1
+            return cls(f"req-{_REQUEST_ID_COUNTER}")
+
+    create = new
+
+
+def new_request_correlation_id() -> RequestCorrelationId:
+    """Create a local project-owned correlation ID."""
+    return RequestCorrelationId.new()
 
 
 class ToolCallId(str):
     def __new__(cls, value: str) -> "ToolCallId":
-        _identifier(value, "tool call ID", FailureClass.INVALID_TOOL_PROPOSAL)
+        if not isinstance(value, str) or not value.isascii() or not value or len(value.encode("ascii", "strict")) > 128:
+            raise ContractError(failure(FailureClass.INVALID_TOOL_PROPOSAL, "tool call ID is not project-owned"))
+        if _CANONICAL_CALL_ID.fullmatch(value):
+            return str.__new__(cls, value)
+        if _has_project_id_marker(value) or not _LEGACY_CALL_ID.fullmatch(value):
+            raise ContractError(failure(FailureClass.INVALID_TOOL_PROPOSAL, "tool call ID is not project-owned"))
+        digest = hashlib.sha256(value.encode("ascii")).hexdigest()[:32]
+        return str.__new__(cls, f"call-{digest}")
+
+    @classmethod
+    def require_canonical(cls, value: Any) -> "ToolCallId":
+        if not isinstance(value, str) or not _CANONICAL_CALL_ID.fullmatch(value):
+            raise ContractError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "transcript proposal ID is not canonical"))
+        return cls(value)
+
+
+class ModelIdentifier(str):
+    """A provider-neutral, credential-free model identifier."""
+
+    _GRAMMAR = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*(?:[/:][A-Za-z0-9][A-Za-z0-9._-]*)*$")
+    _SUSPICIOUS = ("authorization", "apikey", "api-key", "bearer", "credential", "password", "secret", "token")
+
+    def __new__(cls, value: str) -> "ModelIdentifier":
+        try:
+            size = len(value.encode("ascii")) if isinstance(value, str) else -1
+        except UnicodeEncodeError:
+            size = -1
+        lowered = value.lower() if isinstance(value, str) else ""
+        if (
+            not isinstance(value, str) or not value or size < 0 or size > 256
+            or not value.isascii() or not cls._GRAMMAR.fullmatch(value)
+            or value.startswith(("/", "\\")) or "://" in value
+            or any(marker in lowered for marker in cls._SUSPICIOUS)
+            or lowered.startswith(("http:", "https:", "ftp:", "file:"))
+        ):
+            raise ContractError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "model identifier is not project-owned"))
         return str.__new__(cls, value)
 
 
@@ -74,17 +149,60 @@ def _bounded_text(value: Any, label: str, maximum: int, classification: FailureC
     return value
 
 
+class _FrozenDict(dict[str, Any]):
+    """A JSON-compatible dict whose public mutation operations are disabled."""
+
+    def _immutable(self, *_args: Any, **_kwargs: Any) -> None:
+        raise TypeError("immutable JSON mapping")
+
+    __setitem__ = __delitem__ = clear = pop = popitem = setdefault = update = __ior__ = _immutable
+
+
+def _freeze_json(value: Any, *, depth: int = 0, limits: Limits = HARD_LIMITS) -> Any:
+    """Validate JSON and detach it from caller-owned containers."""
+    if depth > limits.json_nesting_depth:
+        raise ContractError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "JSON nesting depth exceeded"))
+    if isinstance(value, Mapping):
+        if len(value) > limits.object_array_items:
+            raise ContractError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "JSON object item limit exceeded"))
+        result = _FrozenDict()
+        for key, child in value.items():
+            if not isinstance(key, str) or not key:
+                raise ContractError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "JSON object key is invalid"))
+            dict.__setitem__(result, key, _freeze_json(child, depth=depth + 1, limits=limits))
+        return result
+    if isinstance(value, (list, tuple)):
+        if len(value) > limits.object_array_items:
+            raise ContractError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "JSON array item limit exceeded"))
+        return tuple(_freeze_json(child, depth=depth + 1, limits=limits) for child in value)
+    if isinstance(value, str):
+        try:
+            size = len(value.encode("utf-8"))
+        except UnicodeEncodeError:
+            raise ContractError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "JSON string is not valid UTF-8")) from None
+        if size > max(limits.message_bytes, limits.tool_argument_bytes, limits.tool_definition_bytes):
+            raise ContractError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "JSON string exceeds byte limit"))
+        return value
+    if isinstance(value, bool) or value is None or isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            raise ContractError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "non-finite JSON number"))
+        return value
+    raise ContractError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "unsupported JSON value"))
+
+
 def _json_value(value: Any, *, depth: int = 0, limits: Limits = DEFAULT_LIMITS) -> None:
     if depth > limits.json_nesting_depth:
         raise ContractError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "JSON nesting depth exceeded"))
-    if isinstance(value, dict):
+    if isinstance(value, Mapping):
         if len(value) > limits.object_array_items:
             raise ContractError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "JSON object item limit exceeded"))
         for key, child in value.items():
             if not isinstance(key, str) or not key:
                 raise ContractError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "JSON object key is invalid"))
             _json_value(child, depth=depth + 1, limits=limits)
-    elif isinstance(value, list):
+    elif isinstance(value, (list, tuple)):
         if len(value) > limits.object_array_items:
             raise ContractError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "JSON array item limit exceeded"))
         for child in value:
@@ -150,14 +268,18 @@ def _closed_object(value: Any, allowed: set[str], required: set[str], label: str
 @dataclass(frozen=True)
 class ProviderConfig:
     endpoint: str
-    model: str
+    model: ModelIdentifier | str
     verify_tls: bool = True
     allow_loopback_http: bool = False
     redirects: str = "reject"
 
     def __post_init__(self) -> None:
         _bounded_text(self.endpoint, "provider endpoint", 2_048, FailureClass.INVALID_PROVIDER_CONFIGURATION)
-        _bounded_text(self.model, "model identifier", 256, FailureClass.INVALID_PROVIDER_CONFIGURATION)
+        try:
+            model = self.model if isinstance(self.model, ModelIdentifier) else ModelIdentifier(self.model)
+        except ContractError as error:
+            raise ProviderError(failure(FailureClass.INVALID_PROVIDER_CONFIGURATION, "model identifier is invalid")) from error
+        object.__setattr__(self, "model", model)
         if not isinstance(self.verify_tls, bool) or not isinstance(self.allow_loopback_http, bool):
             raise ContractError(failure(FailureClass.INVALID_PROVIDER_CONFIGURATION, "TLS and loopback options must be boolean"))
         if self.redirects != "reject":
@@ -197,9 +319,13 @@ class AdvertisedTool:
 
     def __post_init__(self) -> None:
         _identifier(self.name, "tool name", FailureClass.LOCAL_VALIDATION_FAILURE)
-        if not isinstance(self.parameters, dict):
+        if not isinstance(self.parameters, Mapping):
             raise ContractError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "tool parameters must be an object"))
-        _validate_schema_definition(self.parameters, HARD_LIMITS)
+        frozen = _freeze_json(self.parameters, limits=HARD_LIMITS)
+        if not isinstance(frozen, dict):
+            raise ContractError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "tool parameters must be an object"))
+        object.__setattr__(self, "parameters", frozen)
+        _validate_schema_definition(frozen, HARD_LIMITS)
         if not isinstance(self.description, str):
             raise ContractError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "tool description is incorrectly typed"))
         if self.description and len(self.description.encode("utf-8")) > 1_024:
@@ -208,7 +334,7 @@ class AdvertisedTool:
 
 @dataclass(frozen=True)
 class ProviderRequest:
-    model: str
+    model: ModelIdentifier | str
     messages: tuple[ProviderMessage, ...]
     tools: tuple[AdvertisedTool, ...]
     max_output_tokens: int
@@ -216,7 +342,11 @@ class ProviderRequest:
     generation: GenerationControls = field(default_factory=GenerationControls)
 
     def __post_init__(self) -> None:
-        _bounded_text(self.model, "model identifier", 256)
+        try:
+            model = self.model if isinstance(self.model, ModelIdentifier) else ModelIdentifier(self.model)
+        except ContractError as error:
+            raise ProviderError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "model identifier is invalid")) from error
+        object.__setattr__(self, "model", model)
         if not isinstance(self.messages, tuple) or not 0 < len(self.messages) <= HARD_LIMITS.message_count:
             raise ContractError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "message count is outside its limit"))
         if not isinstance(self.tools, tuple) or len(self.tools) > HARD_LIMITS.advertised_tool_count:
@@ -231,18 +361,29 @@ class ProviderRequest:
             raise ContractError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "correlation ID is not project-owned"))
 
     def to_json_bytes(self, limits: Limits = DEFAULT_LIMITS) -> bytes:
+        model = ModelIdentifier(self.model)
+        if not isinstance(self.correlation_id, RequestCorrelationId):
+            raise ContractError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "correlation ID is not project-owned"))
+        RequestCorrelationId(str(self.correlation_id))
         if len(self.messages) > limits.message_count:
             raise ContractError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "message count exceeds configured limit"))
         if len(self.tools) > limits.advertised_tool_count:
             raise ContractError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "advertised tool count exceeds configured limit"))
+        if any(not isinstance(item, ProviderMessage) or not isinstance(item.role, MessageRole) or not isinstance(item.content, str) for item in self.messages):
+            raise ContractError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "provider message is invalid"))
+        for item in self.tools:
+            if not isinstance(item, AdvertisedTool) or not isinstance(item.name, str) or not isinstance(item.parameters, Mapping):
+                raise ContractError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "advertised tool is invalid"))
+            _identifier(item.name, "tool name", FailureClass.LOCAL_VALIDATION_FAILURE)
+            _validate_schema_definition(item.parameters, limits)
         for message in self.messages:
             if len(message.content.encode("utf-8", "replace")) > limits.message_bytes:
                 raise ContractError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "message exceeds configured byte limit"))
-        if len(self.model.encode("utf-8")) > limits.message_bytes:
+        if len(model.encode("ascii")) > limits.message_bytes:
             raise ContractError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "model exceeds configured byte limit"))
         value: dict[str, Any] = {
             "correlationId": str(self.correlation_id),
-            "model": self.model,
+            "model": str(model),
             "messages": [{"role": item.role.value, "content": item.content} for item in self.messages],
             "tools": [
                 {"name": item.name, "description": item.description, "parameters": item.parameters}
@@ -283,25 +424,52 @@ class ProviderToolCallProposal:
     call_id: ToolCallId
     name: str
     arguments: Mapping[str, Any]
+    _canonical_argument_bytes: bytes = field(init=False, repr=False, compare=False)
+    _action_identity: LocalActionIdentity | None = field(init=False, repr=False, compare=False, default=None)
 
     def __post_init__(self) -> None:
         if not isinstance(self.call_id, ToolCallId):
             raise ContractError(failure(FailureClass.INVALID_TOOL_PROPOSAL, "call ID is not project-owned"))
         _identifier(self.name, "tool name", FailureClass.INVALID_TOOL_PROPOSAL)
-        if not isinstance(self.arguments, dict):
+        if not isinstance(self.arguments, Mapping):
             raise ContractError(failure(FailureClass.INVALID_TOOL_PROPOSAL, "tool arguments must be an object"))
-        _json_value(self.arguments, limits=HARD_LIMITS)
+        frozen = _freeze_json(self.arguments, limits=HARD_LIMITS)
+        if not isinstance(frozen, dict):
+            raise ContractError(failure(FailureClass.INVALID_TOOL_PROPOSAL, "tool arguments must be an object"))
+        object.__setattr__(self, "arguments", frozen)
+        _json_value(frozen, limits=HARD_LIMITS)
         try:
-            encoded = json.dumps(self.arguments, ensure_ascii=True, sort_keys=True, separators=(",", ":")).encode("utf-8")
+            encoded = json.dumps(frozen, ensure_ascii=True, sort_keys=True, separators=(",", ":")).encode("utf-8")
         except (TypeError, ValueError, OverflowError):
             raise ContractError(failure(FailureClass.INVALID_TOOL_PROPOSAL, "tool arguments are not canonical JSON")) from None
         if len(encoded) > HARD_LIMITS.tool_argument_bytes:
             raise ContractError(failure(FailureClass.INVALID_TOOL_PROPOSAL, "tool arguments exceed their byte limit"))
+        canonical = json.dumps({"name": self.name, "arguments": frozen}, ensure_ascii=True, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        object.__setattr__(self, "_canonical_argument_bytes", encoded)
+        object.__setattr__(self, "_action_identity", LocalActionIdentity(hashlib.sha256(canonical).hexdigest()[:32]))
 
     @property
     def action_identity(self) -> "LocalActionIdentity":
-        canonical = json.dumps({"name": self.name, "arguments": self.arguments}, sort_keys=True, separators=(",", ":"))
-        return LocalActionIdentity(hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:32])
+        if not isinstance(self._action_identity, LocalActionIdentity):
+            raise ContractError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "action identity is not canonical"))
+        return self._action_identity
+
+    @property
+    def canonical_argument_bytes(self) -> bytes:
+        return self._canonical_argument_bytes
+
+    def to_json_bytes(self, limits: Limits = DEFAULT_LIMITS) -> bytes:
+        """Serialize a proposal only after revalidating its control scalars."""
+        if not isinstance(self.call_id, ToolCallId) or not _CANONICAL_CALL_ID.fullmatch(str(self.call_id)):
+            raise ContractError(failure(FailureClass.INVALID_TOOL_PROPOSAL, "call ID is not canonical"))
+        _identifier(self.name, "tool name", FailureClass.INVALID_TOOL_PROPOSAL)
+        frozen = _freeze_json(self.arguments, limits=limits)
+        if not isinstance(frozen, dict):
+            raise ContractError(failure(FailureClass.INVALID_TOOL_PROPOSAL, "tool arguments are not an object"))
+        encoded = json.dumps({"id": str(self.call_id), "name": self.name, "arguments": frozen}, ensure_ascii=True, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        if len(encoded) > limits.tool_argument_bytes:
+            raise ContractError(failure(FailureClass.INVALID_TOOL_PROPOSAL, "tool proposal exceeds its byte limit"))
+        return encoded
 
 
 @dataclass(frozen=True)
@@ -348,7 +516,7 @@ def _validate_schema_definition(schema: Any, limits: Limits, *, depth: int = 0) 
             if not isinstance(name, str) or not name or name_size > 64 or name_size < 0 or any(ord(char) < 0x21 or char in "/\\" for char in name):
                 raise _schema_error()
             _validate_schema_definition(child, limits, depth=depth + 1)
-        if not isinstance(required, list) or len(required) > limits.object_array_items:
+        if not isinstance(required, (list, tuple)) or len(required) > limits.object_array_items:
             raise _schema_error()
         if any(not isinstance(name, str) for name in required) or len(set(required)) != len(required) or any(name not in properties for name in required):
             raise _schema_error()
@@ -360,7 +528,7 @@ def _validate_schema_definition(schema: Any, limits: Limits, *, depth: int = 0) 
         raise _schema_error()
     if "enum" in schema:
         values = schema["enum"]
-        if not isinstance(values, list) or not values or len(values) > limits.object_array_items:
+        if not isinstance(values, (list, tuple)) or not values or len(values) > limits.object_array_items:
             raise _schema_error()
         _json_value(values, limits=limits)
         for item in values:
@@ -383,8 +551,8 @@ def _schema_value_matches(value: Any, schema_type: str) -> bool:
     if schema_type == "boolean": return isinstance(value, bool)
     if schema_type == "integer": return isinstance(value, int) and not isinstance(value, bool)
     if schema_type == "number": return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
-    if schema_type == "object": return isinstance(value, dict)
-    if schema_type == "array": return isinstance(value, list)
+    if schema_type == "object": return isinstance(value, Mapping)
+    if schema_type == "array": return isinstance(value, (list, tuple))
     return value is None
 
 

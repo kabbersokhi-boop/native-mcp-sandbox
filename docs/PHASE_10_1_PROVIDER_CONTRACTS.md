@@ -102,5 +102,43 @@ Child environments are constructed from a new explicit allowlist and reject
 provider credentials, tokens, proxy credentials, live-provider settings, and
 secret-disclosing debug variables.
 
+## Security corrections
+
+Control identifiers are project-owned. Correlation IDs are ASCII `req-` plus
+one or more decimal components (`req-123` or `req-10-1`); a local counter
+factory creates them without provider or user text. Canonical proposal IDs are
+`call-` plus decimal digits. Bounded legacy provider IDs are converted to a
+deterministic `call-` plus hash value, while credential, header, path, and
+user-info markers are rejected. Transcript proposal IDs must already be
+canonical and are never silently converted.
+
+`ModelIdentifier` is the shared ASCII, maximum-256-byte value type used by
+configuration, requests, and transcripts. Each component is non-empty and
+uses letters, digits, `.`, `_`, or `-`; components may be separated by `/` or
+`:`, as in `organization/model-name` and `provider:model`. Spaces, controls,
+URLs, absolute paths, user-info, and credential-like values are rejected.
+
+Proxy variables remain excluded unless `allow_proxy=True`, the child is not a
+provider child, and each variable is explicitly allowlisted. HTTP proxy values
+must be `http` or `https` URLs with a valid DNS/IP host, an explicit valid port,
+no credentials/query/fragment/backslash, and only an empty or `/` path.
+`NO_PROXY` is separately bounded to at most 64 comma-separated, whitespace-free
+entries: `*`, DNS names, leading-dot suffixes, IPv4, bracketed IPv6, and
+optional valid ports are accepted; URLs, credentials, malformed ports, and
+unbracketed IPv6 are rejected.
+
+Failure objects retain only the project failure class and validated status,
+retry delay, and attempt fields. The compatibility `detail` field is always
+empty, so exception text, reprs, diagnostics, and transcript bytes cannot
+carry adapter/provider detail. Nested mappings are detached into immutable
+JSON-compatible mappings and arrays into tuples. Proposals compute canonical
+argument bytes and a stable `LocalActionIdentity` at construction, so caller
+mutation cannot alter their action identity or serialized arguments.
+
+Transport honors a valid bounded decimal `Retry-After`. A missing, malformed,
+or excessive value is discarded and uses the local bounded `retry_backoff_ms`.
+The malformed header itself is never included in an exception or log.
+
 The test suite is standard-library-only, offline, and registered as
-`agent.phase_10_1` in normal CTest execution.
+`agent.phase_10_1` and `agent.phase_10_1_security_regressions` in normal CTest
+execution.

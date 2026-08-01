@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import re
+import ipaddress
 from typing import Mapping
+from urllib.parse import urlsplit
 
 from .errors import FailureClass, ProviderError, failure
 
@@ -16,11 +18,86 @@ _NEVER_ALLOW = {
 }
 _SECRET_HINTS = ("API_KEY", "TOKEN", "PASSWORD", "SECRET", "AUTH", "CREDENTIAL")
 _PROVIDER_HINTS = ("PROVIDER", "OPENAI", "NVIDIA", "NIM", "MODEL_ENDPOINT", "MODEL_URL")
+_PROXY_NAMES = {"HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY"}
+_NO_PROXY_NAME = "NO_PROXY"
+_DNS_NAME = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*\.?$")
 
 
 def _validate_name(name: str) -> None:
     if not isinstance(name, str) or not _NAME.fullmatch(name):
         raise ProviderError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "invalid child environment variable name"))
+
+
+def _valid_dns_name(value: str) -> bool:
+    return bool(_DNS_NAME.fullmatch(value)) and len(value.encode("ascii", "ignore")) <= 253
+
+
+def _validate_proxy(value: str) -> None:
+    if not isinstance(value, str) or not value.isascii() or any(ord(char) < 0x20 or ord(char) == 0x7f for char in value):
+        raise ProviderError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "proxy value is invalid"))
+    if any(char in value for char in ("@", "\\", "?", "#")):
+        raise ProviderError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "proxy value is invalid"))
+    try:
+        parsed = urlsplit(value)
+        port = parsed.port
+    except (ValueError, UnicodeError):
+        raise ProviderError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "proxy value is invalid")) from None
+    if parsed.scheme.lower() not in {"http", "https"} or parsed.username is not None or parsed.password is not None:
+        raise ProviderError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "proxy value is invalid"))
+    if not parsed.hostname or port is None or not 1 <= port <= 65535 or parsed.query or parsed.fragment or parsed.path not in ("", "/"):
+        raise ProviderError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "proxy value is invalid"))
+    host = parsed.hostname
+    try:
+        ipaddress.ip_address(host)
+        valid_host = True
+    except ValueError:
+        valid_host = _valid_dns_name(host)
+    if not valid_host:
+        raise ProviderError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "proxy value is invalid"))
+
+
+def _validate_no_proxy(value: str) -> None:
+    if not isinstance(value, str) or not value.isascii() or any(char.isspace() or ord(char) < 0x20 or ord(char) == 0x7f for char in value):
+        raise ProviderError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "NO_PROXY value is invalid"))
+    entries = value.split(",")
+    if not entries or len(entries) > 64 or any(not entry for entry in entries):
+        raise ProviderError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "NO_PROXY value is invalid"))
+    for entry in entries:
+        if entry == "*":
+            continue
+        if "://" in entry or "@" in entry or "/" in entry or "\\" in entry or "?" in entry or "#" in entry:
+            raise ProviderError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "NO_PROXY value is invalid"))
+        host = entry
+        port: str | None = None
+        if entry.startswith("["):
+            closing = entry.find("]")
+            if closing < 0:
+                raise ProviderError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "NO_PROXY value is invalid"))
+            host = entry[1:closing]
+            remainder = entry[closing + 1:]
+            if remainder:
+                if not remainder.startswith(":"):
+                    raise ProviderError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "NO_PROXY value is invalid"))
+                port = remainder[1:]
+            try:
+                ipaddress.IPv6Address(host)
+            except ValueError:
+                raise ProviderError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "NO_PROXY value is invalid")) from None
+        else:
+            if entry.count(":") > 1:
+                raise ProviderError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "NO_PROXY value is invalid"))
+            if ":" in entry:
+                host, port = entry.rsplit(":", 1)
+            host_value = host[1:] if host.startswith(".") else host
+            try:
+                ipaddress.IPv4Address(host_value)
+                valid_host = host == host_value
+            except ValueError:
+                valid_host = _valid_dns_name(host_value) and (host.startswith(".") or not host.startswith("."))
+            if not valid_host:
+                raise ProviderError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "NO_PROXY value is invalid"))
+        if port is not None and (not re.fullmatch(r"[0-9]+", port) or not 1 <= int(port) <= 65535):
+            raise ProviderError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "NO_PROXY value is invalid"))
 
 
 def build_child_environment(
@@ -74,5 +151,9 @@ def build_child_environment(
             raise ProviderError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "child environment value is invalid or oversized"))
         if len(value.encode("utf-8")) > max_value_bytes:
             raise ProviderError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "child environment value is invalid or oversized"))
+        if upper in _PROXY_NAMES:
+            _validate_proxy(value)
+        elif upper == _NO_PROXY_NAME:
+            _validate_no_proxy(value)
         result[name] = value
     return result
