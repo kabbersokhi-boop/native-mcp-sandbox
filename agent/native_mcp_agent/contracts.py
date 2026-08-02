@@ -22,11 +22,11 @@ class ContractError(ProviderError):
 
 _CORRELATION_ID = re.compile(r"^req-[0-9]+(?:-[0-9]+)*$")
 _CANONICAL_CALL_ID = re.compile(r"^call-[0-9]+$")
-_LEGACY_CALL_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
+_LEGACY_CALL_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 _PROJECT_ID_MARKERS = (
     "authorization", "proxy-authorization", "bearer", "api-key", "apikey",
     "credential", "password", "secret", "token", "header", "path", "userinfo",
-    "user-info", "://", "http", "ftp",
+    "user-info", "sk-", "pk-", "rk-", "://", "http", "ftp",
 )
 _REQUEST_ID_COUNTER = 0
 _REQUEST_ID_LOCK = threading.Lock()
@@ -35,7 +35,7 @@ _REQUEST_ID_LOCK = threading.Lock()
 def _has_project_id_marker(value: str) -> bool:
     lowered = value.lower()
     return any(marker in lowered for marker in _PROJECT_ID_MARKERS) or any(
-        marker in value for marker in ("/", "\\", "@", "?", "#")
+        marker in value for marker in ("/", "\\", "@", "?", "#", ":")
     )
 
 

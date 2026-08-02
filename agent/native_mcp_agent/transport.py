@@ -179,10 +179,20 @@ class LoopbackFakeTransport:
             sock.settimeout(remaining)
 
 
+_RETRY_AFTER = re.compile(r"^[0-9]+(?:\.[0-9]{1,3})?$")
+
+
 def _retry_after(value: str | None, limits: Limits) -> int | None:
-    if value is None or not isinstance(value, str) or not value.isascii() or not re.fullmatch(r"[0-9]+", value) or len(value) > 4:
+    # Keep parsing bounded before converting untrusted header text to an int.
+    if value is None or not isinstance(value, str) or not value.isascii() or len(value) > 16 or not _RETRY_AFTER.fullmatch(value):
         return None
-    milliseconds = int(value) * 1_000
+    whole, separator, fraction = value.partition(".")
+    try:
+        milliseconds = int(whole) * 1_000
+        if separator:
+            milliseconds += int(fraction.ljust(3, "0"))
+    except (TypeError, ValueError, OverflowError):
+        return None
     if milliseconds > limits.retry_after_ms:
         return None
     return milliseconds

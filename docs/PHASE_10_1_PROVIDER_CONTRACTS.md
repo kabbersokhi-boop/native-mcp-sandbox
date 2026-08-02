@@ -135,9 +135,14 @@ JSON-compatible mappings and arrays into tuples. Proposals compute canonical
 argument bytes and a stable `LocalActionIdentity` at construction, so caller
 mutation cannot alter their action identity or serialized arguments.
 
-Transport honors a valid bounded decimal `Retry-After`. A missing, malformed,
-or excessive value is discarded and uses the local bounded `retry_backoff_ms`.
-The malformed header itself is never included in an exception or log.
+Transport accepts only an ASCII decimal-seconds `Retry-After` value matching
+`[0-9]+` or `[0-9]+\.[0-9]{1,3}`. Fractional digits are right-padded to three
+places and converted with integer arithmetic (`0.5` is 500 ms, `0.05` is 50
+ms, and `0.005` is 5 ms); no binary floating-point conversion is used. Values
+above the configured `retry_after_ms` bound, as well as missing, empty,
+malformed, signed, exponent, over-precision, non-ASCII, or excessively long
+values, are discarded and use the local bounded `retry_backoff_ms`. The
+rejected header text itself is never included in an exception or log.
 
 The test suite is standard-library-only, offline, and registered as
 `agent.phase_10_1` and `agent.phase_10_1_security_regressions` in normal CTest

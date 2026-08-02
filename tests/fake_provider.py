@@ -40,6 +40,8 @@ class FakeCase(str, Enum):
     STATUS_503 = "status_503"
     STATUS_504 = "status_504"
     RETRY_AFTER = "retry_after"
+    RETRY_AFTER_INTEGER = "retry_after_integer"
+    RETRY_AFTER_DECIMAL = "retry_after_decimal"
     MALFORMED_RETRY_AFTER = "malformed_retry_after"
     EXCESSIVE_RETRY_AFTER = "excessive_retry_after"
     REDIRECT = "redirect"
@@ -106,6 +108,10 @@ class FakeProviderServer:
                     self.send_header("Content-Type", content_type)
                 if owner.case == FakeCase.RETRY_AFTER:
                     self.send_header("Retry-After", "0")
+                elif owner.case == FakeCase.RETRY_AFTER_INTEGER and owner.request_count == 1:
+                    self.send_header("Retry-After", "1")
+                elif owner.case == FakeCase.RETRY_AFTER_DECIMAL and owner.request_count == 1:
+                    self.send_header("Retry-After", "0.5")
                 elif owner.case == FakeCase.MALFORMED_RETRY_AFTER:
                     self.send_header("Retry-After", "not-a-delay")
                 elif owner.case == FakeCase.EXCESSIVE_RETRY_AFTER:
@@ -180,6 +186,10 @@ class FakeProviderServer:
         if case == FakeCase.RETRY_SUCCESS:
             if self.request_count == 1:
                 return 503, b'{"error":"bounded"}', "application/json", None, 0.0, False
+            return 200, final, "application/json", None, 0.0, False
+        if case in {FakeCase.RETRY_AFTER_INTEGER, FakeCase.RETRY_AFTER_DECIMAL}:
+            if self.request_count == 1:
+                return 429, b'{"error":"bounded"}', "application/json", None, 0.0, False
             return 200, final, "application/json", None, 0.0, False
         if case == FakeCase.MALFORMED_LENGTH:
             return 200, final, "application/json", "not-a-length", 0.0, False

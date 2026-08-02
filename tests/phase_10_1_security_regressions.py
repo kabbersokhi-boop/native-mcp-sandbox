@@ -24,7 +24,7 @@ from agent.native_mcp_agent.environment import build_child_environment  # noqa: 
 from agent.native_mcp_agent.errors import FailureClass, ProviderError, failure  # noqa: E402
 from agent.native_mcp_agent.limits import DEFAULT_LIMITS  # noqa: E402
 from agent.native_mcp_agent.transcript import TranscriptEvent, parse_transcript  # noqa: E402
-from agent.native_mcp_agent.transport import LoopbackFakeTransport  # noqa: E402
+from agent.native_mcp_agent.transport import LoopbackFakeTransport, _retry_after  # noqa: E402
 from tests.fake_provider import FakeCase, FakeProviderServer  # noqa: E402
 
 
@@ -52,9 +52,18 @@ class IdentifierTests(unittest.TestCase):
         for value in ("abc", "request-1", "req-user", "req-1.2", "req-1/2"):
             with self.subTest(value=value), self.assertRaises(ProviderError):
                 RequestCorrelationId(value)
-        for value in ("authorization-token", "api-key-abc", "user@host", "/tmp/call", "header:path"):
-            with self.subTest(value=value), self.assertRaises(ProviderError):
+        rejected = (
+            "sk-api-sentinel", "pk-api-sentinel", "rk-api-sentinel", "sk-secret",
+            "authorization-token", "api-key-abc", "bearer-secret", "token-secret",
+            "password-secret", "secret-value", "credential-value", "user@host",
+            "user:pass@host", "user:pass", "https://provider.invalid/call", "/tmp/call",
+            "header:path",
+        )
+        for value in rejected:
+            with self.subTest(value=value), self.assertRaises(ProviderError) as raised:
                 ToolCallId(value)
+            output = " ".join((str(raised.exception), repr(raised.exception), repr(raised.exception.failure.__dict__)))
+            self.assertNotIn(value, output)
 
     def test_duplicate_detection_uses_canonical_provider_id(self) -> None:
         raw = b'{"toolCalls":[{"id":"legacy-id","name":"logs.search","arguments":"{}"},{"id":"legacy-id","name":"logs.search","arguments":"{}"}]}'
@@ -207,20 +216,34 @@ class FailureAndImmutabilityTests(unittest.TestCase):
 class RetryAfterTests(unittest.TestCase):
     def test_retry_after_valid_missing_malformed_and_excessive(self) -> None:
         limits = replace(DEFAULT_LIMITS, provider_attempt_count=2, retry_backoff_ms=7, retry_after_ms=1_000)
-        for case, expected_sleep in (
-            (FakeCase.RETRY_AFTER, ()),
-            (FakeCase.STATUS_429, (0.007,)),
-            (FakeCase.MALFORMED_RETRY_AFTER, (0.007,)),
-            (FakeCase.EXCESSIVE_RETRY_AFTER, (0.007,)),
+        parser_limits = replace(DEFAULT_LIMITS, retry_after_ms=5_000)
+        for value, expected in (("0", 0), ("1", 1_000), ("0.5", 500), ("0.05", 50), ("0.005", 5), ("5.000", 5_000)):
+            with self.subTest(parser_value=value):
+                self.assertEqual(_retry_after(value, parser_limits), expected)
+        for value in (None, "", " ", "+1", "-1", "1e0", "0.0001", "1.2.3", "５", "1" * 17, "5.001"):
+            with self.subTest(rejected_parser_value=value):
+                self.assertIsNone(_retry_after(value, parser_limits))
+        for case, expected_sleep, succeeds in (
+            (FakeCase.RETRY_AFTER, (), False),
+            (FakeCase.RETRY_AFTER_INTEGER, (1.0,), True),
+            (FakeCase.RETRY_AFTER_DECIMAL, (0.5,), True),
+            (FakeCase.STATUS_429, (0.007,), False),
+            (FakeCase.MALFORMED_RETRY_AFTER, (0.007,), False),
+            (FakeCase.EXCESSIVE_RETRY_AFTER, (0.007,), False),
         ):
             sleeps: list[float] = []
             with self.subTest(case=case), FakeProviderServer(case) as provider:
                 transport = LoopbackFakeTransport(sleep=sleeps.append)
-                with self.assertRaises(ProviderError) as raised:
-                    transport.send(provider.validated_endpoint(), request(), limits=limits, correlation_id="req-10-1")
+                if succeeds:
+                    result = transport.send(provider.validated_endpoint(), request(), limits=limits, correlation_id="req-10-1")
+                    self.assertEqual(result.message.content, "synthetic guidance")
+                else:
+                    with self.assertRaises(ProviderError) as raised:
+                        transport.send(provider.validated_endpoint(), request(), limits=limits, correlation_id="req-10-1")
             self.assertEqual(tuple(sleeps), expected_sleep)
-            self.assertNotIn("not-a-delay", str(raised.exception))
-            self.assertNotIn("not-a-delay", repr(raised.exception))
+            if not succeeds:
+                self.assertNotIn("not-a-delay", str(raised.exception))
+                self.assertNotIn("not-a-delay", repr(raised.exception))
 
 
 if __name__ == "__main__":
