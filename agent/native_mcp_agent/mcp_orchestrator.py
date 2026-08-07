@@ -249,10 +249,18 @@ class OrchestrationOutcome:
 
 class Orchestrator:
     def __init__(self, client:McpStdioClient, provider:ProviderTurn, *, limits:Limits=DEFAULT_LIMITS, context:str="offline", clock:Callable[[],float]=time.monotonic, cancellation:Cancellation|None=None) -> None:
+        # Phase 10.2 deliberately supports only the project-owned deterministic
+        # double.  A future live adapter needs a separate authority decision.
+        if not isinstance(provider, ScriptedProvider):
+            raise _fail(FailureClass.LOCAL_POLICY_FAILURE, "unbounded provider implementation rejected")
         self.client,self.provider,self.limits,self.context,self.clock,self.cancellation=client,provider,limits,context,clock,cancellation
         self.actions:set[str]=set(); self.call_ids:dict[str,bytes]={}; self.evidence:list[Evidence]=[]; self.order:list[LocalActionIdentity]=[]; self.transcript=Phase10Transcript(limits)
     def _action(self,p:ProviderToolCallProposal,surface:ToolSurface)->LocalActionIdentity: return LocalActionIdentity(hashlib.sha256(_canon({"surface":surface.identity,"name":p.name,"arguments":p.arguments,"context":self.context})).hexdigest()[:32])
     def _outcome(self,outcome:str)->OrchestrationOutcome:
+        # Serialize shutdown control evidence before the immutable transcript.
+        self.transcript.add("shutdown_start")
+        self.client.close(None, suppress=True)
+        self.transcript.add("shutdown_complete")
         self.transcript.add("outcome",outcome=outcome); raw=self.transcript.to_json_bytes()
         parse_phase_10_2_transcript(raw,self.limits); return OrchestrationOutcome(outcome,tuple(self.evidence),tuple(self.order),raw)
     def run(self, request:ProviderRequest) -> OrchestrationOutcome:
@@ -306,9 +314,7 @@ class Orchestrator:
         except ProviderError as exc:
             self.transcript.add("deadline" if exc.failure.classification is FailureClass.MCP_TIMEOUT else "failure", **({} if exc.failure.classification is FailureClass.MCP_TIMEOUT else {"failure":exc.failure.classification.value})); return self._outcome("deadline" if exc.failure.classification is FailureClass.MCP_TIMEOUT else "failed")
         finally:
-            self.transcript.add("shutdown_start")
             self.client.close(deadline,suppress=True)
-            self.transcript.add("shutdown_complete")
 
 def _provider_response_value(response: ProviderFinalMessage | Sequence[ProviderToolCallProposal]) -> Mapping[str, Any]:
     """Canonical bounded Phase 10.2 provider response representation."""

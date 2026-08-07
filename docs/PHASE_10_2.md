@@ -20,7 +20,7 @@ Provider turns use an explicit bounded `ProviderTurn.turn(..., timeout_ms,
 cancellation)` interface.  The request is serialized and bounded before the
 turn, expiry is checked immediately after it, and no proposal can be authorized
 after expiry.  Cancellation is checked before every lifecycle wait and action.
-The bundled `ScriptedProvider` is the deterministic Phase 10.2 double: delayed
+The bundled `ScriptedProvider` is the only supported deterministic Phase 10.2 provider: delayed
 scripts poll cancellation and convert an over-budget delay to a local timeout;
 it never starts a detached worker or continues after returning.
 
