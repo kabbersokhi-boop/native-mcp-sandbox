@@ -1,7 +1,7 @@
 """Closed, serial and deadline-bounded offline MCP orchestration."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import hashlib, json, os, selectors, subprocess, time
 from typing import Any, Callable, Mapping, Protocol, Sequence
 
@@ -44,6 +44,7 @@ class AuthorizedMcpAction:
     name: str
     arguments: Mapping[str, Any]
     argument_bytes: bytes
+    _issuer: object | None = field(default=None, init=False, repr=False, compare=False)
 
 @dataclass(frozen=True)
 class CorrelatedMcpResponse:
@@ -105,6 +106,18 @@ class McpStdioClient:
         self.environment=build_child_environment(dict(os.environ if parent_environment is None else parent_environment),list(child_allowlist),provider_child=False)
         self.process: subprocess.Popen[bytes]|None=None; self.selector: selectors.BaseSelector|None=None; self.surface: ToolSurface|None=None
         self.out=bytearray(); self.err=bytearray(); self.out_total=0; self.err_total=0; self.next_id=1
+        self._issuer = object()
+
+    def authorize(self, action_id: LocalActionIdentity, proposal_id: str, name: str, arguments: Mapping[str, Any]) -> AuthorizedMcpAction:
+        if self.surface is None: raise _fail(FailureClass.LOCAL_AUTHORIZATION_FAILURE,"surface absent")
+        frozen = _freeze_json(arguments, limits=self.limits)
+        if not isinstance(frozen, dict): raise _fail(FailureClass.LOCAL_AUTHORIZATION_FAILURE,"arguments invalid")
+        tool=next((x for x in self.surface.tools if x.name==name),None)
+        if tool is None: raise _fail(FailureClass.LOCAL_AUTHORIZATION_FAILURE,"tool unauthorized")
+        _validate_schema(frozen,tool.parameters,self.limits)
+        value=AuthorizedMcpAction(self.surface.identity,action_id,proposal_id,name,frozen,_canon(frozen))
+        object.__setattr__(value,"_issuer",self._issuer)
+        return value
 
     def start(self, deadline: Deadline) -> None:
         if self.process is not None: raise _fail(FailureClass.LOCAL_POLICY_FAILURE,"child already started")
@@ -183,7 +196,7 @@ class McpStdioClient:
         if later.identity!=self.surface.identity: raise _fail(FailureClass.MCP_PROTOCOL_FAILURE,"tool surface changed")
 
     def execute(self, action: AuthorizedMcpAction, deadline: Deadline, cancellation: Cancellation|None=None) -> CorrelatedMcpResponse:
-        if not isinstance(action,AuthorizedMcpAction) or self.surface is None or action.surface_identity!=self.surface.identity: raise _fail(FailureClass.LOCAL_AUTHORIZATION_FAILURE,"forged or stale authorization")
+        if not isinstance(action,AuthorizedMcpAction) or action._issuer is not self._issuer or self.surface is None or action.surface_identity!=self.surface.identity: raise _fail(FailureClass.LOCAL_AUTHORIZATION_FAILURE,"forged or stale authorization")
         tool=next((x for x in self.surface.tools if x.name==action.name),None)
         if tool is None or not isinstance(action.action_id,LocalActionIdentity): raise _fail(FailureClass.LOCAL_AUTHORIZATION_FAILURE,"tool unauthorized")
         try:
@@ -281,7 +294,7 @@ class Orchestrator:
                 for index,(p,aid,content,frozen) in enumerate(prepared):
                     if self.cancellation and self.cancellation.is_set(): self.transcript.add("cancelled"); self.transcript.add("skipped",proposal=str(p.call_id)); return self._outcome("cancelled")
                     if len(self.order)>=self.limits.mcp_total_calls or deadline.remaining_ms()<=0: self.transcript.add("deadline"); self.transcript.add("skipped",proposal=str(p.call_id)); return self._outcome("deadline")
-                    auth=AuthorizedMcpAction(surface.identity,aid,str(p.call_id),p.name,frozen,_canon(frozen)); self.call_ids[str(p.call_id)]=content; self.actions.add(aid.value); self.transcript.add("authorized",action=aid.value,proposal=str(p.call_id))
+                    auth=self.client.authorize(aid,str(p.call_id),p.name,frozen); self.call_ids[str(p.call_id)]=content; self.actions.add(aid.value); self.transcript.add("authorized",action=aid.value,proposal=str(p.call_id))
                     try:
                         self.transcript.add("mcp_request",action=aid.value,response="pending")
                         response=self.client.execute(auth,deadline,self.cancellation); self.order.append(aid); self.evidence.append(Evidence(aid,response.request_id,response.result)); self.transcript.add("mcp_response",action=aid.value,response=str(response.request_id)); self.transcript.add("evidence_validated",action=aid.value,response=str(response.request_id))
