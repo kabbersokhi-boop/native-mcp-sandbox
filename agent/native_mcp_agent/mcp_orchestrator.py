@@ -327,7 +327,9 @@ class Orchestrator:
                     tool=next((x for x in surface.tools if x.name==p.name),None)
                     if tool is None: self.transcript.add("proposal_rejected",proposal=str(p.call_id)); return self._outcome("rejected")
                     frozen=_freeze_json(p.arguments,limits=self.limits); _validate_schema(frozen,tool.parameters,self.limits); content=_canon({"name":p.name,"arguments":frozen}); aid=self._action(p,surface)
-                    if str(p.call_id) in self.call_ids or aid.value in self.actions or any(x[1].value==aid.value for x in prepared): self.transcript.add("proposal_duplicate",proposal=str(p.call_id)); return self._outcome("duplicate")
+                    if (str(p.call_id) in self.call_ids or aid.value in self.actions
+                            or any(str(x[0].call_id) == str(p.call_id) or x[1].value == aid.value for x in prepared)):
+                        self.transcript.add("proposal_duplicate",proposal=str(p.call_id)); return self._outcome("duplicate")
                     prepared.append((p,aid,content,frozen))
                 for index,(p,aid,content,frozen) in enumerate(prepared):
                     if self.cancellation and self.cancellation.is_set(): self.transcript.add("cancelled"); self.transcript.add("skipped",proposal=str(p.call_id)); return self._outcome("cancelled")

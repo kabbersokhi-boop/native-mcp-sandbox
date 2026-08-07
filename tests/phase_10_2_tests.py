@@ -125,6 +125,17 @@ class CorrelationAndCancellationTests(unittest.TestCase):
   trigger.start(); out=Orchestrator(c,provider((proposal("call-1","a"),proposal("call-2","b"))),cancellation=token).run(req()); trigger.join()
   self.assertEqual(out.outcome,"cancelled"); self.assertEqual(len(out.execution_order),0); self.assertIn(b'"skipped"',out.transcript); self.assertIsNone(c.process)
 
+class AtMostOnceTests(unittest.TestCase):
+ def test_changed_content_reusing_call_id_in_one_response_is_rejected_before_write(self):
+  c=client(); out=Orchestrator(c,provider((proposal("call-1","a"),proposal("call-1","b")))).run(req())
+  self.assertEqual(out.outcome,"duplicate"); self.assertEqual(len(out.execution_order),0); self.assertIn(b'"proposal_duplicate"',out.transcript); self.assertIsNone(c.process)
+ def test_identical_content_under_different_call_ids_is_rejected_before_write(self):
+  c=client(); out=Orchestrator(c,provider((proposal("call-1","a"),proposal("call-2","a")))).run(req())
+  self.assertEqual(out.outcome,"duplicate"); self.assertEqual(len(out.execution_order),0); self.assertIsNone(c.process)
+ def test_completed_call_id_replay_in_later_turn_is_rejected(self):
+  c=client(); out=Orchestrator(c,provider((proposal("call-1","a"),),(proposal("call-1","b"),))).run(req())
+  self.assertEqual(out.outcome,"duplicate"); self.assertEqual(len(out.execution_order),1); self.assertIsNone(c.process)
+
 class EvidenceAndTranscriptTests(unittest.TestCase):
  def test_closed_result_variants_fail(self):
   for case in ("malformed_result","result_missing_content","result_wrong_content","result_unknown_block","result_unknown_type","result_missing_text","result_wrong_text","result_oversized_text","result_many_blocks","result_structured"):
