@@ -6,7 +6,7 @@ ROOT=os.path.dirname(os.path.dirname(__file__)); sys.path.insert(0,os.path.join(
 from native_mcp_agent.contracts import ProviderMessage,ProviderRequest,ProviderToolCallProposal,ProviderFinalMessage,RequestCorrelationId,ToolCallId,MessageRole
 from native_mcp_agent.errors import ProviderError
 from native_mcp_agent.limits import DEFAULT_LIMITS
-from native_mcp_agent.mcp_orchestrator import McpStdioClient,Orchestrator,Deadline,AuthorizedMcpAction
+from native_mcp_agent.mcp_orchestrator import McpStdioClient,Orchestrator,Deadline,AuthorizedMcpAction,ScriptedProvider
 from native_mcp_agent.transcript import parse_phase_10_2_transcript
 CHILD=os.path.join(ROOT,"tests","fake_mcp_stdio_child.py")
 def req(): return ProviderRequest("fake",(ProviderMessage(MessageRole.USER,"investigate"),),(),32,RequestCorrelationId("req-10-2"))
@@ -48,6 +48,11 @@ class Tests(unittest.TestCase):
  def test_provider_late_response_discarded(self):
   limits=replace(DEFAULT_LIMITS,orchestration_total_timeout_ms=50); c=client(limits=limits); out=Orchestrator(c,FakeProvider((proposal("call-1"),),delay=.08),limits=limits).run(req())
   self.assertEqual(out.outcome,"deadline"); self.assertEqual(len(out.evidence),0)
+ def test_scripted_provider_timeout_does_not_sleep_full_delay(self):
+  provider=ScriptedProvider((ProviderFinalMessage(ProviderMessage(MessageRole.ASSISTANT,"done")),),delay_ms=200)
+  started=time.monotonic()
+  with self.assertRaises(ProviderError): provider.turn(req(),(),timeout_ms=50,cancellation=None)
+  self.assertLess(time.monotonic()-started,.12)
  def test_result_contract_and_transcript_determinism(self):
   c=client("malformed_result"); out=Orchestrator(c,FakeProvider((proposal("call-1"),))).run(req()); self.assertEqual(out.outcome,"failed")
   a=Orchestrator(client(),FakeProvider(ProviderFinalMessage(ProviderMessage(MessageRole.ASSISTANT,"done")))).run(req()).transcript

@@ -20,6 +20,9 @@ Provider turns use an explicit bounded `ProviderTurn.turn(..., timeout_ms,
 cancellation)` interface.  The request is serialized and bounded before the
 turn, expiry is checked immediately after it, and no proposal can be authorized
 after expiry.  Cancellation is checked before every lifecycle wait and action.
+The bundled `ScriptedProvider` is the deterministic Phase 10.2 double: delayed
+scripts poll cancellation and convert an over-budget delay to a local timeout;
+it never starts a detached worker or continues after returning.
 
 Only `AuthorizedMcpAction` reaches the final execution boundary.  It binds the
 surface hash, local content/context action identity, advertised name, frozen
@@ -35,7 +38,8 @@ closed schema-version-2 control record.  It records lifecycle, surface,
 provider, authorization, response, failure, skip, and outcome events without
 raw child output or result bodies.  It accounts incrementally for bytes and
 adds one deterministic terminal transcript-limit event rather than replacing
-the complete history.
+the complete history. Terminal space is reserved before ordinary control events
+are accepted, so exhaustion never removes an accepted lifecycle event.
 
 The deterministic stdio fixture has only synthetic in-process behavior.  It
 includes malformed JSON/duplicate IDs/output flood, changed surface, delay,

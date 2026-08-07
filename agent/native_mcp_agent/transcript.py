@@ -18,6 +18,20 @@ _SAFE_METADATA_KEYS = {"mode", "phase", "source", "reason", "status", "retry", "
 _SUSPICIOUS = ("authorization", "proxy-authorization", "bearer", "api-key", "api-", "apikey", "sk-", "password", "secret", "token")
 _PHASE10_EVENTS = {"process_start", "initialize_request", "initialize_response", "initialized_notification", "tools_list_request", "tools_list_response", "surface_captured", "surface_revalidated", "provider_turn_start", "provider_turn_response", "proposal_rejected", "proposal_duplicate", "authorized", "mcp_request", "mcp_response", "evidence_validated", "skipped", "deadline", "cancelled", "failure", "shutdown_start", "shutdown_terminate", "shutdown_kill", "shutdown_complete", "outcome", "transcript_limit", "surface", "provider_turn", "failed"}
 _PHASE10_KEYS = {"surface", "turn", "bytes", "action", "proposal", "response", "failure", "outcome"}
+_PHASE10_SCHEMA = {
+    "process_start": set(), "initialize_request": set(), "initialize_response": {"response"},
+    "initialized_notification": set(), "tools_list_request": set(), "tools_list_response": {"response"},
+    "surface_captured": {"surface"}, "surface_revalidated": {"surface"},
+    "provider_turn_start": {"turn", "bytes"}, "provider_turn_response": {"turn", "bytes"},
+    "proposal_rejected": {"proposal"}, "proposal_duplicate": {"proposal"},
+    "authorized": {"action", "proposal"}, "mcp_request": {"action", "response"},
+    "mcp_response": {"action", "response"}, "evidence_validated": {"action", "response"},
+    "skipped": {"proposal"}, "deadline": set(), "cancelled": set(), "failure": {"failure"},
+    "shutdown_start": set(), "shutdown_terminate": set(), "shutdown_kill": set(), "shutdown_complete": set(),
+    "outcome": {"outcome"}, "transcript_limit": set(),
+    # Compatibility aliases emitted by the initial Phase 10.2 correction.
+    "surface": {"surface"}, "provider_turn": {"turn", "bytes"}, "failed": {"failure", "action"},
+}
 
 
 def _safe_identity(value: Any, label: str) -> str:
@@ -183,7 +197,7 @@ class Phase10Transcript:
     def add(self, event: str, **metadata: str) -> None:
         if self._limited:
             return
-        if event not in _PHASE10_EVENTS or set(metadata) - _PHASE10_KEYS:
+        if event not in _PHASE10_EVENTS or (set(metadata) != _PHASE10_SCHEMA[event] and not (event == "failed" and set(metadata) == {"failure"})):
             raise ProviderError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "Phase 10 transcript event is invalid"))
         values: dict[str, str] = {}
         for key, value in metadata.items():
@@ -218,7 +232,7 @@ def parse_phase_10_2_transcript(raw: bytes | str, limits: Limits = DEFAULT_LIMIT
         raise ProviderError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "Phase 10 transcript is not closed"))
     result=[]
     for item in value["events"]:
-        if not isinstance(item, dict) or set(item) != {"event", "metadata"} or item["event"] not in _PHASE10_EVENTS or not isinstance(item["metadata"], dict) or set(item["metadata"]) - _PHASE10_KEYS:
+        if not isinstance(item, dict) or set(item) != {"event", "metadata"} or item["event"] not in _PHASE10_EVENTS or not isinstance(item["metadata"], dict) or (set(item["metadata"]) != _PHASE10_SCHEMA[item["event"]] and not (item["event"] == "failed" and set(item["metadata"]) == {"failure"})):
             raise ProviderError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "Phase 10 transcript event is invalid"))
         if any(not isinstance(v, str) or len(v) > 64 for v in item["metadata"].values()):
             raise ProviderError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "Phase 10 transcript metadata is invalid"))

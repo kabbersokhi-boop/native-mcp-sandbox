@@ -19,7 +19,7 @@ from .contracts import (
 )
 from .errors import ClassifiedFailure, FailureClass, ProviderError
 from .limits import DEFAULT_LIMITS, Limits
-from .mcp_orchestrator import McpStdioClient, Orchestrator, OrchestrationOutcome
+from .mcp_orchestrator import McpStdioClient, Orchestrator, OrchestrationOutcome, ScriptedProvider
 
 __all__ = [
     "AdvertisedTool",
@@ -45,4 +45,5 @@ __all__ = [
     "McpStdioClient",
     "Orchestrator",
     "OrchestrationOutcome",
+    "ScriptedProvider",
 ]

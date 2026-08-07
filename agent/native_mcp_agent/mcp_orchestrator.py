@@ -65,6 +65,25 @@ class Cancellation(Protocol):
 class ProviderTurn(Protocol):
     def turn(self, request: ProviderRequest, evidence: tuple[Evidence, ...], *, timeout_ms: int, cancellation: Cancellation | None) -> ProviderFinalMessage | Sequence[ProviderToolCallProposal]: ...
 
+@dataclass
+class ScriptedProvider:
+    """The only Phase 10.2 provider double; it never outlives its budget."""
+    responses: tuple[ProviderFinalMessage | Sequence[ProviderToolCallProposal], ...]
+    delay_ms: int = 0
+    _index: int = 0
+    def turn(self, request: ProviderRequest, evidence: tuple[Evidence, ...], *, timeout_ms: int, cancellation: Cancellation | None) -> ProviderFinalMessage | Sequence[ProviderToolCallProposal]:
+        if not isinstance(timeout_ms, int) or timeout_ms <= 0: raise _fail(FailureClass.TOTAL_REQUEST_TIMEOUT,"provider deadline")
+        end=time.monotonic()+timeout_ms/1000
+        while time.monotonic() < end and self.delay_ms > 0:
+            if cancellation is not None and cancellation.is_set(): raise _fail(FailureClass.CANCELLED,"provider cancelled")
+            time.sleep(min(.005, max(0,end-time.monotonic())))
+            self.delay_ms -= 5
+        if cancellation is not None and cancellation.is_set(): raise _fail(FailureClass.CANCELLED,"provider cancelled")
+        if self.delay_ms > 0 or time.monotonic() >= end: raise _fail(FailureClass.TOTAL_REQUEST_TIMEOUT,"provider timed out")
+        if self._index >= len(self.responses): raise _fail(FailureClass.PERMANENT_PROVIDER_FAILURE,"script exhausted")
+        result=self.responses[self._index]; self._index += 1
+        return result
+
 def capture_tool_surface(result: Any, limits: Limits = DEFAULT_LIMITS) -> ToolSurface:
     tools = _closed(result, {"tools"}, {"tools"})["tools"]
     if not isinstance(tools, (list, tuple)) or len(tools) > limits.advertised_tool_count: raise _fail(FailureClass.MCP_PROTOCOL_FAILURE, "tool count invalid")
@@ -179,10 +198,12 @@ class McpStdioClient:
         if process is None: return
         try:
             if process.stdin: process.stdin.close()
-            wait=(deadline.timeout(self.limits.graceful_shutdown_timeout_ms)/1000 if deadline else self.limits.graceful_shutdown_timeout_ms/1000)
+            wait=(max(1, deadline.remaining_ms())/1000 if deadline else self.limits.graceful_shutdown_timeout_ms/1000)
             if process.poll() is None: process.terminate(); process.wait(wait)
         except (subprocess.TimeoutExpired,ProviderError):
-            try: process.kill(); process.wait(1.0)
+            try:
+                kill_wait = (max(1, deadline.remaining_ms())/1000 if deadline else self.limits.graceful_shutdown_timeout_ms/1000)
+                process.kill(); process.wait(kill_wait)
             except (OSError,subprocess.TimeoutExpired):
                 if not suppress: raise _fail(FailureClass.MCP_PROCESS_EXIT,"kill/reap failed") from None
         except (OSError,BrokenPipeError):
