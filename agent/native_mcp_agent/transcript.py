@@ -16,6 +16,8 @@ from .redaction import redact_json
 _SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
 _SAFE_METADATA_KEYS = {"mode", "phase", "source", "reason", "status", "retry", "category", "provider", "operation"}
 _SUSPICIOUS = ("authorization", "proxy-authorization", "bearer", "api-key", "api-", "apikey", "sk-", "password", "secret", "token")
+_PHASE10_EVENTS = {"process_start", "surface", "provider_turn", "authorized", "mcp_response", "failed", "skipped", "outcome", "transcript_limit"}
+_PHASE10_KEYS = {"surface", "turn", "bytes", "action", "proposal", "response", "failure", "outcome"}
 
 
 def _safe_identity(value: Any, label: str) -> str:
@@ -170,3 +172,56 @@ def parse_transcript(raw: bytes | str, limits: Limits = DEFAULT_LIMITS) -> Trans
         raise
     except (AttributeError, KeyError, TypeError, ValueError, UnicodeError, OverflowError, RecursionError):
         raise ProviderError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "transcript fields are malformed")) from None
+
+
+class Phase10Transcript:
+    """Incrementally bounded, closed Phase 10.2 control transcript."""
+    def __init__(self, limits: Limits = DEFAULT_LIMITS) -> None:
+        self._limits, self._events, self._limited = limits, [], False
+
+    def add(self, event: str, **metadata: str) -> None:
+        if self._limited:
+            return
+        if event not in _PHASE10_EVENTS or set(metadata) - _PHASE10_KEYS:
+            raise ProviderError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "Phase 10 transcript event is invalid"))
+        values: dict[str, str] = {}
+        for key, value in metadata.items():
+            if not isinstance(value, str) or not value or len(value.encode("ascii", "ignore")) != len(value) or len(value) > 64:
+                raise ProviderError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "Phase 10 transcript metadata is invalid"))
+            if any(part in value.lower() for part in _SUSPICIOUS) or value.startswith("/") or "\\" in value:
+                values[key] = "redacted"
+            else:
+                values[key] = value
+        candidate = self._events + [{"event": event, "metadata": values}]
+        if len(_phase10_bytes(candidate, False)) <= self._limits.transcript_bytes:
+            self._events = candidate
+            return
+        terminal = self._events + [{"event": "transcript_limit", "metadata": {}}]
+        while self._events and len(_phase10_bytes(terminal, True)) > self._limits.transcript_bytes:
+            # Existing events are never replaced; configured limits must leave
+            # room for a terminal event, so only an impossible tiny limit fails.
+            self._events.pop()
+            terminal = self._events + [{"event": "transcript_limit", "metadata": {}}]
+        self._events = terminal
+        self._limited = True
+
+    def to_json_bytes(self) -> bytes:
+        return _phase10_bytes(self._events, self._limited)
+
+
+def _phase10_bytes(events: list[dict[str, Any]], limited: bool) -> bytes:
+    return json.dumps({"schemaVersion":2, "events":events, "limited":limited}, ensure_ascii=True, sort_keys=True, separators=(",", ":")).encode("utf-8")
+
+
+def parse_phase_10_2_transcript(raw: bytes | str, limits: Limits = DEFAULT_LIMITS) -> tuple[Mapping[str, Any], ...]:
+    value = parse_closed_json(raw, limits, byte_limit=limits.transcript_bytes)
+    if not isinstance(value, dict) or set(value) != {"schemaVersion", "events", "limited"} or value["schemaVersion"] != 2 or type(value["limited"]) is not bool or not isinstance(value["events"], list):
+        raise ProviderError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "Phase 10 transcript is not closed"))
+    result=[]
+    for item in value["events"]:
+        if not isinstance(item, dict) or set(item) != {"event", "metadata"} or item["event"] not in _PHASE10_EVENTS or not isinstance(item["metadata"], dict) or set(item["metadata"]) - _PHASE10_KEYS:
+            raise ProviderError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "Phase 10 transcript event is invalid"))
+        if any(not isinstance(v, str) or len(v) > 64 for v in item["metadata"].values()):
+            raise ProviderError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "Phase 10 transcript metadata is invalid"))
+        result.append(_FrozenDict(item))
+    return tuple(result)
