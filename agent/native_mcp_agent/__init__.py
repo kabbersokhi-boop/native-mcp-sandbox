@@ -1,8 +1,4 @@
-"""Provider-neutral, bounded Phase 10.1 contracts.
-
-This package deliberately contains no MCP client, provider SDK, credential
-loader, or live-provider implementation.
-"""
+"""Provider-neutral bounded orchestration contracts (no live provider SDK)."""
 
 from .contracts import (
     AdvertisedTool,
@@ -23,6 +19,7 @@ from .contracts import (
 )
 from .errors import ClassifiedFailure, FailureClass, ProviderError
 from .limits import DEFAULT_LIMITS, Limits
+from .mcp_orchestrator import McpStdioClient, Orchestrator, OrchestrationOutcome
 
 __all__ = [
     "AdvertisedTool",
@@ -45,4 +42,7 @@ __all__ = [
     "RetryDecision",
     "ToolCallId",
     "parse_provider_response",
+    "McpStdioClient",
+    "Orchestrator",
+    "OrchestrationOutcome",
 ]

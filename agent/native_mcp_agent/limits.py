@@ -26,6 +26,19 @@ class Limits:
     provider_attempt_count: int = 3
     retry_backoff_ms: int = 50
     retry_after_ms: int = 1_000
+    orchestration_total_timeout_ms: int = 15_000
+    provider_turn_count: int = 4
+    mcp_calls_per_turn: int = 4
+    mcp_total_calls: int = 12
+    mcp_request_bytes: int = 16 * 1024
+    mcp_response_bytes: int = 64 * 1024
+    child_stdout_bytes: int = 128 * 1024
+    child_stderr_bytes: int = 64 * 1024
+    process_startup_timeout_ms: int = 1_000
+    mcp_initialize_timeout_ms: int = 1_000
+    mcp_tools_list_timeout_ms: int = 1_000
+    mcp_call_timeout_ms: int = 2_000
+    graceful_shutdown_timeout_ms: int = 500
 
     HARD_MAX = {
         "provider_request_bytes": 256 * 1024,
@@ -45,6 +58,19 @@ class Limits:
         "provider_attempt_count": 5,
         "retry_backoff_ms": 500,
         "retry_after_ms": 5_000,
+        "orchestration_total_timeout_ms": 120_000,
+        "provider_turn_count": 16,
+        "mcp_calls_per_turn": 16,
+        "mcp_total_calls": 64,
+        "mcp_request_bytes": 128 * 1024,
+        "mcp_response_bytes": 512 * 1024,
+        "child_stdout_bytes": 1024 * 1024,
+        "child_stderr_bytes": 512 * 1024,
+        "process_startup_timeout_ms": 10_000,
+        "mcp_initialize_timeout_ms": 10_000,
+        "mcp_tools_list_timeout_ms": 10_000,
+        "mcp_call_timeout_ms": 30_000,
+        "graceful_shutdown_timeout_ms": 5_000,
     }
 
     def __post_init__(self) -> None:
