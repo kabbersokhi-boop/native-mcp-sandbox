@@ -13,13 +13,18 @@ for line in sys.stdin:
  method=req.get("method")
  if scenario=="malformed" and method=="initialize": sys.stdout.write("{bad\n"); sys.stdout.flush(); continue
  if scenario=="duplicate_keys" and method=="initialize": sys.stdout.write('{"jsonrpc":"2.0","id":1,"id":1,"result":{}}\n'); sys.stdout.flush(); continue
- if scenario in {"wrong_id","unsolicited","future_id"} and method=="initialize": emit({"jsonrpc":"2.0","id":999,"result":{}}); continue
+ if scenario=="wrong_id" and method=="initialize": emit({"jsonrpc":"2.0","id":999,"result":{}}); continue
+ if scenario=="unsolicited" and method=="initialize": emit({"jsonrpc":"2.0","id":0,"result":{}}); continue
+ if scenario=="future_id" and method=="initialize": emit({"jsonrpc":"2.0","id":2,"result":{}}); continue
+ if scenario=="truncated" and method=="initialize": sys.stdout.write('{"jsonrpc":"2.0"'); sys.stdout.flush(); sys.exit(0)
+ if scenario=="oversized" and method=="initialize": sys.stdout.write('{"jsonrpc":"2.0","id":1,"result":"'+("x"*70000)+'"}\n'); sys.stdout.flush(); continue
  if scenario=="flood" and method=="initialize": sys.stdout.write("x"*200000); sys.stdout.flush(); continue
  if scenario=="exit" and method=="tools/call": sys.exit(0)
  if method=="initialize":
   if scenario=="delayed_initialize": time.sleep(.2)
   result(req,{"protocolVersion":"2024-11-05","capabilities":{},"serverInfo":{}})
  elif method=="tools/list":
+  if scenario=="duplicate_completed": emit({"jsonrpc":"2.0","id":1,"result":{}}); continue
   if scenario=="delayed_list": time.sleep(.2)
   result(req,{"tools":tools if scenario!="changing_tools" or listed==0 else tools[:1]}); listed+=1
  elif method=="tools/call":

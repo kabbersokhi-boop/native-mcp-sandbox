@@ -24,8 +24,14 @@ class Tests(unittest.TestCase):
   c=client(); out=Orchestrator(c,FakeProvider(ProviderFinalMessage(ProviderMessage(MessageRole.ASSISTANT,"done")))).run(req())
   self.assertEqual(out.outcome,"final"); self.assertIsNone(c.process); self.assertEqual(c.environment,{"LANG":"C"}); self.assertTrue(parse_phase_10_2_transcript(out.transcript))
  def test_bad_json_and_response_ids_fail_closed(self):
-  for case in ("malformed","duplicate_keys","wrong_id","unsolicited","future_id","flood"):
+  for case in ("malformed","duplicate_keys","wrong_id","unsolicited","future_id","truncated","oversized","flood"):
    c=client(case); out=Orchestrator(c,FakeProvider(())).run(req()); self.assertEqual(out.outcome,"failed"); self.assertIsNone(c.process)
+ def test_duplicate_completed_response_is_rejected(self):
+  c=client("duplicate_completed"); out=Orchestrator(c,FakeProvider(ProviderFinalMessage(ProviderMessage(MessageRole.ASSISTANT,"done")))).run(req())
+  self.assertEqual(out.outcome,"failed"); self.assertIsNone(c.process)
+ def test_ignored_shutdown_is_killed_and_reaped(self):
+  c=client("ignore_shutdown",replace(DEFAULT_LIMITS,graceful_shutdown_timeout_ms=20)); out=Orchestrator(c,FakeProvider(ProviderFinalMessage(ProviderMessage(MessageRole.ASSISTANT,"done"))),limits=c.limits).run(req())
+  self.assertEqual(out.outcome,"final"); self.assertIsNone(c.process)
  def test_changed_surface_and_final_boundary(self):
   c=client("changing_tools"); d=deadline(c); c.initialize_and_capture(d)
   with self.assertRaises(ProviderError): c.revalidate_surface(d)
