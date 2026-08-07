@@ -202,7 +202,9 @@ class McpStdioClient:
             if process.poll() is None: process.terminate(); process.wait(wait)
         except (subprocess.TimeoutExpired,ProviderError):
             try:
-                kill_wait = (max(1, deadline.remaining_ms())/1000 if deadline else self.limits.graceful_shutdown_timeout_ms/1000)
+                # A killed child must be reaped even after the investigation
+                # budget elapsed; this bounded local cleanup lease is 200 ms.
+                kill_wait = min(.2, max(.001, deadline.remaining_ms()/1000)) if deadline and deadline.remaining_ms() > 0 else .2
                 process.kill(); process.wait(kill_wait)
             except (OSError,subprocess.TimeoutExpired):
                 if not suppress: raise _fail(FailureClass.MCP_PROCESS_EXIT,"kill/reap failed") from None
@@ -244,12 +246,18 @@ class Orchestrator:
         deadline=Deadline(self.clock()+self.limits.orchestration_total_timeout_ms/1000,self.clock)
         try:
             self.transcript.add("process_start")
-            surface=self.client.initialize_and_capture(deadline,self.cancellation); self.transcript.add("surface",surface=surface.identity)
+            self.transcript.add("initialize_request")
+            surface=self.client.initialize_and_capture(deadline,self.cancellation)
+            self.transcript.add("initialize_response",response="1")
+            self.transcript.add("initialized_notification")
+            self.transcript.add("tools_list_request")
+            self.transcript.add("tools_list_response",response="2")
+            self.transcript.add("surface_captured",surface=surface.identity)
             for turn in range(self.limits.provider_turn_count):
                 if self.cancellation and self.cancellation.is_set(): return self._outcome("cancelled")
                 timeout=deadline.timeout(self.limits.provider_total_timeout_ms)
                 bounded=ProviderRequest(request.model,request.messages,surface.tools,request.max_output_tokens,request.correlation_id,request.generation)
-                raw=bounded.to_json_bytes(self.limits); self.transcript.add("provider_turn",turn=str(turn),bytes=str(len(raw)))
+                raw=bounded.to_json_bytes(self.limits); self.transcript.add("provider_turn_start",turn=str(turn),bytes=str(len(raw)))
                 response=self.provider.turn(bounded,tuple(self.evidence),timeout_ms=timeout,cancellation=self.cancellation)
                 if deadline.remaining_ms()<=0: return self._outcome("deadline")
                 try:
@@ -258,32 +266,36 @@ class Orchestrator:
                     return self._outcome("failed")
                 if len(encoded_response) > self.limits.provider_response_bytes:
                     return self._outcome("failed")
+                self.transcript.add("provider_turn_response",turn=str(turn),bytes=str(len(encoded_response)))
                 if isinstance(response,ProviderFinalMessage): return self._outcome("final")
                 proposals=tuple(response)
                 if len(proposals)>self.limits.proposed_tool_call_count or len(proposals)>self.limits.mcp_calls_per_turn: return self._outcome("rejected")
                 prepared=[]
                 for p in proposals:
-                    if not isinstance(p,ProviderToolCallProposal): return self._outcome("rejected")
+                    if not isinstance(p,ProviderToolCallProposal): self.transcript.add("proposal_rejected",proposal="invalid"); return self._outcome("rejected")
                     tool=next((x for x in surface.tools if x.name==p.name),None)
-                    if tool is None: return self._outcome("rejected")
+                    if tool is None: self.transcript.add("proposal_rejected",proposal=str(p.call_id)); return self._outcome("rejected")
                     frozen=_freeze_json(p.arguments,limits=self.limits); _validate_schema(frozen,tool.parameters,self.limits); content=_canon({"name":p.name,"arguments":frozen}); aid=self._action(p,surface)
-                    if str(p.call_id) in self.call_ids or aid.value in self.actions or any(x[1].value==aid.value for x in prepared): return self._outcome("duplicate")
+                    if str(p.call_id) in self.call_ids or aid.value in self.actions or any(x[1].value==aid.value for x in prepared): self.transcript.add("proposal_duplicate",proposal=str(p.call_id)); return self._outcome("duplicate")
                     prepared.append((p,aid,content,frozen))
                 for index,(p,aid,content,frozen) in enumerate(prepared):
-                    if self.cancellation and self.cancellation.is_set(): self.transcript.add("skipped",proposal=str(p.call_id)); return self._outcome("cancelled")
-                    if len(self.order)>=self.limits.mcp_total_calls or deadline.remaining_ms()<=0: self.transcript.add("skipped",proposal=str(p.call_id)); return self._outcome("deadline")
+                    if self.cancellation and self.cancellation.is_set(): self.transcript.add("cancelled"); self.transcript.add("skipped",proposal=str(p.call_id)); return self._outcome("cancelled")
+                    if len(self.order)>=self.limits.mcp_total_calls or deadline.remaining_ms()<=0: self.transcript.add("deadline"); self.transcript.add("skipped",proposal=str(p.call_id)); return self._outcome("deadline")
                     auth=AuthorizedMcpAction(surface.identity,aid,str(p.call_id),p.name,frozen,_canon(frozen)); self.call_ids[str(p.call_id)]=content; self.actions.add(aid.value); self.transcript.add("authorized",action=aid.value,proposal=str(p.call_id))
                     try:
-                        response=self.client.execute(auth,deadline,self.cancellation); self.order.append(aid); self.evidence.append(Evidence(aid,response.request_id,response.result)); self.transcript.add("mcp_response",action=aid.value,response=str(response.request_id))
+                        self.transcript.add("mcp_request",action=aid.value,response="pending")
+                        response=self.client.execute(auth,deadline,self.cancellation); self.order.append(aid); self.evidence.append(Evidence(aid,response.request_id,response.result)); self.transcript.add("mcp_response",action=aid.value,response=str(response.request_id)); self.transcript.add("evidence_validated",action=aid.value,response=str(response.request_id))
                     except ProviderError as exc:
-                        self.transcript.add("failed",action=aid.value,failure=exc.failure.classification.value)
+                        self.transcript.add("failure",failure=exc.failure.classification.value)
                         for later,*_ in prepared[index+1:]: self.transcript.add("skipped",proposal=str(later.call_id))
                         return self._outcome("cancelled" if exc.failure.classification is FailureClass.CANCELLED else "failed")
             return self._outcome("budget")
         except ProviderError as exc:
-            self.transcript.add("failed",failure=exc.failure.classification.value); return self._outcome("deadline" if exc.failure.classification is FailureClass.MCP_TIMEOUT else "failed")
+            self.transcript.add("deadline" if exc.failure.classification is FailureClass.MCP_TIMEOUT else "failure", **({} if exc.failure.classification is FailureClass.MCP_TIMEOUT else {"failure":exc.failure.classification.value})); return self._outcome("deadline" if exc.failure.classification is FailureClass.MCP_TIMEOUT else "failed")
         finally:
+            self.transcript.add("shutdown_start")
             self.client.close(deadline,suppress=True)
+            self.transcript.add("shutdown_complete")
 
 def _provider_response_value(response: ProviderFinalMessage | Sequence[ProviderToolCallProposal]) -> Mapping[str, Any]:
     """Canonical bounded Phase 10.2 provider response representation."""
