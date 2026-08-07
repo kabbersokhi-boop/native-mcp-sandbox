@@ -16,7 +16,7 @@ from .redaction import redact_json
 _SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
 _SAFE_METADATA_KEYS = {"mode", "phase", "source", "reason", "status", "retry", "category", "provider", "operation"}
 _SUSPICIOUS = ("authorization", "proxy-authorization", "bearer", "api-key", "api-", "apikey", "sk-", "password", "secret", "token")
-_PHASE10_EVENTS = {"process_start", "surface", "provider_turn", "authorized", "mcp_response", "failed", "skipped", "outcome", "transcript_limit"}
+_PHASE10_EVENTS = {"process_start", "initialize_request", "initialize_response", "initialized_notification", "tools_list_request", "tools_list_response", "surface_captured", "surface_revalidated", "provider_turn_start", "provider_turn_response", "proposal_rejected", "proposal_duplicate", "authorized", "mcp_request", "mcp_response", "evidence_validated", "skipped", "deadline", "cancelled", "failure", "shutdown_start", "shutdown_terminate", "shutdown_kill", "shutdown_complete", "outcome", "transcript_limit", "surface", "provider_turn", "failed"}
 _PHASE10_KEYS = {"surface", "turn", "bytes", "action", "proposal", "response", "failure", "outcome"}
 
 
@@ -178,6 +178,7 @@ class Phase10Transcript:
     """Incrementally bounded, closed Phase 10.2 control transcript."""
     def __init__(self, limits: Limits = DEFAULT_LIMITS) -> None:
         self._limits, self._events, self._limited = limits, [], False
+        self._terminal = {"event": "transcript_limit", "metadata": {}}
 
     def add(self, event: str, **metadata: str) -> None:
         if self._limited:
@@ -193,15 +194,13 @@ class Phase10Transcript:
             else:
                 values[key] = value
         candidate = self._events + [{"event": event, "metadata": values}]
-        if len(_phase10_bytes(candidate, False)) <= self._limits.transcript_bytes:
+        # Reserve terminal-event space before accepting ordinary control data.
+        if event == "transcript_limit" or len(_phase10_bytes(candidate + [self._terminal], True)) <= self._limits.transcript_bytes:
             self._events = candidate
             return
-        terminal = self._events + [{"event": "transcript_limit", "metadata": {}}]
-        while self._events and len(_phase10_bytes(terminal, True)) > self._limits.transcript_bytes:
-            # Existing events are never replaced; configured limits must leave
-            # room for a terminal event, so only an impossible tiny limit fails.
-            self._events.pop()
-            terminal = self._events + [{"event": "transcript_limit", "metadata": {}}]
+        terminal = self._events + [self._terminal]
+        if len(_phase10_bytes(terminal, True)) > self._limits.transcript_bytes:
+            raise ProviderError(failure(FailureClass.OVERSIZED_RESPONSE, "transcript terminal cannot fit"))
         self._events = terminal
         self._limited = True
 

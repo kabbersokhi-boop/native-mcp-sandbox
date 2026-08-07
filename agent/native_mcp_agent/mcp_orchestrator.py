@@ -132,7 +132,9 @@ class McpStdioClient:
             if self.process.poll() is not None:
                 if self.out: raise _fail(FailureClass.TRUNCATED_RESPONSE,"incomplete stdout response")
                 raise _fail(FailureClass.MCP_AMBIGUOUS_COMPLETION,"child exited after request")
-            remaining=min(stop-self.clock(),deadline.timeout(operation_ms)/1000)
+            # Poll cancellation at a bounded cadence instead of sleeping through
+            # a full request timeout.
+            remaining=min(stop-self.clock(),deadline.timeout(operation_ms)/1000,0.01)
             if remaining<=0: raise _fail(FailureClass.MCP_TIMEOUT,"response deadline")
             for line in self._drain(remaining):
                 try: msg=parse_closed_json(line,self.limits,byte_limit=self.limits.mcp_response_bytes)
@@ -229,6 +231,12 @@ class Orchestrator:
                 raw=bounded.to_json_bytes(self.limits); self.transcript.add("provider_turn",turn=str(turn),bytes=str(len(raw)))
                 response=self.provider.turn(bounded,tuple(self.evidence),timeout_ms=timeout,cancellation=self.cancellation)
                 if deadline.remaining_ms()<=0: return self._outcome("deadline")
+                try:
+                    encoded_response = _canon(_provider_response_value(response))
+                except (TypeError, ValueError, ProviderError):
+                    return self._outcome("failed")
+                if len(encoded_response) > self.limits.provider_response_bytes:
+                    return self._outcome("failed")
                 if isinstance(response,ProviderFinalMessage): return self._outcome("final")
                 proposals=tuple(response)
                 if len(proposals)>self.limits.proposed_tool_call_count or len(proposals)>self.limits.mcp_calls_per_turn: return self._outcome("rejected")
@@ -255,3 +263,13 @@ class Orchestrator:
             self.transcript.add("failed",failure=exc.failure.classification.value); return self._outcome("deadline" if exc.failure.classification is FailureClass.MCP_TIMEOUT else "failed")
         finally:
             self.client.close(deadline,suppress=True)
+
+def _provider_response_value(response: ProviderFinalMessage | Sequence[ProviderToolCallProposal]) -> Mapping[str, Any]:
+    """Canonical bounded Phase 10.2 provider response representation."""
+    if isinstance(response, ProviderFinalMessage):
+        return {"kind":"final","role":response.message.role.value,"content":response.message.content}
+    calls=[]
+    for proposal in response:
+        if not isinstance(proposal, ProviderToolCallProposal): raise _fail(FailureClass.INVALID_TOOL_PROPOSAL,"provider response invalid")
+        calls.append({"id":str(proposal.call_id),"name":proposal.name,"arguments":proposal.arguments})
+    return {"kind":"proposals","calls":calls}
