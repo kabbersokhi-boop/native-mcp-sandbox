@@ -9,6 +9,10 @@ remaining budget to startup, initialize, initialized notification, tools/list,
 provider turns, calls, cancellation, and shutdown.  The child gets a newly
 constructed Phase 10.1 allowlisted environment and starts with `shell=False`.
 `run()` always closes stdin and performs bounded terminate/kill/reap cleanup.
+`subprocess.Popen` is the trusted local creation primitive (the standard
+library cannot asynchronously preempt it); `process_startup_timeout_ms` bounds
+the first enforceable readiness boundary, the correlated `initialize` response,
+as well as being dominated by the total deadline.
 
 The client accepts one outstanding JSON-RPC request.  It rejects malformed or
 duplicate-key JSON, incomplete EOF records, unsolicited/future/duplicate IDs,

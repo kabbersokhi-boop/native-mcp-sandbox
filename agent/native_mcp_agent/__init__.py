@@ -19,7 +19,7 @@ from .contracts import (
 )
 from .errors import ClassifiedFailure, FailureClass, ProviderError
 from .limits import DEFAULT_LIMITS, Limits
-from .mcp_orchestrator import McpStdioClient, Orchestrator, OrchestrationOutcome, ScriptedProvider
+from .mcp_orchestrator import CancellationToken, McpStdioClient, Orchestrator, OrchestrationOutcome, ScriptedProvider
 
 __all__ = [
     "AdvertisedTool",
@@ -43,6 +43,7 @@ __all__ = [
     "ToolCallId",
     "parse_provider_response",
     "McpStdioClient",
+    "CancellationToken",
     "Orchestrator",
     "OrchestrationOutcome",
     "ScriptedProvider",

@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-import hashlib, json, os, selectors, subprocess, time
+import hashlib, json, os, selectors, subprocess, threading, time
 from typing import Any, Callable, Mapping, Protocol, Sequence
 
 from .contracts import (AdvertisedTool, EvidenceProvenance, LocalActionIdentity,
@@ -63,6 +63,18 @@ class Evidence:
 
 class Cancellation(Protocol):
     def is_set(self) -> bool: ...
+
+
+class CancellationToken:
+    """Project-owned cancellation source for the offline orchestration path."""
+    def __init__(self) -> None:
+        self._event = threading.Event()
+
+    def cancel(self) -> None:
+        self._event.set()
+
+    def is_set(self) -> bool:
+        return self._event.is_set()
 class ProviderTurn(Protocol):
     def turn(self, request: ProviderRequest, evidence: tuple[Evidence, ...], *, timeout_ms: int, cancellation: Cancellation | None) -> ProviderFinalMessage | Sequence[ProviderToolCallProposal]: ...
 
@@ -107,6 +119,7 @@ class McpStdioClient:
         self.process: subprocess.Popen[bytes]|None=None; self.selector: selectors.BaseSelector|None=None; self.surface: ToolSurface|None=None
         self.out=bytearray(); self.err=bytearray(); self.out_total=0; self.err_total=0; self.next_id=1
         self._issuer = object()
+        self._startup_pending=True; self.last_initialize: CorrelatedMcpResponse|None=None; self.last_tools_list: CorrelatedMcpResponse|None=None
 
     def authorize(self, action_id: LocalActionIdentity, proposal_id: str, name: str, arguments: Mapping[str, Any]) -> AuthorizedMcpAction:
         if self.surface is None: raise _fail(FailureClass.LOCAL_AUTHORIZATION_FAILURE,"surface absent")
@@ -153,7 +166,11 @@ class McpStdioClient:
         if method not in {"initialize","tools/list","tools/call"}: raise _fail(FailureClass.LOCAL_POLICY_FAILURE,"method rejected")
         if self.process is None: self.start(deadline)
         assert self.process and self.process.stdin
-        timeout_ms=deadline.timeout(operation_ms); request_id=self.next_id; self.next_id+=1
+        # Popen is a trusted local primitive and cannot be safely preempted by
+        # the standard library.  Its earliest enforceable readiness boundary is
+        # the first initialize response, which is therefore also startup-bound.
+        configured=min(operation_ms, self.limits.process_startup_timeout_ms) if self._startup_pending else operation_ms
+        timeout_ms=deadline.timeout(configured); request_id=self.next_id; self.next_id+=1
         raw=_canon({"jsonrpc":"2.0","id":request_id,"method":method,"params":params})+b"\n"
         if len(raw)>self.limits.mcp_request_bytes: raise _fail(FailureClass.REQUEST_TOO_LARGE,"request limit")
         try: self.process.stdin.write(raw); self.process.stdin.flush()
@@ -178,16 +195,20 @@ class McpStdioClient:
                     err=_closed(obj["error"],{"code","message","data"},{"code","message"})
                     if type(err["code"]) is not int or not isinstance(err["message"],str): raise _fail(FailureClass.MCP_PROTOCOL_FAILURE,"bad error")
                     raise _fail(FailureClass.MCP_PROTOCOL_FAILURE,"MCP error")
-                return CorrelatedMcpResponse(request_id,action,_freeze_json(obj["result"],limits=self.limits),len(line))
+                response=CorrelatedMcpResponse(request_id,action,_freeze_json(obj["result"],limits=self.limits),len(line))
+                if method == "initialize": self._startup_pending=False
+                return response
 
     def initialize_and_capture(self, deadline: Deadline, cancellation: Cancellation|None=None) -> ToolSurface:
         init=self._request("initialize",{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"native-mcp-agent","version":"10.2"}},deadline,self.limits.mcp_initialize_timeout_ms,cancellation=cancellation)
+        self.last_initialize=init
         value=_closed(init.result,{"protocolVersion","capabilities","serverInfo","instructions"},{"protocolVersion","capabilities","serverInfo"})
         if not isinstance(value["protocolVersion"],str) or not isinstance(value["capabilities"],dict) or not isinstance(value["serverInfo"],dict): raise _fail(FailureClass.MCP_PROTOCOL_FAILURE,"bad initialize")
         assert self.process and self.process.stdin; deadline.timeout(self.limits.mcp_initialize_timeout_ms)
         try: self.process.stdin.write(_canon({"jsonrpc":"2.0","method":"notifications/initialized","params":{}})+b"\n"); self.process.stdin.flush()
         except (OSError,BrokenPipeError): raise _fail(FailureClass.MCP_AMBIGUOUS_COMPLETION,"initialized notification failed") from None
         listed=self._request("tools/list",{},deadline,self.limits.mcp_tools_list_timeout_ms,cancellation=cancellation)
+        self.last_tools_list=listed
         self.surface=capture_tool_surface(listed.result,self.limits); return self.surface
 
     def revalidate_surface(self, deadline: Deadline, cancellation: Cancellation|None=None) -> None:
@@ -206,19 +227,23 @@ class McpStdioClient:
         response=self._request("tools/call",{"name":action.name,"arguments":frozen},deadline,self.limits.mcp_call_timeout_ms,action,cancellation)
         return CorrelatedMcpResponse(response.request_id,action.action_id,_validate_tool_result(response.result,self.limits),response.byte_count)
 
-    def close(self, deadline: Deadline|None=None, *, suppress: bool=False) -> None:
+    def close(self, deadline: Deadline|None=None, *, suppress: bool=False) -> str:
         process=self.process
-        if process is None: return
+        if process is None: return "none"
+        mode="none"
         try:
             if process.stdin: process.stdin.close()
-            wait=(max(1, deadline.remaining_ms())/1000 if deadline else self.limits.graceful_shutdown_timeout_ms/1000)
-            if process.poll() is None: process.terminate(); process.wait(wait)
+            # Graceful shutdown is independently bounded and may never consume
+            # more than the remaining orchestration budget.
+            wait=(min(self.limits.graceful_shutdown_timeout_ms, max(1, deadline.remaining_ms()))/1000 if deadline else self.limits.graceful_shutdown_timeout_ms/1000)
+            if process.poll() is None:
+                mode="terminate"; process.terminate(); process.wait(wait)
         except (subprocess.TimeoutExpired,ProviderError):
             try:
                 # A killed child must be reaped even after the investigation
                 # budget elapsed; this bounded local cleanup lease is 200 ms.
                 kill_wait = min(.2, max(.001, deadline.remaining_ms()/1000)) if deadline and deadline.remaining_ms() > 0 else .2
-                process.kill(); process.wait(kill_wait)
+                mode="kill"; process.kill(); process.wait(kill_wait)
             except (OSError,subprocess.TimeoutExpired):
                 if not suppress: raise _fail(FailureClass.MCP_PROCESS_EXIT,"kill/reap failed") from None
         except (OSError,BrokenPipeError):
@@ -230,6 +255,7 @@ class McpStdioClient:
                     if stream: stream.close()
                 except OSError: pass
             self.selector=None; self.process=None
+        return mode
 
 def _validate_tool_result(value: Any, limits: Limits) -> Mapping[str,Any]:
     obj=_closed(value,{"content","isError"},{"content"})
@@ -255,24 +281,28 @@ class Orchestrator:
             raise _fail(FailureClass.LOCAL_POLICY_FAILURE, "unbounded provider implementation rejected")
         self.client,self.provider,self.limits,self.context,self.clock,self.cancellation=client,provider,limits,context,clock,cancellation
         self.actions:set[str]=set(); self.call_ids:dict[str,bytes]={}; self.evidence:list[Evidence]=[]; self.order:list[LocalActionIdentity]=[]; self.transcript=Phase10Transcript(limits)
+        self._deadline: Deadline|None=None
     def _action(self,p:ProviderToolCallProposal,surface:ToolSurface)->LocalActionIdentity: return LocalActionIdentity(hashlib.sha256(_canon({"surface":surface.identity,"name":p.name,"arguments":p.arguments,"context":self.context})).hexdigest()[:32])
     def _outcome(self,outcome:str)->OrchestrationOutcome:
         # Serialize shutdown control evidence before the immutable transcript.
         self.transcript.add("shutdown_start")
-        self.client.close(None, suppress=True)
+        mode=self.client.close(self._deadline, suppress=True)
+        if mode == "terminate": self.transcript.add("shutdown_terminate")
+        elif mode == "kill": self.transcript.add("shutdown_terminate"); self.transcript.add("shutdown_kill")
         self.transcript.add("shutdown_complete")
         self.transcript.add("outcome",outcome=outcome); raw=self.transcript.to_json_bytes()
         parse_phase_10_2_transcript(raw,self.limits); return OrchestrationOutcome(outcome,tuple(self.evidence),tuple(self.order),raw)
     def run(self, request:ProviderRequest) -> OrchestrationOutcome:
         deadline=Deadline(self.clock()+self.limits.orchestration_total_timeout_ms/1000,self.clock)
+        self._deadline=deadline
         try:
             self.transcript.add("process_start")
             self.transcript.add("initialize_request")
             surface=self.client.initialize_and_capture(deadline,self.cancellation)
-            self.transcript.add("initialize_response",response="1")
+            self.transcript.add("initialize_response",response=str(self.client.last_initialize.request_id if self.client.last_initialize else 1))
             self.transcript.add("initialized_notification")
             self.transcript.add("tools_list_request")
-            self.transcript.add("tools_list_response",response="2")
+            self.transcript.add("tools_list_response",response=str(self.client.last_tools_list.request_id if self.client.last_tools_list else 2))
             self.transcript.add("surface_captured",surface=surface.identity)
             for turn in range(self.limits.provider_turn_count):
                 if self.cancellation and self.cancellation.is_set(): return self._outcome("cancelled")
@@ -304,7 +334,7 @@ class Orchestrator:
                     if len(self.order)>=self.limits.mcp_total_calls or deadline.remaining_ms()<=0: self.transcript.add("deadline"); self.transcript.add("skipped",proposal=str(p.call_id)); return self._outcome("deadline")
                     auth=self.client.authorize(aid,str(p.call_id),p.name,frozen); self.call_ids[str(p.call_id)]=content; self.actions.add(aid.value); self.transcript.add("authorized",action=aid.value,proposal=str(p.call_id))
                     try:
-                        self.transcript.add("mcp_request",action=aid.value,response="pending")
+                        self.transcript.add("mcp_request",action=aid.value,response=str(self.client.next_id))
                         response=self.client.execute(auth,deadline,self.cancellation); self.order.append(aid); self.evidence.append(Evidence(aid,response.request_id,response.result)); self.transcript.add("mcp_response",action=aid.value,response=str(response.request_id)); self.transcript.add("evidence_validated",action=aid.value,response=str(response.request_id))
                     except ProviderError as exc:
                         self.transcript.add("failure",failure=exc.failure.classification.value)
@@ -312,7 +342,10 @@ class Orchestrator:
                         return self._outcome("cancelled" if exc.failure.classification is FailureClass.CANCELLED else "failed")
             return self._outcome("budget")
         except ProviderError as exc:
-            self.transcript.add("deadline" if exc.failure.classification is FailureClass.MCP_TIMEOUT else "failure", **({} if exc.failure.classification is FailureClass.MCP_TIMEOUT else {"failure":exc.failure.classification.value})); return self._outcome("deadline" if exc.failure.classification is FailureClass.MCP_TIMEOUT else "failed")
+            if exc.failure.classification is FailureClass.CANCELLED:
+                self.transcript.add("cancelled"); return self._outcome("cancelled")
+            timed_out=exc.failure.classification in {FailureClass.MCP_TIMEOUT, FailureClass.TOTAL_REQUEST_TIMEOUT}
+            self.transcript.add("deadline" if timed_out else "failure", **({} if timed_out else {"failure":exc.failure.classification.value})); return self._outcome("deadline" if timed_out else "failed")
         finally:
             self.client.close(deadline,suppress=True)
 
