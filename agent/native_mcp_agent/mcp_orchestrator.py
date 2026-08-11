@@ -232,21 +232,37 @@ class McpStdioClient:
         if process is None: return "none"
         mode="none"
         try:
-            if process.stdin: process.stdin.close()
-            # Graceful shutdown is independently bounded and may never consume
-            # more than the remaining orchestration budget.
-            wait=(min(self.limits.graceful_shutdown_timeout_ms, max(1, deadline.remaining_ms()))/1000 if deadline else self.limits.graceful_shutdown_timeout_ms/1000)
+            if process.stdin:
+                process.stdin.close()
             if process.poll() is None:
-                mode="terminate"; process.terminate(); process.wait(wait)
-        except (subprocess.TimeoutExpired,ProviderError):
-            try:
-                # A killed child must be reaped even after the investigation
-                # budget elapsed; this bounded local cleanup lease is 200 ms.
-                kill_wait = min(.2, max(.001, deadline.remaining_ms()/1000)) if deadline and deadline.remaining_ms() > 0 else .2
-                mode="kill"; process.kill(); process.wait(kill_wait)
-            except (OSError,subprocess.TimeoutExpired):
-                if not suppress: raise _fail(FailureClass.MCP_PROCESS_EXIT,"kill/reap failed") from None
+                mode="terminate"
+                process.terminate()
+                # Every blocking wait under orchestration ownership consumes
+                # only a positive slice of its absolute deadline.  Once it is
+                # exhausted, signals and poll() are safe but wait() is not.
+                graceful_wait=(min(self.limits.graceful_shutdown_timeout_ms, deadline.remaining_ms())/1000
+                               if deadline and deadline.remaining_ms()>0 else
+                               self.limits.graceful_shutdown_timeout_ms/1000 if deadline is None else None)
+                if graceful_wait is not None:
+                    try: process.wait(graceful_wait)
+                    except subprocess.TimeoutExpired: pass
+            if process.poll() is None:
+                mode="kill"
+                process.kill()
+                reap_wait=(deadline.remaining_ms()/1000 if deadline and deadline.remaining_ms()>0 else .2 if deadline is None else None)
+                if reap_wait is not None:
+                    try: process.wait(reap_wait)
+                    except subprocess.TimeoutExpired: pass
+                else:
+                    # timeout=0 is a non-blocking reap attempt, not a new
+                    # lease after the orchestration deadline.
+                    try: process.wait(0)
+                    except subprocess.TimeoutExpired: pass
+            if process.poll() is None:
+                mode="unreaped"
+                if not suppress: raise _fail(FailureClass.MCP_PROCESS_EXIT,"child unreaped at shutdown deadline")
         except (OSError,BrokenPipeError):
+            mode="unreaped"
             if not suppress: raise _fail(FailureClass.MCP_PROCESS_EXIT,"shutdown failed") from None
         finally:
             if self.selector: self.selector.close()
@@ -289,7 +305,8 @@ class Orchestrator:
         mode=self.client.close(self._deadline, suppress=True)
         if mode == "terminate": self.transcript.add("shutdown_terminate")
         elif mode == "kill": self.transcript.add("shutdown_terminate"); self.transcript.add("shutdown_kill")
-        self.transcript.add("shutdown_complete")
+        elif mode == "unreaped": self.transcript.add("shutdown_terminate"); self.transcript.add("shutdown_kill"); self.transcript.add("shutdown_unreaped")
+        if mode != "unreaped": self.transcript.add("shutdown_complete")
         self.transcript.add("outcome",outcome=outcome); raw=self.transcript.to_json_bytes()
         parse_phase_10_2_transcript(raw,self.limits); return OrchestrationOutcome(outcome,tuple(self.evidence),tuple(self.order),raw)
     def run(self, request:ProviderRequest) -> OrchestrationOutcome:

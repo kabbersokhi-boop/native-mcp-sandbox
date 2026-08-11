@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 from __future__ import annotations
-import os, sys, time, unittest
+import os, subprocess, sys, time, unittest
 from dataclasses import replace
 ROOT=os.path.dirname(os.path.dirname(__file__)); sys.path.insert(0,os.path.join(ROOT,"agent"))
 from native_mcp_agent.contracts import ProviderMessage,ProviderRequest,ProviderToolCallProposal,ProviderFinalMessage,RequestCorrelationId,ToolCallId,MessageRole
@@ -65,6 +65,45 @@ class Tests(unittest.TestCase):
   a=Orchestrator(client(),provider(ProviderFinalMessage(ProviderMessage(MessageRole.ASSISTANT,"done")))).run(req()).transcript
   b=Orchestrator(client(),provider(ProviderFinalMessage(ProviderMessage(MessageRole.ASSISTANT,"done")))).run(req()).transcript
   self.assertEqual(a,b)
+
+class ShutdownBoundaryTests(unittest.TestCase):
+ class Clock:
+  def __init__(self): self.now=0.0
+  def __call__(self): return self.now
+  def advance(self, seconds): self.now+=seconds
+ class Stream:
+  def close(self): pass
+ class Process:
+  def __init__(self, clock, graceful): self.clock,self.graceful,self.stdin,self.stdout,self.stderr=clock,graceful,ShutdownBoundaryTests.Stream(),None,None; self.calls=[]; self.reaped=False; self.reap_after_kill=True
+  def poll(self): self.calls.append(("poll",)); return 0 if self.reaped else None
+  def terminate(self): self.calls.append(("terminate",))
+  def kill(self): self.calls.append(("kill",))
+  def wait(self, timeout):
+   self.calls.append(("wait",timeout))
+   if not any(item[0]=="kill" for item in self.calls):
+    if self.graceful: self.reaped=True; return 0
+    self.clock.advance(timeout); raise subprocess.TimeoutExpired("stub",timeout)
+   if not self.reap_after_kill: raise subprocess.TimeoutExpired("stub",timeout)
+   self.clock.advance(timeout); self.reaped=True; return 0
+ def _client_with_process(self, clock, graceful):
+  c=client(limits=replace(DEFAULT_LIMITS,graceful_shutdown_timeout_ms=20)); c.process=self.Process(clock,graceful); return c
+ def test_graceful_shutdown_within_remaining_budget_reaps_and_clears_ownership(self):
+  clock=self.Clock(); c=self._client_with_process(clock,True); process=c.process; result=c.close(Deadline(.100,clock),suppress=True)
+  waits=[item[1] for item in process.calls if item[0]=="wait"]
+  self.assertEqual(result,"terminate"); self.assertEqual(waits,[.02]); self.assertLessEqual(sum(waits),.10); self.assertNotIn(("kill",),process.calls); self.assertIsNone(c.process)
+ def test_ignored_sigterm_fixture_uses_positive_remaining_budget_for_kill_reap(self):
+  class InstrumentedProcess:
+   def __init__(self, process): self.process=process; self.waits=[]
+   def __getattr__(self, name): return getattr(self.process,name)
+   def wait(self, timeout): self.waits.append(timeout); return self.process.wait(timeout)
+  limits=replace(DEFAULT_LIMITS,graceful_shutdown_timeout_ms=20); c=client("ignore_shutdown",limits); d=deadline(c,500); c.initialize_and_capture(d)
+  process=InstrumentedProcess(c.process); c.process=process; result=c.close(d,suppress=True)
+  self.assertEqual(result,"kill"); self.assertEqual(len(process.waits),2); self.assertLessEqual(process.waits[0],.02); self.assertGreater(process.waits[1],0); self.assertLessEqual(sum(process.waits),.5); self.assertIsNone(c.process)
+ def test_expired_deadline_kills_without_new_reap_wait_and_reports_unreaped(self):
+  clock=self.Clock(); c=self._client_with_process(clock,False); process=c.process; process.reap_after_kill=False
+  result=c.close(Deadline(.020,clock),suppress=True)
+  waits=[item[1] for item in process.calls if item[0]=="wait"]
+  self.assertEqual(result,"unreaped"); self.assertEqual(waits,[.02,0]); self.assertIn(("kill",),process.calls); self.assertIsNone(c.process)
 
 class DeadlineTests(unittest.TestCase):
  def test_startup_readiness_limit_and_overall_limit(self):

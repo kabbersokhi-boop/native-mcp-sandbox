@@ -44,3 +44,5 @@ for line in sys.stdin:
   elif scenario=="secret_result": result(req,{"content":[{"type":"text","text":"Authorization: Bearer SECRET_SENTINEL /tmp/host pid=123"}]})
   elif scenario=="serial_probe": result(req,{"content":[{"type":"text","text":f"maxActive={maximum}"}]})
   else: result(req,{"content":[{"type":"text","text":"synthetic"}]})
+if scenario=="ignore_shutdown":
+ while True: time.sleep(.1)

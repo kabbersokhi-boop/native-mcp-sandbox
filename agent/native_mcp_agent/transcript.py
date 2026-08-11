@@ -16,7 +16,7 @@ from .redaction import redact_json
 _SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
 _SAFE_METADATA_KEYS = {"mode", "phase", "source", "reason", "status", "retry", "category", "provider", "operation"}
 _SUSPICIOUS = ("authorization", "proxy-authorization", "bearer", "api-key", "api-", "apikey", "sk-", "password", "secret", "token")
-_PHASE10_EVENTS = {"process_start", "initialize_request", "initialize_response", "initialized_notification", "tools_list_request", "tools_list_response", "surface_captured", "surface_revalidated", "provider_turn_start", "provider_turn_response", "proposal_rejected", "proposal_duplicate", "authorized", "mcp_request", "mcp_response", "evidence_validated", "skipped", "deadline", "cancelled", "failure", "shutdown_start", "shutdown_terminate", "shutdown_kill", "shutdown_complete", "outcome", "transcript_limit", "surface", "provider_turn", "failed"}
+_PHASE10_EVENTS = {"process_start", "initialize_request", "initialize_response", "initialized_notification", "tools_list_request", "tools_list_response", "surface_captured", "surface_revalidated", "provider_turn_start", "provider_turn_response", "proposal_rejected", "proposal_duplicate", "authorized", "mcp_request", "mcp_response", "evidence_validated", "skipped", "deadline", "cancelled", "failure", "shutdown_start", "shutdown_terminate", "shutdown_kill", "shutdown_complete", "shutdown_unreaped", "outcome", "transcript_limit", "surface", "provider_turn", "failed"}
 _PHASE10_KEYS = {"surface", "turn", "bytes", "action", "proposal", "response", "failure", "outcome"}
 _PHASE10_SCHEMA = {
     "process_start": set(), "initialize_request": set(), "initialize_response": {"response"},
@@ -27,7 +27,7 @@ _PHASE10_SCHEMA = {
     "authorized": {"action", "proposal"}, "mcp_request": {"action", "response"},
     "mcp_response": {"action", "response"}, "evidence_validated": {"action", "response"},
     "skipped": {"proposal"}, "deadline": set(), "cancelled": set(), "failure": {"failure"},
-    "shutdown_start": set(), "shutdown_terminate": set(), "shutdown_kill": set(), "shutdown_complete": set(),
+    "shutdown_start": set(), "shutdown_terminate": set(), "shutdown_kill": set(), "shutdown_complete": set(), "shutdown_unreaped": set(),
     "outcome": {"outcome"}, "transcript_limit": set(),
     # Compatibility aliases emitted by the initial Phase 10.2 correction.
     "surface": {"surface"}, "provider_turn": {"turn", "bytes"}, "failed": {"failure", "action"},

@@ -9,6 +9,13 @@ remaining budget to startup, initialize, initialized notification, tools/list,
 provider turns, calls, cancellation, and shutdown.  The child gets a newly
 constructed Phase 10.1 allowlisted environment and starts with `shell=False`.
 `run()` always closes stdin and performs bounded terminate/kill/reap cleanup.
+Every blocking terminate, kill, and reap wait is derived solely from positive
+remaining absolute orchestration time: graceful termination is capped by both
+its configured limit and that remainder, and a kill/reap wait gets only the
+subsequent positive remainder.  Total expiry creates no new cleanup wait lease.
+After expiry the client may send non-blocking safety signals and make only a
+zero-time reap check, but it does not block again; an unreaped child is recorded deterministically as
+`shutdown_unreaped`, never as successful cleanup.
 `subprocess.Popen` is the trusted local creation primitive (the standard
 library cannot asynchronously preempt it); `process_startup_timeout_ms` bounds
 the first enforceable readiness boundary, the correlated `initialize` response,
