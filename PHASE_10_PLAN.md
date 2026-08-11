@@ -2,6 +2,12 @@
 
 ## Status
 
+Phase 10.2 implements the deterministic, offline stdio orchestration subset:
+minimal child environment, initialize/tools-list capture, closed tool schemas,
+serial at-most-once `tools/call` execution, bounded lifecycle, validated
+evidence, and deterministic control transcript.  Live provider networking,
+credentials, streaming, and final reporting remain outside this phase.
+
 Planning only through PR #13. No provider transport, credential handling, live
 model call, new MCP tool, or native-server authority is implemented by this
 document. No Phase 10 release version is selected here.

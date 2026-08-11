@@ -16,6 +16,22 @@ from .redaction import redact_json
 _SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
 _SAFE_METADATA_KEYS = {"mode", "phase", "source", "reason", "status", "retry", "category", "provider", "operation"}
 _SUSPICIOUS = ("authorization", "proxy-authorization", "bearer", "api-key", "api-", "apikey", "sk-", "password", "secret", "token")
+_PHASE10_EVENTS = {"process_start", "initialize_request", "initialize_response", "initialized_notification", "tools_list_request", "tools_list_response", "surface_captured", "surface_revalidated", "provider_turn_start", "provider_turn_response", "proposal_rejected", "proposal_duplicate", "authorized", "mcp_request", "mcp_response", "evidence_validated", "skipped", "deadline", "cancelled", "failure", "shutdown_start", "shutdown_terminate", "shutdown_kill", "shutdown_complete", "shutdown_unreaped", "outcome", "transcript_limit", "surface", "provider_turn", "failed"}
+_PHASE10_KEYS = {"surface", "turn", "bytes", "action", "proposal", "response", "failure", "outcome"}
+_PHASE10_SCHEMA = {
+    "process_start": set(), "initialize_request": set(), "initialize_response": {"response"},
+    "initialized_notification": set(), "tools_list_request": set(), "tools_list_response": {"response"},
+    "surface_captured": {"surface"}, "surface_revalidated": {"surface"},
+    "provider_turn_start": {"turn", "bytes"}, "provider_turn_response": {"turn", "bytes"},
+    "proposal_rejected": {"proposal"}, "proposal_duplicate": {"proposal"},
+    "authorized": {"action", "proposal"}, "mcp_request": {"action", "response"},
+    "mcp_response": {"action", "response"}, "evidence_validated": {"action", "response"},
+    "skipped": {"proposal"}, "deadline": set(), "cancelled": set(), "failure": {"failure"},
+    "shutdown_start": set(), "shutdown_terminate": set(), "shutdown_kill": set(), "shutdown_complete": set(), "shutdown_unreaped": set(),
+    "outcome": {"outcome"}, "transcript_limit": set(),
+    # Compatibility aliases emitted by the initial Phase 10.2 correction.
+    "surface": {"surface"}, "provider_turn": {"turn", "bytes"}, "failed": {"failure", "action"},
+}
 
 
 def _safe_identity(value: Any, label: str) -> str:
@@ -170,3 +186,55 @@ def parse_transcript(raw: bytes | str, limits: Limits = DEFAULT_LIMITS) -> Trans
         raise
     except (AttributeError, KeyError, TypeError, ValueError, UnicodeError, OverflowError, RecursionError):
         raise ProviderError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "transcript fields are malformed")) from None
+
+
+class Phase10Transcript:
+    """Incrementally bounded, closed Phase 10.2 control transcript."""
+    def __init__(self, limits: Limits = DEFAULT_LIMITS) -> None:
+        self._limits, self._events, self._limited = limits, [], False
+        self._terminal = {"event": "transcript_limit", "metadata": {}}
+
+    def add(self, event: str, **metadata: str) -> None:
+        if self._limited:
+            return
+        if event not in _PHASE10_EVENTS or (set(metadata) != _PHASE10_SCHEMA[event] and not (event == "failed" and set(metadata) == {"failure"})):
+            raise ProviderError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "Phase 10 transcript event is invalid"))
+        values: dict[str, str] = {}
+        for key, value in metadata.items():
+            if not isinstance(value, str) or not value or len(value.encode("ascii", "ignore")) != len(value) or len(value) > 64:
+                raise ProviderError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "Phase 10 transcript metadata is invalid"))
+            if any(part in value.lower() for part in _SUSPICIOUS) or value.startswith("/") or "\\" in value:
+                values[key] = "redacted"
+            else:
+                values[key] = value
+        candidate = self._events + [{"event": event, "metadata": values}]
+        # Reserve terminal-event space before accepting ordinary control data.
+        if event == "transcript_limit" or len(_phase10_bytes(candidate + [self._terminal], True)) <= self._limits.transcript_bytes:
+            self._events = candidate
+            return
+        terminal = self._events + [self._terminal]
+        if len(_phase10_bytes(terminal, True)) > self._limits.transcript_bytes:
+            raise ProviderError(failure(FailureClass.OVERSIZED_RESPONSE, "transcript terminal cannot fit"))
+        self._events = terminal
+        self._limited = True
+
+    def to_json_bytes(self) -> bytes:
+        return _phase10_bytes(self._events, self._limited)
+
+
+def _phase10_bytes(events: list[dict[str, Any]], limited: bool) -> bytes:
+    return json.dumps({"schemaVersion":2, "events":events, "limited":limited}, ensure_ascii=True, sort_keys=True, separators=(",", ":")).encode("utf-8")
+
+
+def parse_phase_10_2_transcript(raw: bytes | str, limits: Limits = DEFAULT_LIMITS) -> tuple[Mapping[str, Any], ...]:
+    value = parse_closed_json(raw, limits, byte_limit=limits.transcript_bytes)
+    if not isinstance(value, dict) or set(value) != {"schemaVersion", "events", "limited"} or value["schemaVersion"] != 2 or type(value["limited"]) is not bool or not isinstance(value["events"], list):
+        raise ProviderError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "Phase 10 transcript is not closed"))
+    result=[]
+    for item in value["events"]:
+        if not isinstance(item, dict) or set(item) != {"event", "metadata"} or item["event"] not in _PHASE10_EVENTS or not isinstance(item["metadata"], dict) or (set(item["metadata"]) != _PHASE10_SCHEMA[item["event"]] and not (item["event"] == "failed" and set(item["metadata"]) == {"failure"})):
+            raise ProviderError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "Phase 10 transcript event is invalid"))
+        if any(not isinstance(v, str) or len(v) > 64 for v in item["metadata"].values()):
+            raise ProviderError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "Phase 10 transcript metadata is invalid"))
+        result.append(_FrozenDict(item))
+    return tuple(result)

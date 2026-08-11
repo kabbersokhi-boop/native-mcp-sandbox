@@ -43,6 +43,10 @@ class FailureClass(str, Enum):
     LOCAL_AUTHORIZATION_FAILURE = "local_authorization_failure"
     LOCAL_POLICY_FAILURE = "local_policy_failure"
     MALFORMED_HTTP_RESPONSE = "malformed_http_response"
+    MCP_PROTOCOL_FAILURE = "mcp_protocol_failure"
+    MCP_TIMEOUT = "mcp_timeout"
+    MCP_PROCESS_EXIT = "mcp_process_exit"
+    MCP_AMBIGUOUS_COMPLETION = "mcp_ambiguous_completion"
 
 
 @dataclass(frozen=True)
