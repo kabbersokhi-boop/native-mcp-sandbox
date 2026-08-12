@@ -237,4 +237,12 @@ def parse_phase_10_2_transcript(raw: bytes | str, limits: Limits = DEFAULT_LIMIT
         if any(not isinstance(v, str) or len(v) > 64 for v in item["metadata"].values()):
             raise ProviderError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "Phase 10 transcript metadata is invalid"))
         result.append(_FrozenDict(item))
+    terminal_indexes=[index for index,item in enumerate(result) if item["event"] == "transcript_limit"]
+    # A limited transcript is an immutable accepted prefix followed by its one
+    # terminal marker.  This makes serialized append attempts fail closed.
+    if value["limited"]:
+        if terminal_indexes != [len(result)-1]:
+            raise ProviderError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "Phase 10 transcript terminal is invalid"))
+    elif terminal_indexes:
+        raise ProviderError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "Phase 10 transcript terminal is invalid"))
     return tuple(result)

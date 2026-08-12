@@ -119,6 +119,7 @@ class McpStdioClient:
         self.process: subprocess.Popen[bytes]|None=None; self.selector: selectors.BaseSelector|None=None; self.surface: ToolSurface|None=None
         self.out=bytearray(); self.err=bytearray(); self.out_total=0; self.err_total=0; self.next_id=1
         self._issuer = object()
+        self._authorizations: dict[int, tuple[str, LocalActionIdentity, str, str, Mapping[str, Any], bytes]] = {}
         self._startup_pending=True; self.last_initialize: CorrelatedMcpResponse|None=None; self.last_tools_list: CorrelatedMcpResponse|None=None
 
     def authorize(self, action_id: LocalActionIdentity, proposal_id: str, name: str, arguments: Mapping[str, Any]) -> AuthorizedMcpAction:
@@ -130,6 +131,7 @@ class McpStdioClient:
         _validate_schema(frozen,tool.parameters,self.limits)
         value=AuthorizedMcpAction(self.surface.identity,action_id,proposal_id,name,frozen,_canon(frozen))
         object.__setattr__(value,"_issuer",self._issuer)
+        self._authorizations[id(value)] = (value.surface_identity, value.action_id, value.proposal_id, value.name, value.arguments, value.argument_bytes)
         return value
 
     def start(self, deadline: Deadline) -> None:
@@ -153,7 +155,10 @@ class McpStdioClient:
             if not data: continue
             if key.data=="out": self.out_total+=len(data); target,bound,total=self.out,self.limits.child_stdout_bytes,self.out_total
             else: self.err_total+=len(data); target,bound,total=self.err,self.limits.child_stderr_bytes,self.err_total
-            target.extend(data)
+            # stderr is never a protocol surface.  Retain only a fixed marker
+            # for diagnostics so hostile child output cannot become a
+            # project-owned secret-bearing buffer.
+            target.extend(data if key.data=="out" else b"<redacted>")
             if total>bound: raise _fail(FailureClass.OVERSIZED_RESPONSE,"child output limit")
             if key.data=="out":
                 while b"\n" in self.out:
@@ -217,7 +222,9 @@ class McpStdioClient:
         if later.identity!=self.surface.identity: raise _fail(FailureClass.MCP_PROTOCOL_FAILURE,"tool surface changed")
 
     def execute(self, action: AuthorizedMcpAction, deadline: Deadline, cancellation: Cancellation|None=None) -> CorrelatedMcpResponse:
-        if not isinstance(action,AuthorizedMcpAction) or action._issuer is not self._issuer or self.surface is None or action.surface_identity!=self.surface.identity: raise _fail(FailureClass.LOCAL_AUTHORIZATION_FAILURE,"forged or stale authorization")
+        expected=self._authorizations.get(id(action))
+        actual=(action.surface_identity, action.action_id, action.proposal_id, action.name, action.arguments, action.argument_bytes) if isinstance(action,AuthorizedMcpAction) else None
+        if not isinstance(action,AuthorizedMcpAction) or action._issuer is not self._issuer or self.surface is None or action.surface_identity!=self.surface.identity or expected != actual: raise _fail(FailureClass.LOCAL_AUTHORIZATION_FAILURE,"forged or stale authorization")
         tool=next((x for x in self.surface.tools if x.name==action.name),None)
         if tool is None or not isinstance(action.action_id,LocalActionIdentity): raise _fail(FailureClass.LOCAL_AUTHORIZATION_FAILURE,"tool unauthorized")
         try:
@@ -339,11 +346,23 @@ class Orchestrator:
                 proposals=tuple(response)
                 if len(proposals)>self.limits.proposed_tool_call_count or len(proposals)>self.limits.mcp_calls_per_turn: return self._outcome("rejected")
                 prepared=[]
-                for p in proposals:
+                for proposal_index,p in enumerate(proposals):
                     if not isinstance(p,ProviderToolCallProposal): self.transcript.add("proposal_rejected",proposal="invalid"); return self._outcome("rejected")
                     tool=next((x for x in surface.tools if x.name==p.name),None)
                     if tool is None: self.transcript.add("proposal_rejected",proposal=str(p.call_id)); return self._outcome("rejected")
-                    frozen=_freeze_json(p.arguments,limits=self.limits); _validate_schema(frozen,tool.parameters,self.limits); content=_canon({"name":p.name,"arguments":frozen}); aid=self._action(p,surface)
+                    try:
+                        frozen=_freeze_json(p.arguments,limits=self.limits); _validate_schema(frozen,tool.parameters,self.limits)
+                    except ProviderError:
+                        # Proposal validation is a serial authority boundary: a
+                        # locally rejected first proposal ends this provider
+                        # turn before any later proposal can be authorized or
+                        # consume a JSON-RPC tools/call request ID.
+                        self.transcript.add("proposal_rejected",proposal=str(p.call_id))
+                        for later in proposals[proposal_index + 1:]:
+                            if isinstance(later, ProviderToolCallProposal):
+                                self.transcript.add("skipped",proposal=str(later.call_id))
+                        return self._outcome("rejected")
+                    content=_canon({"name":p.name,"arguments":frozen}); aid=self._action(p,surface)
                     if (str(p.call_id) in self.call_ids or aid.value in self.actions
                             or any(str(x[0].call_id) == str(p.call_id) or x[1].value == aid.value for x in prepared)):
                         self.transcript.add("proposal_duplicate",proposal=str(p.call_id)); return self._outcome("duplicate")

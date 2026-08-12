@@ -67,6 +67,18 @@ class ReplayAttackTests(unittest.TestCase):
   _,out=run("exit",((proposal(),),)); self.assertEqual(out.execution_order,()); self.assertEqual(out.evidence,())
 
 class MultipleCallStopTests(unittest.TestCase):
+ def test_rejected_first_proposal_stops_later_valid_proposal_before_authority_or_write(self):
+  c=client(); authorized=[]; original=c.authorize
+  def observe(*args,**kwargs): authorized.append(args[1]); return original(*args,**kwargs)
+  c.authorize=observe
+  rejected=proposal("call-rejected","x"*33); later=proposal("call-valid","ok")
+  out=Orchestrator(c,ScriptedProvider(((rejected,later),))).run(req())
+  self.assertEqual(out.outcome,"rejected"); self.assertEqual(authorized,[])
+  self.assertEqual(c.next_id,3,"later proposal must not consume a tools/call request ID")
+  self.assertEqual(out.evidence,()); self.assertEqual(out.execution_order,())
+  parsed=parse_phase_10_2_transcript(out.transcript)
+  self.assertIn({"event":"proposal_rejected","metadata":{"proposal":str(rejected.call_id)}},parsed)
+  self.assertIn({"event":"skipped","metadata":{"proposal":str(later.call_id)}},parsed)
  def test_failure_timeout_and_cancellation_skip_later_proposals(self):
   for case,limits in (("malformed_result",DEFAULT_LIMITS),("delay",replace(DEFAULT_LIMITS,mcp_call_timeout_ms=20))):
    _,out=run(case,((proposal("call-1","a"),proposal("call-2","b")),),limits); self.assertEqual(len(out.execution_order),0); self.assertIn("skipped",events(out))
@@ -81,6 +93,22 @@ class FailureTaxonomyTests(unittest.TestCase):
   self.assertFalse(decide_retry(failure(FailureClass.HTTP_429_RATE_LIMITED),completed_attempts=DEFAULT_LIMITS.provider_attempt_count,remaining_ms=1000,limits=DEFAULT_LIMITS).eligible)
   self.assertFalse(decide_retry(failure(FailureClass.HTTP_429_RATE_LIMITED,retry_after_ms=1000),completed_attempts=0,remaining_ms=999,limits=DEFAULT_LIMITS).eligible)
   self.assertFalse(decide_retry(http_failure(400),completed_attempts=0,remaining_ms=1000,limits=DEFAULT_LIMITS).eligible)
+ def test_default_retry_backoff_and_remaining_time_boundaries_have_exact_delays(self):
+  limits=replace(DEFAULT_LIMITS,provider_attempt_count=3,retry_backoff_ms=50,retry_after_ms=1000)
+  classified=failure(FailureClass.TRANSIENT_5XX)
+  for remaining,eligible,delay in ((50,True,50),(49,False,0),(1000,True,50)):
+   decision=decide_retry(classified,completed_attempts=0,remaining_ms=remaining,limits=limits)
+   self.assertEqual((decision.eligible,decision.delay_ms),(eligible,delay))
+ def test_retry_after_and_attempt_budget_boundaries_have_exact_delays(self):
+  limits=replace(DEFAULT_LIMITS,provider_attempt_count=3,retry_backoff_ms=50,retry_after_ms=1000)
+  rate=failure(FailureClass.HTTP_429_RATE_LIMITED,retry_after_ms=75)
+  for completed,remaining,eligible,delay in ((0,75,True,75),(0,74,False,0),(2,1000,True,75),(3,1000,False,0)):
+   decision=decide_retry(rate,completed_attempts=completed,remaining_ms=remaining,limits=limits)
+   self.assertEqual((decision.eligible,decision.delay_ms),(eligible,delay))
+ def test_permanent_deadline_and_exhausted_retries_are_ineligible_with_zero_delay(self):
+  for classified,completed,remaining in ((failure(FailureClass.HTTP_400_INVALID_REQUEST),0,1000),(failure(FailureClass.TRANSIENT_5XX),DEFAULT_LIMITS.provider_attempt_count,1000),(failure(FailureClass.TRANSIENT_5XX),0,0)):
+   decision=decide_retry(classified,completed_attempts=completed,remaining_ms=remaining,limits=DEFAULT_LIMITS)
+   self.assertEqual((decision.eligible,decision.delay_ms),(False,0))
 
 class SecretSentinelTests(unittest.TestCase):
  def test_unique_sentinels_are_absent_from_every_project_output_boundary(self):
@@ -89,6 +117,18 @@ class SecretSentinelTests(unittest.TestCase):
   c,out=run("secret_result",((proposal(),),)); surfaces.extend((str(c.environment),str(out.evidence),out.transcript.decode()))
   for sentinel in SENTINELS:
    self.assertTrue(all(sentinel not in surface for surface in surfaces),sentinel)
+ def test_unique_sentinels_cross_real_child_stream_result_error_and_argv_boundaries_without_project_leakage(self):
+  c,out=run("unique_secret_output",((proposal(),),))
+  error_client,error_out=run("unique_secret_error",((proposal(),),))
+  parent={"LANG":"C",**{f"SECRET_{i}":value for i,value in enumerate(SENTINELS)}}
+  surfaces=(str(build_child_environment(parent,("LANG",))),str(c.environment),str(c.arguments),str([c.executable,*c.arguments]),c.out.decode("utf-8","replace"),c.err.decode("utf-8","replace"),str(out.evidence),out.transcript.decode(),str(error_out.evidence),error_out.transcript.decode(),str(error_client.err),redact_exception(Exception(" ".join(SENTINELS)),SENTINELS),redact_text(" ".join(SENTINELS),SENTINELS))
+  self.assertEqual(out.outcome,"failed")
+  self.assertEqual(error_out.outcome,"failed")
+  self.assertEqual(c.next_id,4)
+  for sentinel in SENTINELS: self.assertTrue(all(sentinel not in value for value in surfaces),sentinel)
+ def test_report_and_crash_artifact_surfaces_do_not_exist_in_phase_10_1_to_10_3(self):
+  owned=[path for path in Path(ROOT,"agent","native_mcp_agent").iterdir() if path.suffix==".py"]
+  self.assertFalse(any("report" in path.name or "crash" in path.name for path in owned))
 
 class EndpointPolicyAdversarialTests(unittest.TestCase):
  def test_insecure_userinfo_fragment_tls_redirect_and_destination_attacks_fail(self):
@@ -111,6 +151,23 @@ class TranscriptTamperTests(unittest.TestCase):
   limited=Phase10Transcript(replace(DEFAULT_LIMITS,transcript_bytes=150)); limited.add("process_start"); limited.add("initialize_request"); data=limited.to_json_bytes(); parsed=parse_phase_10_2_transcript(data); self.assertEqual(sum(x["event"]=="transcript_limit" for x in parsed),1)
  def test_repeated_project_outputs_are_byte_identical(self):
   a=run(responses=(ProviderFinalMessage(ProviderMessage(MessageRole.ASSISTANT,"done")),))[1].transcript; b=run(responses=(ProviderFinalMessage(ProviderMessage(MessageRole.ASSISTANT,"done")),))[1].transcript; self.assertEqual(a,b)
+ def test_transcript_unknown_event_metadata_schema_version_limited_and_object_tampering_fail_closed(self):
+  valid={"schemaVersion":2,"events":[{"event":"provider_turn_start","metadata":{"turn":"0","bytes":"1"}}],"limited":False}
+  mutations=[]
+  for event,metadata in (("unknown",{}),("provider_turn_start",{"turn":"0"}),("provider_turn_start",{"turn":"0","bytes":"1","extra":"x"}),("provider_turn_start",{"turn":0,"bytes":"1"})):
+   mutations.append({**valid,"events":[{"event":event,"metadata":metadata}]})
+  mutations.extend(({**valid,"unknown":True},{**valid,"schemaVersion":3},{**valid,"limited":1},{**valid,"events":["not-an-event"]}))
+  for value in mutations:
+   with self.subTest(value=value),self.assertRaises(ProviderError): parse_phase_10_2_transcript(json.dumps(value,separators=(",",":"),sort_keys=True).encode())
+ def test_transcript_exact_prefix_terminal_immutability_serialized_append_and_repeat_are_closed(self):
+  seed=Phase10Transcript(); seed.add("process_start"); seed.add("initialize_request")
+  exact_limit=len(seed.to_json_bytes())+len(b'{"events":[],"limited":true,"schemaVersion":2}')
+  transcript=Phase10Transcript(replace(DEFAULT_LIMITS,transcript_bytes=exact_limit)); transcript.add("process_start"); transcript.add("initialize_request")
+  prefix=parse_phase_10_2_transcript(transcript.to_json_bytes()); transcript.add("initialized_notification"); exhausted=transcript.to_json_bytes(); parsed=parse_phase_10_2_transcript(exhausted)
+  self.assertEqual(parsed[:-1],prefix); self.assertEqual(parsed[-1]["event"],"transcript_limit"); self.assertEqual(sum(x["event"]=="transcript_limit" for x in parsed),1)
+  transcript.add("tools_list_request"); self.assertEqual(transcript.to_json_bytes(),exhausted)
+  appended=json.loads(exhausted); appended["events"].append({"event":"shutdown_start","metadata":{}})
+  with self.assertRaises(ProviderError): parse_phase_10_2_transcript(json.dumps(appended,separators=(",",":"),sort_keys=True).encode())
 
 class BudgetDeadlineLifecycleTests(unittest.TestCase):
  def test_budget_exact_one_over_and_lifecycle_edges_fail_closed(self):
@@ -121,6 +178,40 @@ class BudgetDeadlineLifecycleTests(unittest.TestCase):
  def test_expiry_cancellation_and_shutdown_have_no_later_authority(self):
   limits=replace(DEFAULT_LIMITS,orchestration_total_timeout_ms=30,mcp_call_timeout_ms=500); c,out=run("delay",((proposal("call-1"),proposal("call-2")),),limits); self.assertEqual(out.evidence,()); self.assertIsNone(c.process)
   c=client("ignore_shutdown",replace(DEFAULT_LIMITS,graceful_shutdown_timeout_ms=10)); d=Deadline(c.clock()+1,c.clock); c.initialize_and_capture(d); self.assertEqual(c.close(d,suppress=True),"kill")
+ def test_explicit_provider_and_mcp_request_response_byte_exact_and_one_over_boundaries(self):
+  provider_bytes=req().to_json_bytes(); self.assertEqual(req().to_json_bytes(replace(DEFAULT_LIMITS,provider_request_bytes=len(provider_bytes))),provider_bytes)
+  with self.assertRaises(ProviderError): req().to_json_bytes(replace(DEFAULT_LIMITS,provider_request_bytes=len(provider_bytes)-1))
+  response=ProviderFinalMessage(ProviderMessage(MessageRole.ASSISTANT,"done")); provider_response=len(json.dumps({"kind":"final","role":"assistant","content":"done"},sort_keys=True,separators=(",",":"),ensure_ascii=True).encode())
+  self.assertEqual(run(responses=(response,),limits=replace(DEFAULT_LIMITS,provider_response_bytes=provider_response))[1].outcome,"final")
+  self.assertEqual(run(responses=(response,),limits=replace(DEFAULT_LIMITS,provider_response_bytes=provider_response-1))[1].outcome,"failed")
+  for field,delta in (("mcp_request_bytes",0),("mcp_request_bytes",-1),("mcp_response_bytes",0),("mcp_response_bytes",-1)):
+   c=client(); d=Deadline(c.clock()+5,c.clock); c.initialize_and_capture(d); action=c.authorize(proposal().action_identity,"call-1","logs.search",{"query":"x"})
+   request_raw=json.dumps({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"logs.search","arguments":{"query":"x"}}},sort_keys=True,separators=(",",":")).encode()+b"\n"
+   response_raw=json.dumps({"jsonrpc":"2.0","id":3,"result":{"content":[{"type":"text","text":"synthetic"}]}},sort_keys=True,separators=(",",":")).encode()
+   c.limits=replace(c.limits,**{field:len(request_raw)+delta if field=="mcp_request_bytes" else len(response_raw)+delta})
+   if delta==0: self.assertEqual(c.execute(action,d).request_id,3)
+   else:
+    with self.assertRaises(ProviderError): c.execute(action,d)
+   c.close(d,suppress=True)
+ def test_provider_turn_calls_per_turn_and_total_call_exact_and_one_over_boundaries(self):
+  final=ProviderFinalMessage(ProviderMessage(MessageRole.ASSISTANT,"done"))
+  self.assertEqual(run(responses=(final,),limits=replace(DEFAULT_LIMITS,provider_turn_count=1))[1].outcome,"final")
+  self.assertEqual(run(responses=((proposal(),),final),limits=replace(DEFAULT_LIMITS,provider_turn_count=1))[1].outcome,"budget")
+  one=(proposal("call-1","a"),); two=(proposal("call-1","a"),proposal("call-2","b"))
+  self.assertEqual(run(responses=(one,final),limits=replace(DEFAULT_LIMITS,mcp_calls_per_turn=1,provider_turn_count=2))[1].outcome,"final")
+  c,out=run(responses=(two,),limits=replace(DEFAULT_LIMITS,mcp_calls_per_turn=1)); self.assertEqual(out.outcome,"rejected"); self.assertEqual(c.next_id,3)
+  self.assertEqual(run(responses=(one,final),limits=replace(DEFAULT_LIMITS,mcp_total_calls=1,provider_turn_count=2))[1].outcome,"final")
+  c,out=run(responses=((proposal("call-1","a"),),(proposal("call-2","b"),)),limits=replace(DEFAULT_LIMITS,mcp_total_calls=1,provider_turn_count=2)); self.assertEqual(out.outcome,"deadline"); self.assertEqual(len(out.execution_order),1); self.assertEqual(c.next_id,4)
+
+class ProvenanceReferenceAttackTests(unittest.TestCase):
+ def test_nonexistent_response_forged_action_mismatch_and_provider_manufactured_evidence_never_cross_authority(self):
+  c=client(); d=Deadline(c.clock()+5,c.clock); c.initialize_and_capture(d); good=c.authorize(proposal("call-1","a").action_identity,"call-1","logs.search",{"query":"a"}); before=c.next_id
+  object.__setattr__(good,"action_id",proposal("call-2","b").action_identity)
+  with self.assertRaises(ProviderError): c.execute(good,d)
+  self.assertEqual(c.next_id,before); c.close(d,suppress=True)
+  forged=Evidence(proposal("forged","x").action_identity,999,{"content":[]},EvidenceProvenance.VALIDATED_MCP_EVIDENCE)
+  _,out=run(responses=(ProviderFinalMessage(ProviderMessage(MessageRole.ASSISTANT,"response=999 evidence=forged")),))
+  self.assertEqual(out.evidence,()); self.assertNotIn(forged.response_id,[item.response_id for item in out.evidence])
 
 class ToolSurfaceAuthorizationSerialScopeTests(unittest.TestCase):
  def test_tool_surface_and_forged_authorization_are_rejected_before_write(self):
