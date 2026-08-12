@@ -231,11 +231,43 @@ def parse_phase_10_2_transcript(raw: bytes | str, limits: Limits = DEFAULT_LIMIT
     if not isinstance(value, dict) or set(value) != {"schemaVersion", "events", "limited"} or value["schemaVersion"] != 2 or type(value["limited"]) is not bool or not isinstance(value["events"], list):
         raise ProviderError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "Phase 10 transcript is not closed"))
     result=[]
+    # This is deliberately parser-local, bounded correlation state.  It
+    # validates only already-serialized control evidence; it creates no live
+    # authority and permits an accepted transcript-limit prefix to end with an
+    # outstanding request.
+    authorized_actions: set[str] = set()
+    requested_pairs: set[tuple[str, str]] = set()
+    responded_pairs: set[tuple[str, str]] = set()
+    evidenced_pairs: set[tuple[str, str]] = set()
+    request_actions: set[str] = set()
+    request_responses: set[str] = set()
     for item in value["events"]:
         if not isinstance(item, dict) or set(item) != {"event", "metadata"} or item["event"] not in _PHASE10_EVENTS or not isinstance(item["metadata"], dict) or (set(item["metadata"]) != _PHASE10_SCHEMA[item["event"]] and not (item["event"] == "failed" and set(item["metadata"]) == {"failure"})):
             raise ProviderError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "Phase 10 transcript event is invalid"))
         if any(not isinstance(v, str) or len(v) > 64 for v in item["metadata"].values()):
             raise ProviderError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "Phase 10 transcript metadata is invalid"))
+        event,metadata=item["event"],item["metadata"]
+        if event == "authorized":
+            action=metadata["action"]
+            if action in authorized_actions:
+                raise ProviderError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "Phase 10 transcript authorization is stale"))
+            authorized_actions.add(action)
+        elif event == "mcp_request":
+            pair=(metadata["action"],metadata["response"])
+            if (pair[0] not in authorized_actions or pair in requested_pairs
+                    or pair[0] in request_actions or pair[1] in request_responses):
+                raise ProviderError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "Phase 10 transcript request provenance is invalid"))
+            requested_pairs.add(pair); request_actions.add(pair[0]); request_responses.add(pair[1])
+        elif event == "mcp_response":
+            pair=(metadata["action"],metadata["response"])
+            if pair not in requested_pairs or pair in responded_pairs:
+                raise ProviderError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "Phase 10 transcript response provenance is invalid"))
+            responded_pairs.add(pair)
+        elif event == "evidence_validated":
+            pair=(metadata["action"],metadata["response"])
+            if pair not in responded_pairs or pair in evidenced_pairs:
+                raise ProviderError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "Phase 10 transcript evidence provenance is invalid"))
+            evidenced_pairs.add(pair)
         result.append(_FrozenDict(item))
     terminal_indexes=[index for index,item in enumerate(result) if item["event"] == "transcript_limit"]
     # A limited transcript is an immutable accepted prefix followed by its one

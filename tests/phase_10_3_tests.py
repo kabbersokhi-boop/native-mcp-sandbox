@@ -212,6 +212,23 @@ class ProvenanceReferenceAttackTests(unittest.TestCase):
   forged=Evidence(proposal("forged","x").action_identity,999,{"content":[]},EvidenceProvenance.VALIDATED_MCP_EVIDENCE)
   _,out=run(responses=(ProviderFinalMessage(ProviderMessage(MessageRole.ASSISTANT,"response=999 evidence=forged")),))
   self.assertEqual(out.evidence,()); self.assertNotIn(forged.response_id,[item.response_id for item in out.evidence])
+ def _transcript(self,*events): return json.dumps({"schemaVersion":2,"events":[{"event":event,"metadata":metadata} for event,metadata in events],"limited":False},sort_keys=True,separators=(",",":")).encode()
+ def _valid_lifecycle(self): return (("authorized",{"action":"action-a","proposal":"call-a"}),("mcp_request",{"action":"action-a","response":"3"}),("mcp_response",{"action":"action-a","response":"3"}),("evidence_validated",{"action":"action-a","response":"3"}))
+ def test_transcript_orphan_mcp_response_and_orphan_evidence_validation_fail_closed(self):
+  for events in ((("mcp_response",{"action":"action-a","response":"3"}),),(("evidence_validated",{"action":"action-a","response":"3"}),)):
+   with self.subTest(events=events),self.assertRaises(ProviderError): parse_phase_10_2_transcript(self._transcript(*events))
+ def test_transcript_existing_action_wrong_response_and_existing_response_wrong_action_fail_closed(self):
+  base=self._valid_lifecycle()[:2]
+  for event in (("mcp_response",{"action":"action-a","response":"4"}),("mcp_response",{"action":"action-b","response":"3"}),("evidence_validated",{"action":"action-a","response":"4"}),("evidence_validated",{"action":"action-b","response":"3"})):
+   with self.subTest(event=event),self.assertRaises(ProviderError): parse_phase_10_2_transcript(self._transcript(*base,event))
+ def test_transcript_nonexistent_response_999_and_duplicate_stale_evidence_fail_closed(self):
+  base=self._valid_lifecycle()
+  for events in (base[:2]+(("mcp_response",{"action":"action-a","response":"999"}),),base+(("evidence_validated",{"action":"action-a","response":"3"}),)):
+   with self.subTest(events=events),self.assertRaises(ProviderError): parse_phase_10_2_transcript(self._transcript(*events))
+ def test_valid_generated_transcript_still_parses_and_is_byte_identical(self):
+  a=run(responses=((proposal(),),ProviderFinalMessage(ProviderMessage(MessageRole.ASSISTANT,"done")),))[1].transcript
+  b=run(responses=((proposal(),),ProviderFinalMessage(ProviderMessage(MessageRole.ASSISTANT,"done")),))[1].transcript
+  self.assertEqual(a,b); self.assertTrue(parse_phase_10_2_transcript(a))
 
 class ToolSurfaceAuthorizationSerialScopeTests(unittest.TestCase):
  def test_tool_surface_and_forged_authorization_are_rejected_before_write(self):
