@@ -353,6 +353,12 @@ if(BUILD_TESTING)
             ${CMAKE_CURRENT_SOURCE_DIR}/tests/phase_10_2_tests.py
   )
   set_tests_properties(agent.phase_10_2 PROPERTIES TIMEOUT 90)
+  add_test(
+    NAME agent.phase_10_3
+    COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/phase_10_3_tests.py
+  )
+  set_tests_properties(agent.phase_10_3 PROPERTIES TIMEOUT 90)
   if(NMS_BUILD_BENCHMARKS)
     add_test(
       NAME benchmarks.component_smoke

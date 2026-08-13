@@ -2,6 +2,7 @@
 """Offline credential-free adversarial MCP stdio fixture."""
 import json, signal, sys, time
 scenario=sys.argv[1] if len(sys.argv)>1 else "normal"; listed=0; active=0; maximum=0
+UNIQUE_SENTINELS=("API_KEY_10_3_UNIQUE","Authorization: Bearer TOKEN_10_3_UNIQUE","proxy://user:pass@host","SECRET_STORE_10_3_UNIQUE","/absolute/phase10_3/sentinel","pid=424242","--command-secret=CMD_10_3")
 if scenario=="ignore_shutdown": signal.signal(signal.SIGTERM, signal.SIG_IGN)
 if scenario=="delayed_start": time.sleep(.2)
 tools=[{"name":"logs.search","description":"synthetic","inputSchema":{"type":"object","properties":{"query":{"type":"string","maxLength":32}},"required":["query"],"additionalProperties":False}}, {"name":"logs.count","inputSchema":{"type":"object","properties":{},"required":[],"additionalProperties":False}}]
@@ -42,6 +43,14 @@ for line in sys.stdin:
   elif scenario=="result_many_blocks": result(req,{"content":[{"type":"text","text":"x"} for _ in range(33)]})
   elif scenario=="result_structured": result(req,{"content":[{"type":"text","text":"x"}],"structuredContent":{}})
   elif scenario=="secret_result": result(req,{"content":[{"type":"text","text":"Authorization: Bearer SECRET_SENTINEL /tmp/host pid=123"}]})
+  elif scenario=="unique_secret_output":
+   # This deliberately crosses the real stdout JSON-RPC result and stderr
+   # streams.  The parent must redact/avoid retaining it at every owned output.
+   sys.stderr.write(" ".join(UNIQUE_SENTINELS)+"\n"); sys.stderr.flush()
+   result(req,{"content":[{"type":"text","text":" ".join(UNIQUE_SENTINELS)}],"isError":True})
+  elif scenario=="unique_secret_error":
+   sys.stderr.write(" ".join(UNIQUE_SENTINELS)+"\n"); sys.stderr.flush()
+   emit({"jsonrpc":"2.0","id":req["id"],"error":{"code":-32000,"message":" ".join(UNIQUE_SENTINELS)}})
   elif scenario=="serial_probe": result(req,{"content":[{"type":"text","text":f"maxActive={maximum}"}]})
   else: result(req,{"content":[{"type":"text","text":"synthetic"}]})
 if scenario=="ignore_shutdown":

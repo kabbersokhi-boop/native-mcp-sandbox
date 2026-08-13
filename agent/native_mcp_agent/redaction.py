@@ -24,6 +24,8 @@ _HEADER_RE = re.compile(r"(?is)\b(?:proxy-authorization|authorization|cookie)\s*
 _BEARER_RE = re.compile(r"(?is)\bbearer\s+[A-Za-z0-9._~+/=-]{4,}")
 _ABSOLUTE_PATH_RE = re.compile(r"(?<![A-Za-z0-9_.-])/(?:[^\s\x00-\x1f\\]|\\)+")
 _PID_ASSIGNMENT_RE = re.compile(r"(?i)\b(?:pid|raw_pid|process[_-]?id)\s*[=:]\s*\d+\b")
+_SECRET_VALUE_RE = re.compile(r"(?i)\b(?:api[_-]?key|secret(?:[_-]?store)?|token)[A-Za-z0-9_.=-]*")
+_USERINFO_URL_RE = re.compile(r"(?i)\b[a-z][a-z0-9+.-]*://[^\s/@]+:[^\s/@]+@[^\s]+")
 _DIAGNOSTIC_KEYS = {"diagnostic", "detail", "error", "message", "command", "argv", "output", "stdout", "stderr"}
 
 
@@ -76,6 +78,8 @@ def _structural_text(text: str, *, sensitive_field: bool = False) -> str:
         spans.extend(match.span() for match in _BEARER_RE.finditer(text))
         spans.extend(match.span() for match in _ABSOLUTE_PATH_RE.finditer(text))
         spans.extend(match.span() for match in _PID_ASSIGNMENT_RE.finditer(text))
+        spans.extend(match.span() for match in _SECRET_VALUE_RE.finditer(text))
+        spans.extend(match.span() for match in _USERINFO_URL_RE.finditer(text))
     return _replace_spans(text, spans)
 
 
