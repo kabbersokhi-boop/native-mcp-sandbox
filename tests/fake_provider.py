@@ -65,6 +65,7 @@ class FakeCase(str, Enum):
 class FakeProviderServer:
     case: FakeCase
     host: str = "127.0.0.1"
+    openai_compatible: bool = False
     _server: ThreadingHTTPServer | None = None
     _thread: threading.Thread | None = None
     request_count: int = 0
@@ -94,6 +95,10 @@ class FakeProviderServer:
                     owner.request_headers = []
                 owner.request_headers.append({key.lower(): value for key, value in self.headers.items()})
                 status, response, content_type, declared, delay, close = owner.script()
+                if owner.openai_compatible:
+                    response = owner.openai_response(response)
+                    if declared is not None:
+                        declared = len(response) if owner.case != FakeCase.TRUNCATED else len(response) + 3
                 if delay:
                     time.sleep(delay)
                 if close:
@@ -153,6 +158,23 @@ class FakeProviderServer:
 
     def validated_endpoint(self):
         return validate_fake_loopback_endpoint(self.endpoint, allow_loopback_http=True)
+
+    def openai_response(self, response: bytes) -> bytes:
+        if self.case == FakeCase.FINAL or response == b'{"message":{"role":"assistant","content":"synthetic guidance"}}':
+            return b'{"choices":[{"message":{"role":"assistant","content":"synthetic guidance"}}]}'
+        if self.case == FakeCase.ONE_CALL:
+            return b'{"choices":[{"message":{"role":"assistant","tool_calls":[{"id":"call-1","type":"function","function":{"name":"logs.search","arguments":"{\\"query\\":\\"ERROR\\"}"}}]}}]}'
+        if self.case == FakeCase.MULTIPLE_CALLS:
+            return b'{"choices":[{"message":{"role":"assistant","tool_calls":[{"id":"call-1","type":"function","function":{"name":"logs.search","arguments":"{\\"query\\":\\"ERROR\\"}"}},{"id":"call-2","type":"function","function":{"name":"logs.tail","arguments":"{\\"lines\\":3}"}}]}}]}'
+        if self.case == FakeCase.UNEXPECTED_FIELDS:
+            return b'{"choices":[{"message":{"role":"assistant","content":"a","extra":1}}]}'
+        if self.case == FakeCase.MIXED:
+            return b'{"choices":[{"message":{"role":"assistant","content":"a","tool_calls":[]}}]}'
+        if self.case == FakeCase.DUPLICATE_CALL_IDS:
+            return b'{"choices":[{"message":{"role":"assistant","tool_calls":[{"id":"same","type":"function","function":{"name":"logs.search","arguments":"{}"}},{"id":"same","type":"function","function":{"name":"logs.search","arguments":"{}"}}]}}]}'
+        if self.case == FakeCase.MALFORMED_ARGUMENTS:
+            return b'{"choices":[{"message":{"role":"assistant","tool_calls":[{"id":"call-1","type":"function","function":{"name":"logs.search","arguments":"{"}}]}}]}'
+        return response
 
     def script(self) -> tuple[int, bytes, str | None, int | None, float, bool]:
         case = self.case
