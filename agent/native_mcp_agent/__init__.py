@@ -19,7 +19,8 @@ from .contracts import (
 )
 from .errors import ClassifiedFailure, FailureClass, ProviderError
 from .limits import DEFAULT_LIMITS, Limits
-from .mcp_orchestrator import CancellationToken, McpStdioClient, Orchestrator, OrchestrationOutcome, ScriptedProvider
+from .mcp_orchestrator import BoundedProvider, CancellationToken, McpStdioClient, Orchestrator, OrchestrationOutcome, ScriptedProvider
+from .openai_compatible import OpenAICompatibleConfig, OpenAICompatibleProvider, OpenAICompatibleTransport, SyntheticFixture, openai_request_bytes, parse_openai_compatible_response, synthetic_fixture_message
 
 __all__ = [
     "AdvertisedTool",
@@ -47,4 +48,12 @@ __all__ = [
     "Orchestrator",
     "OrchestrationOutcome",
     "ScriptedProvider",
+    "BoundedProvider",
+    "OpenAICompatibleConfig",
+    "OpenAICompatibleProvider",
+    "OpenAICompatibleTransport",
+    "SyntheticFixture",
+    "synthetic_fixture_message",
+    "openai_request_bytes",
+    "parse_openai_compatible_response",
 ]

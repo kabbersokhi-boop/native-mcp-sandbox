@@ -78,8 +78,19 @@ class CancellationToken:
 class ProviderTurn(Protocol):
     def turn(self, request: ProviderRequest, evidence: tuple[Evidence, ...], *, timeout_ms: int, cancellation: Cancellation | None) -> ProviderFinalMessage | Sequence[ProviderToolCallProposal]: ...
 
+class BoundedProvider:
+    """Project-owned marker for the small, bounded provider authority surface.
+
+    The orchestrator intentionally does not accept structural ``.turn``
+    lookalikes.  New providers must inherit this local marker and retain the
+    same result and deadline contract as the deterministic provider below.
+    """
+
+    def turn(self, request: ProviderRequest, evidence: tuple[Evidence, ...], *, timeout_ms: int, cancellation: Cancellation | None) -> ProviderFinalMessage | Sequence[ProviderToolCallProposal]:
+        raise NotImplementedError
+
 @dataclass
-class ScriptedProvider:
+class ScriptedProvider(BoundedProvider):
     """The only Phase 10.2 provider double; it never outlives its budget."""
     responses: tuple[ProviderFinalMessage | Sequence[ProviderToolCallProposal], ...]
     delay_ms: int = 0
@@ -300,7 +311,7 @@ class Orchestrator:
     def __init__(self, client:McpStdioClient, provider:ProviderTurn, *, limits:Limits=DEFAULT_LIMITS, context:str="offline", clock:Callable[[],float]=time.monotonic, cancellation:Cancellation|None=None) -> None:
         # Phase 10.2 deliberately supports only the project-owned deterministic
         # double.  A future live adapter needs a separate authority decision.
-        if not isinstance(provider, ScriptedProvider):
+        if not isinstance(provider, BoundedProvider):
             raise _fail(FailureClass.LOCAL_POLICY_FAILURE, "unbounded provider implementation rejected")
         self.client,self.provider,self.limits,self.context,self.clock,self.cancellation=client,provider,limits,context,clock,cancellation
         self.actions:set[str]=set(); self.call_ids:dict[str,bytes]={}; self.evidence:list[Evidence]=[]; self.order:list[LocalActionIdentity]=[]; self.transcript=Phase10Transcript(limits)

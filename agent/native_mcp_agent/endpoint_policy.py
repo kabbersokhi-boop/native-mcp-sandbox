@@ -74,6 +74,48 @@ def validate_production_endpoint(url: str, *, verify_tls: bool = True) -> Valida
     return ValidatedEndpoint(url, "https", host, host, port, path, False)
 
 
+def resolve_production_transport_endpoint(
+    endpoint: ValidatedEndpoint,
+    *,
+    resolver: Resolver = socket.getaddrinfo,
+) -> ValidatedEndpoint:
+    """Re-resolve a production authority immediately before TLS connect.
+
+    This is deliberately adjacent to, rather than a replacement for, the
+    pure configuration-time policy.  It prevents a hostname from becoming a
+    loopback/private destination between validation and socket creation while
+    retaining the hostname for TLS SNI and certificate verification.
+    """
+    try:
+        checked = validate_production_endpoint(endpoint.url, verify_tls=True)
+        if (
+            endpoint != checked or endpoint.connect_host != endpoint.host
+            or endpoint.loopback_only is not False
+        ):
+            raise ValueError
+        records = list(resolver(checked.host, checked.port, socket.AF_UNSPEC, socket.SOCK_STREAM))
+    except ProviderError:
+        raise
+    except (OSError, ValueError, TypeError):
+        raise ProviderError(failure(FailureClass.DNS_OR_CONNECTION_FAILURE, "production endpoint resolution failed")) from None
+    addresses: list[str] = []
+    try:
+        for family, _socktype, _proto, _canonname, sockaddr in records:
+            if family not in {socket.AF_INET, socket.AF_INET6}:
+                raise ValueError
+            address = ipaddress.ip_address(str(sockaddr[0]))
+            # A provider address must be globally routable.  Reject an answer
+            # set if *any* record is local so selection cannot be gamed.
+            if not address.is_global:
+                raise ValueError
+            addresses.append(str(address))
+    except (IndexError, ValueError, TypeError):
+        raise ProviderError(failure(FailureClass.ENDPOINT_POLICY_REJECTION, "production endpoint destination is disallowed")) from None
+    if not addresses:
+        raise ProviderError(failure(FailureClass.DNS_OR_CONNECTION_FAILURE, "production endpoint resolution failed"))
+    return ValidatedEndpoint(checked.url, checked.scheme, checked.host, addresses[0], checked.port, checked.path, False)
+
+
 def _is_loopback_address(value: object) -> bool:
     try:
         return ipaddress.ip_address(str(value)).is_loopback
