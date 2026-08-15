@@ -26,16 +26,15 @@ The server does not add these capabilities:
 - networking
 - MCP tasks
 
-## Phase 10 planning status
+## Phase 10.4 adapter status
 
-Phase 10 is planning-only through PR #13. No Phase 10 implementation,
-provider client, HTTP transport, networking, credentials, fake-provider
-implementation, or new MCP tool exists in this repository. The planned agent
-will remain outside the native server, which stays stdio-only, network-free,
-credential-free, and unchanged in authority. Provider endpoint and model will
-remain configurable. Normal CI will remain offline and credential-free; a live
-provider smoke, if later implemented, will be manual, synthetic, redacted,
-non-gating, and deferred until PRs 10.1–10.3 pass.
+PR #20 implements the optional OpenAI-compatible adapter in the external
+Python agent. It uses a bounded non-streaming HTTP transport with configurable
+endpoint and model, verified HTTPS for production credentials, and a
+credential-free loopback fake-provider path. The native server remains
+stdio-only, network-free, credential-free, and unchanged in authority; no MCP
+tool was added. Normal CI remains offline and credential-free. The live
+provider smoke is opt-in, synthetic, redacted, observational, and non-gating.
 
 Phase 8 adds a demonstration client.
 The client uses the existing tools only.

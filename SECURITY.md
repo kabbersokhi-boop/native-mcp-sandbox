@@ -13,8 +13,11 @@ process-memory tools.
 
 The immutable `v0.10.0` tag contains the historical stale compiled version
 identifier `0.9.0`. `v0.10.1` is the correction release at the tag target above.
-Phase 10 is currently planning-only through PR #13; no Phase 10 implementation,
-provider client, networking, credentials, or new MCP tool exists yet.
+Phase 10.4 adds an optional bounded OpenAI-compatible adapter only in the
+external Python agent. The native C++ server remains stdio-only, network-free,
+credential-free, and exposes no new MCP tool. Production credentials are
+restricted to verified-HTTPS adapter execution; normal CI remains offline and
+credential-free.
 
 The security scope includes these areas:
 

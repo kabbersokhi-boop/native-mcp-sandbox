@@ -17,9 +17,10 @@ The answer in this repository is a small native server with a deliberately narro
 The latest tagged release is **v0.10.1**, at commit
 `2e19b5b6a14f5fbe26c5b4094c1750c6c5205db1`. Phases 0–9 are complete. The
 immutable **v0.10.0** release remains available as historical context; v0.10.1
-is the correction release. Phase 10 is currently planning-only through PR #13.
-No Phase 10 implementation, provider client, networking, credentials, or new
-MCP tools exist yet.
+is the correction release. Phase 10.4 is implemented in PR #20 as an optional,
+bounded OpenAI-compatible adapter in the external Python agent. The native C++
+server remains stdio-only, network-free, credential-free, and exposes no new
+MCP tools.
 
 ## Why this project exists
 
@@ -324,8 +325,11 @@ docs/FUZZING.md                         Native fuzzing and triage guide
 - Phases 0–9: complete; `v0.10.0` remains immutable historical release state
   and `v0.10.1` is the current correction release at
   `2e19b5b6a14f5fbe26c5b4094c1750c6c5205db1`.
-- Phase 10: planning-only through PR #13. No implementation, provider client,
-  networking, credentials, or new MCP tool has been added.
+- Phase 10.4: PR #20 implements the optional, bounded OpenAI-compatible
+  adapter in the external Python agent. The native server remains unchanged in
+  authority: stdio-only, network-free, credential-free, and with no new MCP
+  tools. Normal CI remains offline and credential-free; the live smoke is
+  manual, synthetic, redacted, non-gating, and observational.
 
 Each phase is developed as a bounded, reviewable increment. New authority requires an explicit threat-model decision.
 
