@@ -23,9 +23,9 @@ from agent.native_mcp_agent.errors import FailureClass, ProviderError, failure  
 from agent.native_mcp_agent.limits import DEFAULT_LIMITS  # noqa: E402
 from agent.native_mcp_agent.mcp_orchestrator import BoundedProvider, Orchestrator, McpStdioClient, ScriptedProvider  # noqa: E402
 from agent.native_mcp_agent.openai_compatible import (  # noqa: E402
-    AuthorizedSyntheticMessage, OpenAICompatibleConfig, OpenAICompatibleProvider, OpenAICompatibleTransport,
-    authorized_synthetic_message,
+    OpenAICompatibleConfig, OpenAICompatibleProvider, OpenAICompatibleTransport, SyntheticFixture,
     openai_request_bytes, parse_openai_compatible_response,
+    synthetic_fixture_message,
 )
 from fake_provider import FakeCase, FakeProviderServer  # noqa: E402
 from scripts.phase_10_4_openai_smoke import build_synthetic_smoke_request  # noqa: E402
@@ -39,7 +39,7 @@ SENTINEL = "PHASE10_4_CREDENTIAL_SENTINEL_NOT_LEAKED"
 
 
 def request() -> ProviderRequest:
-    return ProviderRequest("synthetic-model", (authorized_synthetic_message(MessageRole.USER, "synthetic-only prompt"),), TOOLS, 32, RequestCorrelationId("req-10-4"))
+    return ProviderRequest("synthetic-model", (synthetic_fixture_message(SyntheticFixture.PHASE_10_4_TEST_PROMPT),), TOOLS, 32, RequestCorrelationId("req-10-4"))
 
 
 def config(endpoint: str, **changes: object) -> OpenAICompatibleConfig:
@@ -83,18 +83,16 @@ class ConfigAndMappingTests(unittest.TestCase):
         with self.assertRaises(ProviderError):
             openai_request_bytes(ProviderRequest("different", request().messages, TOOLS, 32, RequestCorrelationId("req-10-4-1")), cfg)
 
-    def test_synthetic_only_rejects_unmarked_content_and_unissued_marker(self) -> None:
+    def test_synthetic_only_rejects_unmarked_content_and_closed_fixture_rejects_arbitrary_strings(self) -> None:
         cfg = config("http://127.0.0.1:1/v1/chat/completions")
-        for message in (
-            ProviderMessage(MessageRole.USER, "arbitrary host evidence"),
-            AuthorizedSyntheticMessage(MessageRole.USER, "ordinary string cannot issue authorization"),
-            replace(authorized_synthetic_message(MessageRole.USER, "a copied authorization is not an egress capability")),
-        ):
-            with self.subTest(message_type=type(message).__name__):
-                unmarked = ProviderRequest("synthetic-model", (message,), TOOLS, 32, RequestCorrelationId("req-10-4"))
-                with self.assertRaises(ProviderError) as raised:
-                    openai_request_bytes(unmarked, cfg)
-                self.assertEqual(raised.exception.failure.classification, FailureClass.LOCAL_AUTHORIZATION_FAILURE)
+        unmarked = ProviderRequest("synthetic-model", (ProviderMessage(MessageRole.USER, "arbitrary host evidence"),), TOOLS, 32, RequestCorrelationId("req-10-4"))
+        with self.assertRaises(ProviderError) as raised:
+            openai_request_bytes(unmarked, cfg)
+        self.assertEqual(raised.exception.failure.classification, FailureClass.LOCAL_AUTHORIZATION_FAILURE)
+        for forged_fixture in ("arbitrary host evidence", (MessageRole.USER, "arbitrary host evidence")):
+            with self.subTest(forged_fixture=forged_fixture), self.assertRaises(ProviderError) as raised:
+                synthetic_fixture_message(forged_fixture)  # type: ignore[arg-type]
+            self.assertEqual(raised.exception.failure.classification, FailureClass.LOCAL_AUTHORIZATION_FAILURE)
 
     def test_authorized_synthetic_content_succeeds_with_deterministic_serialization(self) -> None:
         cfg = config("http://127.0.0.1:1/v1/chat/completions")
@@ -106,7 +104,6 @@ class ConfigAndMappingTests(unittest.TestCase):
     def test_manual_synthetic_smoke_uses_authorized_egress_path(self) -> None:
         cfg = config("http://127.0.0.1:1/v1/chat/completions")
         smoke_request = build_synthetic_smoke_request(cfg)
-        self.assertIsInstance(smoke_request.messages[0], AuthorizedSyntheticMessage)
         self.assertIn(b"Return a short synthetic acknowledgement.", openai_request_bytes(smoke_request, cfg))
 
     def test_endpoint_policy_rejects_http_production_userinfo_fragment_and_disabled_tls(self) -> None:

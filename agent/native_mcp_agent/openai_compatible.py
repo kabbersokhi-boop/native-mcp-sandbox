@@ -8,6 +8,7 @@ to the serial orchestrator.
 from __future__ import annotations
 
 from dataclasses import dataclass, field, fields, replace
+from enum import Enum
 import http.client
 import json
 import os
@@ -39,7 +40,7 @@ _JSON_CONTENT_TYPE = "application/json"
 
 
 @dataclass(frozen=True)
-class AuthorizedSyntheticMessage(ProviderMessage):
+class _AuthorizedSyntheticMessage(ProviderMessage):
     """A provider message issued by this project's synthetic-egress authority.
 
     The marker is deliberately non-serializable and has no caller-supplied
@@ -50,28 +51,55 @@ class AuthorizedSyntheticMessage(ProviderMessage):
     _synthetic_authorization: object | None = field(default=None, init=False, repr=False, compare=False)
 
 
+class SyntheticFixture(Enum):
+    """Closed project-owned content permitted by Phase 10.4 synthetic-only egress.
+
+    Values are intentionally committed constants rather than caller-supplied
+    strings. Adding a fixture is an explicit project code change subject to
+    review; an arbitrary host string cannot obtain outbound authority.
+    """
+
+    PHASE_10_4_TEST_PROMPT = (MessageRole.USER, "synthetic-only prompt")
+    PHASE_10_4_MANUAL_SMOKE_PROMPT = (MessageRole.USER, "Return a short synthetic acknowledgement.")
+
+    @property
+    def role(self) -> MessageRole:
+        return self.value[0]
+
+    @property
+    def content(self) -> str:
+        return self.value[1]
+
+
 def _synthetic_message_authority() -> tuple[
-    Callable[[MessageRole, str], AuthorizedSyntheticMessage],
+    Callable[[SyntheticFixture], _AuthorizedSyntheticMessage],
     Callable[[ProviderMessage], bool],
 ]:
     """Keep the capability identity private to the project-owned factory."""
     issuer = object()
 
-    def authorize(role: MessageRole, content: str) -> AuthorizedSyntheticMessage:
-        message = AuthorizedSyntheticMessage(role, content)
+    def authorize(fixture: SyntheticFixture) -> _AuthorizedSyntheticMessage:
+        if type(fixture) is not SyntheticFixture:
+            raise ProviderError(failure(FailureClass.LOCAL_AUTHORIZATION_FAILURE, "synthetic fixture is not project-authorized"))
+        message = _AuthorizedSyntheticMessage(fixture.role, fixture.content)
         object.__setattr__(message, "_synthetic_authorization", issuer)
         return message
 
     def is_authorized(message: ProviderMessage) -> bool:
         return (
-            type(message) is AuthorizedSyntheticMessage
+            type(message) is _AuthorizedSyntheticMessage
             and message._synthetic_authorization is issuer
         )
 
     return authorize, is_authorized
 
 
-authorized_synthetic_message, _is_authorized_synthetic_message = _synthetic_message_authority()
+_authorize_synthetic_message, _is_authorized_synthetic_message = _synthetic_message_authority()
+
+
+def synthetic_fixture_message(fixture: SyntheticFixture) -> ProviderMessage:
+    """Mint a message only from a closed, project-owned synthetic fixture."""
+    return _authorize_synthetic_message(fixture)
 
 
 def _closed_config(value: Mapping[str, Any]) -> Mapping[str, Any]:
@@ -308,7 +336,7 @@ class OpenAICompatibleTransport:
             self.sleep(decision.delay_ms / 1000.0)
         raise ProviderError(failure(FailureClass.RETRY_EXHAUSTED, "retry budget exhausted"))
 
-    def _one_attempt(self, endpoint: ValidatedEndpoint, body: bytes, credential: str, correlation_id: str, limits: Limits, deadline: float) -> tuple[bytes, str | None, int, int | None]:
+    def _one_attempt(self, endpoint: ValidatedEndpoint, body: bytes, credential: str | None, correlation_id: str, limits: Limits, deadline: float) -> tuple[bytes, str | None, int, int | None]:
         timeout = min(deadline - self.clock(), limits.provider_connect_timeout_ms / 1000.0)
         if timeout <= 0:
             raise ProviderError(failure(FailureClass.CONNECT_TIMEOUT, "connection deadline expired"))

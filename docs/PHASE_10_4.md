@@ -45,9 +45,10 @@ Provider text remains guidance, never evidence.
 All automated tests use the deterministic loopback fake provider and
 synthetic-only prompts/data. Normal CI has no credential or external-network
 requirement. `synthetic-only` is the only accepted data-flow mode: every
-initial outbound message must carry the adapter's immutable project-issued
-synthetic authorization; matching text alone is never sufficient. Later tool
-evidence cannot silently leave the agent.
+initial outbound message must be minted from the adapter's closed, committed
+`SyntheticFixture` set under immutable project-issued authorization. There is
+no public plain-string authorization factory; matching text alone is never
+sufficient. Later tool evidence cannot silently leave the agent.
 
 An operator may run the non-gating manual smoke with explicit endpoint, model,
 credential variable name, and `--enable-synthetic-live`:

@@ -11,10 +11,10 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
-from agent.native_mcp_agent.contracts import MessageRole, ProviderRequest, RequestCorrelationId
+from agent.native_mcp_agent.contracts import ProviderRequest, RequestCorrelationId
 from agent.native_mcp_agent.errors import ProviderError
 from agent.native_mcp_agent.openai_compatible import (
-    OpenAICompatibleConfig, OpenAICompatibleProvider, authorized_synthetic_message,
+    OpenAICompatibleConfig, OpenAICompatibleProvider, SyntheticFixture, synthetic_fixture_message,
 )
 
 
@@ -22,7 +22,7 @@ def build_synthetic_smoke_request(config: OpenAICompatibleConfig) -> ProviderReq
     """Build the smoke prompt through the adapter's project-owned egress path."""
     return ProviderRequest(
         config.model,
-        (authorized_synthetic_message(MessageRole.USER, "Return a short synthetic acknowledgement."),),
+        (synthetic_fixture_message(SyntheticFixture.PHASE_10_4_MANUAL_SMOKE_PROMPT),),
         (),
         32,
         RequestCorrelationId("req-10-4-1"),
