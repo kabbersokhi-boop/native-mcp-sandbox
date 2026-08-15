@@ -9,10 +9,13 @@ credential-free, and exposes no new tools.
 `OpenAICompatibleConfig.from_mapping()` accepts only `endpoint`, `model`,
 `credentialEnv`, `verifyTls`, `allowLoopbackHttp`, `dataFlow`, and the closed
 `limits` object.  Model and endpoint are operator-configurable; no provider,
-endpoint, or model is hard-coded.  `credentialEnv` must be a narrowly named
-`NATIVE_MCP_*` environment variable.  Its value is read only when `turn()` is
-explicitly called, never on import or adapter construction, and is sent only
-as the provider request's HTTP Authorization header.
+endpoint, or model is hard-coded. `credentialEnv` must be a narrowly named
+`NATIVE_MCP_*` environment variable. Its value is read only at explicit
+**production verified-HTTPS** execution, never on import or adapter
+construction, and is sent only as the bounded provider request's HTTP
+Authorization header. The deterministic loopback HTTP path cannot read that
+environment variable and has no credential-bearing transport API or
+Authorization header.
 
 Timeouts, attempt count, retry backoff, Retry-After bound, request byte limit,
 and response byte limit are the existing bounded `Limits` fields. Unknown
@@ -23,11 +26,11 @@ configuration fields and unknown limit names fail closed.
 Production endpoints require verified HTTPS, reject user-info, query/fragment
 forms, redirects, and TLS-verification disablement. The existing endpoint
 policy is reused and production DNS resolution immediately before connection
-rejects non-global addresses. The loopback HTTP exception is test-only and
-requires explicit configuration. HTTP is bounded and non-streaming: requests
-are sized before send, responses are bounded as read, redirects are not
-followed, content type is checked, and errors use the project failure
-taxonomy/retry policy.
+rejects non-global addresses. The loopback HTTP exception is test-only,
+requires explicit configuration, is loopback-only, and is credential-free.
+HTTP is bounded and non-streaming: requests are sized before send, responses
+are bounded as read, redirects are not followed, content type is checked, and
+errors use the project failure taxonomy/retry policy.
 
 The adapter maps only the neutral request fields to a closed
 OpenAI-compatible `chat/completions` request with `stream: false`. It maps a
@@ -41,8 +44,10 @@ Provider text remains guidance, never evidence.
 
 All automated tests use the deterministic loopback fake provider and
 synthetic-only prompts/data. Normal CI has no credential or external-network
-requirement. `synthetic-only` is the only accepted data-flow mode, so later
-tool evidence cannot silently leave the agent.
+requirement. `synthetic-only` is the only accepted data-flow mode: every
+initial outbound message must carry the adapter's immutable project-issued
+synthetic authorization; matching text alone is never sufficient. Later tool
+evidence cannot silently leave the agent.
 
 An operator may run the non-gating manual smoke with explicit endpoint, model,
 credential variable name, and `--enable-synthetic-live`:

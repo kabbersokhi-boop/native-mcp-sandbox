@@ -9,6 +9,7 @@ import os
 import ssl
 import sys
 import unittest
+from unittest.mock import patch
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
@@ -22,10 +23,12 @@ from agent.native_mcp_agent.errors import FailureClass, ProviderError, failure  
 from agent.native_mcp_agent.limits import DEFAULT_LIMITS  # noqa: E402
 from agent.native_mcp_agent.mcp_orchestrator import BoundedProvider, Orchestrator, McpStdioClient, ScriptedProvider  # noqa: E402
 from agent.native_mcp_agent.openai_compatible import (  # noqa: E402
-    OpenAICompatibleConfig, OpenAICompatibleProvider, OpenAICompatibleTransport,
+    AuthorizedSyntheticMessage, OpenAICompatibleConfig, OpenAICompatibleProvider, OpenAICompatibleTransport,
+    authorized_synthetic_message,
     openai_request_bytes, parse_openai_compatible_response,
 )
 from fake_provider import FakeCase, FakeProviderServer  # noqa: E402
+from scripts.phase_10_4_openai_smoke import build_synthetic_smoke_request  # noqa: E402
 
 
 TOOLS = (
@@ -36,7 +39,7 @@ SENTINEL = "PHASE10_4_CREDENTIAL_SENTINEL_NOT_LEAKED"
 
 
 def request() -> ProviderRequest:
-    return ProviderRequest("synthetic-model", (ProviderMessage(MessageRole.USER, "synthetic-only prompt"),), TOOLS, 32, RequestCorrelationId("req-10-4"))
+    return ProviderRequest("synthetic-model", (authorized_synthetic_message(MessageRole.USER, "synthetic-only prompt"),), TOOLS, 32, RequestCorrelationId("req-10-4"))
 
 
 def config(endpoint: str, **changes: object) -> OpenAICompatibleConfig:
@@ -79,6 +82,32 @@ class ConfigAndMappingTests(unittest.TestCase):
         self.assertEqual(raised.exception.failure.classification, FailureClass.REQUEST_TOO_LARGE)
         with self.assertRaises(ProviderError):
             openai_request_bytes(ProviderRequest("different", request().messages, TOOLS, 32, RequestCorrelationId("req-10-4-1")), cfg)
+
+    def test_synthetic_only_rejects_unmarked_content_and_unissued_marker(self) -> None:
+        cfg = config("http://127.0.0.1:1/v1/chat/completions")
+        for message in (
+            ProviderMessage(MessageRole.USER, "arbitrary host evidence"),
+            AuthorizedSyntheticMessage(MessageRole.USER, "ordinary string cannot issue authorization"),
+            replace(authorized_synthetic_message(MessageRole.USER, "a copied authorization is not an egress capability")),
+        ):
+            with self.subTest(message_type=type(message).__name__):
+                unmarked = ProviderRequest("synthetic-model", (message,), TOOLS, 32, RequestCorrelationId("req-10-4"))
+                with self.assertRaises(ProviderError) as raised:
+                    openai_request_bytes(unmarked, cfg)
+                self.assertEqual(raised.exception.failure.classification, FailureClass.LOCAL_AUTHORIZATION_FAILURE)
+
+    def test_authorized_synthetic_content_succeeds_with_deterministic_serialization(self) -> None:
+        cfg = config("http://127.0.0.1:1/v1/chat/completions")
+        first = request()
+        second = request()
+        self.assertEqual(openai_request_bytes(first, cfg), openai_request_bytes(second, cfg))
+        self.assertEqual(json.loads(openai_request_bytes(first, cfg))["messages"], [{"role": "user", "content": "synthetic-only prompt"}])
+
+    def test_manual_synthetic_smoke_uses_authorized_egress_path(self) -> None:
+        cfg = config("http://127.0.0.1:1/v1/chat/completions")
+        smoke_request = build_synthetic_smoke_request(cfg)
+        self.assertIsInstance(smoke_request.messages[0], AuthorizedSyntheticMessage)
+        self.assertIn(b"Return a short synthetic acknowledgement.", openai_request_bytes(smoke_request, cfg))
 
     def test_endpoint_policy_rejects_http_production_userinfo_fragment_and_disabled_tls(self) -> None:
         for endpoint, kwargs, kind in (
@@ -129,16 +158,119 @@ class TransportAndAuthorityTests(unittest.TestCase):
     def _provider(self, server: FakeProviderServer, **changes: object) -> OpenAICompatibleProvider:
         return OpenAICompatibleProvider(config(server.endpoint, **changes))
 
-    def test_loopback_request_credential_is_http_only_and_retry_is_stable(self) -> None:
+    def test_loopback_request_is_credential_free_and_retry_is_stable(self) -> None:
         with FakeProviderServer(FakeCase.RETRY_SUCCESS, openai_compatible=True) as server:
             result = self._provider(server).turn(request(), (), timeout_ms=1_000, cancellation=None)
             self.assertEqual(result.message.content, "synthetic guidance")
             self.assertEqual(server.request_count, 2)
             assert server.request_headers and server.request_bodies
             self.assertEqual([item["x-request-id"] for item in server.request_headers], ["req-10-4", "req-10-4"])
-            self.assertEqual(server.request_headers[0]["authorization"], "Bearer " + SENTINEL)
+            self.assertTrue(all("authorization" not in item for item in server.request_headers))
+            self.assertTrue(all(SENTINEL not in str(item) for item in server.request_headers))
             surfaces = (repr(result), str(server.request_bodies), repr(self._provider(server).config))
             self.assertTrue(all(SENTINEL not in surface for surface in surfaces))
+
+    def test_loopback_never_reads_configured_credential_environment(self) -> None:
+        class NoCredentialEnvironment:
+            def get(self, _name: object, _default: object = None) -> object:
+                raise AssertionError("loopback HTTP must not read configured credentials")
+
+        with FakeProviderServer(FakeCase.FINAL, openai_compatible=True) as server:
+            provider = self._provider(server)
+            with patch("agent.native_mcp_agent.openai_compatible.os.environ", NoCredentialEnvironment()):
+                result = provider.turn(request(), (), timeout_ms=1_000, cancellation=None)
+            self.assertEqual(result.message.content, "synthetic guidance")
+            assert server.request_headers
+            self.assertNotIn("authorization", server.request_headers[0])
+
+    def test_production_transport_is_the_only_credential_bearing_path(self) -> None:
+        class RecordingTransport(OpenAICompatibleTransport):
+            def __init__(self) -> None:
+                super().__init__()
+                self.credentials: list[str] = []
+
+            def send_production(self, endpoint: ValidatedEndpoint, body: bytes, credential: str, **kwargs: object) -> bytes:
+                if endpoint.scheme != "https" or kwargs["correlation_id"] != "req-10-4":
+                    raise AssertionError("production credential was not confined to verified HTTPS")
+                self.credentials.append(credential)
+                return b'{"choices":[{"message":{"role":"assistant","content":"synthetic guidance"}}]}'
+
+        transport = RecordingTransport()
+        provider = OpenAICompatibleProvider(
+            config("https://provider.example/v1/chat/completions", allow_loopback_http=False),
+            transport,
+        )
+        result = provider.turn(request(), (), timeout_ms=1_000, cancellation=None)
+        self.assertEqual(result.message.content, "synthetic guidance")
+        self.assertEqual(transport.credentials, [SENTINEL])
+        loopback = ValidatedEndpoint("http://127.0.0.1:1/v1", "http", "127.0.0.1", "127.0.0.1", 1, "/v1", True)
+        with self.assertRaises(ProviderError) as raised:
+            OpenAICompatibleTransport().send_production(loopback, b"{}", SENTINEL, limits=DEFAULT_LIMITS, correlation_id="req-10-4")
+        self.assertEqual(raised.exception.failure.classification, FailureClass.ENDPOINT_POLICY_REJECTION)
+
+    def test_verified_https_serializes_credential_only_as_authorization_header(self) -> None:
+        response_body = b'{"choices":[{"message":{"role":"assistant","content":"synthetic guidance"}}]}'
+
+        class CapturingSocket:
+            def settimeout(self, _timeout: float) -> None:
+                return
+
+        class CapturingResponse:
+            status = 200
+
+            def __init__(self) -> None:
+                self._remaining = response_body
+
+            def getheader(self, name: str) -> str | None:
+                return {
+                    "Content-Type": "application/json",
+                    "Content-Length": str(len(response_body)),
+                }.get(name)
+
+            def read(self, _size: int) -> bytes:
+                chunk, self._remaining = self._remaining, b""
+                return chunk
+
+        class CapturingConnection:
+            def __init__(self) -> None:
+                self.sock = CapturingSocket()
+                self.headers: dict[str, str] | None = None
+
+            def connect(self) -> None:
+                return
+
+            def request(self, method: str, path: str, *, body: bytes, headers: dict[str, str]) -> None:
+                self.headers = dict(headers)
+                self.method, self.path, self.body = method, path, body
+
+            def getresponse(self) -> CapturingResponse:
+                return CapturingResponse()
+
+            def close(self) -> None:
+                return
+
+        endpoint = ValidatedEndpoint("https://provider.example/v1", "https", "provider.example", "203.0.113.1", 443, "/v1", False)
+        connection = CapturingConnection()
+        with patch("agent.native_mcp_agent.openai_compatible._VerifiedHTTPSConnection", return_value=connection), patch(
+            "agent.native_mcp_agent.openai_compatible.resolve_production_transport_endpoint", return_value=endpoint,
+        ):
+            self.assertEqual(
+                OpenAICompatibleTransport().send_production(endpoint, b"{}", SENTINEL, limits=DEFAULT_LIMITS, correlation_id="req-10-4"),
+                response_body,
+            )
+        assert connection.headers is not None
+        self.assertEqual(connection.headers["Authorization"], "Bearer " + SENTINEL)
+        self.assertEqual(
+            [name for name, value in connection.headers.items() if SENTINEL in value],
+            ["Authorization"],
+        )
+
+    def test_synthetic_only_rejects_later_mcp_evidence_before_transmission(self) -> None:
+        with FakeProviderServer(FakeCase.FINAL, openai_compatible=True) as server:
+            with self.assertRaises(ProviderError) as raised:
+                self._provider(server).turn(request(), (object(),), timeout_ms=1_000, cancellation=None)  # type: ignore[arg-type]
+            self.assertEqual(raised.exception.failure.classification, FailureClass.LOCAL_POLICY_FAILURE)
+            self.assertEqual(server.request_count, 0)
 
     def test_status_redirect_content_and_timeouts_are_classified(self) -> None:
         expected = {
@@ -166,7 +298,7 @@ class TransportAndAuthorityTests(unittest.TestCase):
 
     def test_missing_credential_no_eager_load_tls_and_authority_marker(self) -> None:
         os.environ.pop("NATIVE_MCP_PHASE10_4_TOKEN", None)
-        cfg = config("http://127.0.0.1:1/v1/chat/completions")
+        cfg = config("https://provider.example/v1/chat/completions", allow_loopback_http=False)
         provider = OpenAICompatibleProvider(cfg)
         with self.assertRaises(ProviderError) as raised:
             provider.turn(request(), (), timeout_ms=10, cancellation=None)
@@ -180,9 +312,10 @@ class TransportAndAuthorityTests(unittest.TestCase):
             def _one_attempt(self, *_args: object, **_kwargs: object):
                 raise ssl.SSLCertVerificationError("withheld")
         os.environ["NATIVE_MCP_PHASE10_4_TOKEN"] = SENTINEL
-        endpoint = ValidatedEndpoint("http://127.0.0.1:1/v1", "http", "127.0.0.1", "127.0.0.1", 1, "/v1", True)
+        endpoint = ValidatedEndpoint("https://provider.example/v1", "https", "provider.example", "203.0.113.1", 443, "/v1", False)
         with self.assertRaises(ProviderError) as tls:
-            CertFailure().send(endpoint, b"{}", SENTINEL, limits=DEFAULT_LIMITS, correlation_id="req-10-4")
+            with patch("agent.native_mcp_agent.openai_compatible.resolve_production_transport_endpoint", return_value=endpoint):
+                CertFailure().send_production(endpoint, b"{}", SENTINEL, limits=DEFAULT_LIMITS, correlation_id="req-10-4")
         self.assertEqual(tls.exception.failure.classification, FailureClass.TLS_VERIFICATION_FAILURE)
 
 

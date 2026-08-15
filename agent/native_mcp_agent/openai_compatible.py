@@ -7,7 +7,7 @@ to the serial orchestrator.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, fields, replace
+from dataclasses import dataclass, field, fields, replace
 import http.client
 import json
 import os
@@ -36,6 +36,42 @@ from .transport import _retry_after
 
 _CREDENTIAL_ENV = re.compile(r"^NATIVE_MCP_[A-Z0-9_]{1,96}$")
 _JSON_CONTENT_TYPE = "application/json"
+
+
+@dataclass(frozen=True)
+class AuthorizedSyntheticMessage(ProviderMessage):
+    """A provider message issued by this project's synthetic-egress authority.
+
+    The marker is deliberately non-serializable and has no caller-supplied
+    constructor argument.  Plain ``ProviderMessage`` values, including values
+    with identical text, do not carry this authority.
+    """
+
+    _synthetic_authorization: object | None = field(default=None, init=False, repr=False, compare=False)
+
+
+def _synthetic_message_authority() -> tuple[
+    Callable[[MessageRole, str], AuthorizedSyntheticMessage],
+    Callable[[ProviderMessage], bool],
+]:
+    """Keep the capability identity private to the project-owned factory."""
+    issuer = object()
+
+    def authorize(role: MessageRole, content: str) -> AuthorizedSyntheticMessage:
+        message = AuthorizedSyntheticMessage(role, content)
+        object.__setattr__(message, "_synthetic_authorization", issuer)
+        return message
+
+    def is_authorized(message: ProviderMessage) -> bool:
+        return (
+            type(message) is AuthorizedSyntheticMessage
+            and message._synthetic_authorization is issuer
+        )
+
+    return authorize, is_authorized
+
+
+authorized_synthetic_message, _is_authorized_synthetic_message = _synthetic_message_authority()
 
 
 def _closed_config(value: Mapping[str, Any]) -> Mapping[str, Any]:
@@ -104,6 +140,10 @@ def openai_request_bytes(request: ProviderRequest, config: OpenAICompatibleConfi
     """Map only the provider-neutral contract into OpenAI-compatible JSON."""
     if not isinstance(request, ProviderRequest) or request.model != config.model:
         raise ProviderError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "provider request model does not match configured model"))
+    # Phase 10.4 has only a synthetic-only egress mode.  The authorization is
+    # an opaque project capability, never an inference from message text.
+    if any(not _is_authorized_synthetic_message(message) for message in request.messages):
+        raise ProviderError(failure(FailureClass.LOCAL_AUTHORIZATION_FAILURE, "synthetic-only request is not project-authorized"))
     # Reapply all local cardinality/schema/byte checks before mapping.
     request.to_json_bytes(config.limits)
     tools = [
@@ -193,7 +233,22 @@ class OpenAICompatibleTransport:
     def __init__(self, *, sleep: Callable[[float], None] = time.sleep, clock: Callable[[], float] = time.monotonic) -> None:
         self.sleep, self.clock = sleep, clock
 
-    def send(self, endpoint: ValidatedEndpoint, body: bytes, credential: str, *, limits: Limits, correlation_id: str, deadline: float | None = None) -> bytes:
+    def send_production(self, endpoint: ValidatedEndpoint, body: bytes, credential: str, *, limits: Limits, correlation_id: str, deadline: float | None = None) -> bytes:
+        """Send a credential-bearing request only to a verified HTTPS endpoint."""
+        if not isinstance(endpoint, ValidatedEndpoint) or endpoint.loopback_only or endpoint.scheme != "https":
+            raise ProviderError(failure(FailureClass.ENDPOINT_POLICY_REJECTION, "credential transport requires production HTTPS"))
+        if not isinstance(credential, str) or not credential:
+            raise ProviderError(failure(FailureClass.CREDENTIAL_UNAVAILABLE, "credential is unavailable"))
+        return self._send(endpoint, body, credential, limits=limits, correlation_id=correlation_id, deadline=deadline)
+
+    def send_loopback(self, endpoint: ValidatedEndpoint, body: bytes, *, limits: Limits, correlation_id: str, deadline: float | None = None) -> bytes:
+        """Send an explicitly test-only loopback request without credentials."""
+        if not isinstance(endpoint, ValidatedEndpoint) or endpoint.loopback_only is not True:
+            raise ProviderError(failure(FailureClass.ENDPOINT_POLICY_REJECTION, "credential-free transport requires loopback HTTP"))
+        validate_loopback_transport_endpoint(endpoint)
+        return self._send(endpoint, body, None, limits=limits, correlation_id=correlation_id, deadline=deadline)
+
+    def _send(self, endpoint: ValidatedEndpoint, body: bytes, credential: str | None, *, limits: Limits, correlation_id: str, deadline: float | None = None) -> bytes:
         if not isinstance(body, bytes) or len(body) > limits.provider_request_bytes:
             raise ProviderError(failure(FailureClass.REQUEST_TOO_LARGE, "request exceeds byte limit"))
         if not isinstance(correlation_id, str) or not correlation_id.startswith("req-"):
@@ -202,6 +257,10 @@ class OpenAICompatibleTransport:
             raise ProviderError(failure(FailureClass.ENDPOINT_POLICY_REJECTION, "provider endpoint is invalid"))
         if endpoint.loopback_only:
             validate_loopback_transport_endpoint(endpoint)
+            if credential is not None:
+                raise ProviderError(failure(FailureClass.LOCAL_POLICY_FAILURE, "loopback transport forbids credentials"))
+        elif not isinstance(credential, str) or not credential:
+            raise ProviderError(failure(FailureClass.CREDENTIAL_UNAVAILABLE, "credential is unavailable"))
         now = self.clock()
         deadline_at = now + limits.provider_total_timeout_ms / 1000.0
         if deadline is not None:
@@ -264,7 +323,7 @@ class OpenAICompatibleTransport:
             except (socket.timeout, TimeoutError):
                 raise ProviderError(failure(FailureClass.CONNECT_TIMEOUT, "connection timed out")) from None
             headers = {"Accept": _JSON_CONTENT_TYPE, "Content-Type": _JSON_CONTENT_TYPE, "Content-Length": str(len(body)), "X-Request-ID": correlation_id}
-            if credential:
+            if credential is not None:
                 headers["Authorization"] = "Bearer " + credential
             connection.request("POST", endpoint.path, body=body, headers=headers)
             self._set_read_timeout(connection, deadline, limits)
@@ -331,6 +390,23 @@ class OpenAICompatibleProvider(BoundedProvider):
         # never silently become provider input on later turns.
         if evidence:
             raise ProviderError(failure(FailureClass.LOCAL_POLICY_FAILURE, "synthetic-only provider rejects evidence"))
+        endpoint = self.config.validated_endpoint()
+        body = openai_request_bytes(request, self.config)
+        deadline = time.monotonic() + timeout_ms / 1000.0
+        assert self.transport is not None
+        if endpoint.loopback_only:
+            # This branch deliberately has no reference to the configured
+            # credential source.  The test harness cannot read or transmit it.
+            raw = self.transport.send_loopback(endpoint, body, limits=self.config.limits, correlation_id=str(request.correlation_id), deadline=deadline)
+        else:
+            credential = self._load_production_credential()
+            raw = self.transport.send_production(endpoint, body, credential, limits=self.config.limits, correlation_id=str(request.correlation_id), deadline=deadline)
+        if cancellation is not None and cancellation.is_set():
+            raise ProviderError(failure(FailureClass.CANCELLED, "provider cancelled"))
+        return parse_openai_compatible_response(raw, advertised_tools=request.tools, limits=self.config.limits)
+
+    def _load_production_credential(self) -> str:
+        """Load the configured credential at explicit verified-HTTPS execution only."""
         credential = os.environ.get(self.config.credential_env)
         if (
             not isinstance(credential, str) or not credential
@@ -338,11 +414,4 @@ class OpenAICompatibleProvider(BoundedProvider):
             or any(ord(char) < 0x20 or ord(char) == 0x7f for char in credential)
         ):
             raise ProviderError(failure(FailureClass.CREDENTIAL_UNAVAILABLE, "credential is unavailable"))
-        body = openai_request_bytes(request, self.config)
-        endpoint = self.config.validated_endpoint()
-        deadline = time.monotonic() + timeout_ms / 1000.0
-        assert self.transport is not None
-        raw = self.transport.send(endpoint, body, credential, limits=self.config.limits, correlation_id=str(request.correlation_id), deadline=deadline)
-        if cancellation is not None and cancellation.is_set():
-            raise ProviderError(failure(FailureClass.CANCELLED, "provider cancelled"))
-        return parse_openai_compatible_response(raw, advertised_tools=request.tools, limits=self.config.limits)
+        return credential
