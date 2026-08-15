@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import copy
 from dataclasses import replace
 import json
 import os
@@ -86,15 +87,9 @@ class ConfigAndMappingTests(unittest.TestCase):
     def test_synthetic_only_rejects_unmarked_content_and_closed_fixture_rejects_arbitrary_strings(self) -> None:
         cfg = config("http://127.0.0.1:1/v1/chat/completions")
         authorized = synthetic_fixture_message(SyntheticFixture.PHASE_10_4_TEST_PROMPT)
-        tampered = synthetic_fixture_message(SyntheticFixture.PHASE_10_4_TEST_PROMPT)
-        object.__setattr__(tampered, "content", "arbitrary host evidence")
-        role_tampered = synthetic_fixture_message(SyntheticFixture.PHASE_10_4_TEST_PROMPT)
-        object.__setattr__(role_tampered, "role", MessageRole.ASSISTANT)
         for message in (
             ProviderMessage(MessageRole.USER, "arbitrary host evidence"),
             replace(authorized),
-            tampered,
-            role_tampered,
         ):
             with self.subTest(message_type=type(message).__name__):
                 unmarked = ProviderRequest("synthetic-model", (message,), TOOLS, 32, RequestCorrelationId("req-10-4"))
@@ -105,6 +100,34 @@ class ConfigAndMappingTests(unittest.TestCase):
             with self.subTest(forged_fixture=forged_fixture), self.assertRaises(ProviderError) as raised:
                 synthetic_fixture_message(forged_fixture)  # type: ignore[arg-type]
             self.assertEqual(raised.exception.failure.classification, FailureClass.LOCAL_AUTHORIZATION_FAILURE)
+
+    def test_synthetic_authorization_rejects_copies_and_message_or_fixture_mutation(self) -> None:
+        cfg = config("http://127.0.0.1:1/v1/chat/completions")
+        content_tampered = synthetic_fixture_message(SyntheticFixture.PHASE_10_4_TEST_PROMPT)
+        object.__setattr__(content_tampered, "content", "arbitrary host evidence")
+        role_tampered = synthetic_fixture_message(SyntheticFixture.PHASE_10_4_TEST_PROMPT)
+        object.__setattr__(role_tampered, "role", MessageRole.ASSISTANT)
+        copied = copy.copy(synthetic_fixture_message(SyntheticFixture.PHASE_10_4_TEST_PROMPT))
+        for message in (content_tampered, role_tampered, copied):
+            with self.subTest(message_type=type(message).__name__):
+                forged = ProviderRequest("synthetic-model", (message,), TOOLS, 32, RequestCorrelationId("req-10-4"))
+                with self.assertRaises(ProviderError) as raised:
+                    openai_request_bytes(forged, cfg)
+                self.assertEqual(raised.exception.failure.classification, FailureClass.LOCAL_AUTHORIZATION_FAILURE)
+        fixture = SyntheticFixture.PHASE_10_4_TEST_PROMPT
+        issued_before_fixture_mutation = synthetic_fixture_message(fixture)
+        original_value = fixture.value
+        object.__setattr__(fixture, "_value_", (MessageRole.USER, "arbitrary host evidence"))
+        try:
+            with self.assertRaises(ProviderError) as factory_raised:
+                synthetic_fixture_message(fixture)
+            self.assertEqual(factory_raised.exception.failure.classification, FailureClass.LOCAL_AUTHORIZATION_FAILURE)
+            forged = ProviderRequest("synthetic-model", (issued_before_fixture_mutation,), TOOLS, 32, RequestCorrelationId("req-10-4"))
+            with self.assertRaises(ProviderError) as issued_raised:
+                openai_request_bytes(forged, cfg)
+            self.assertEqual(issued_raised.exception.failure.classification, FailureClass.LOCAL_AUTHORIZATION_FAILURE)
+        finally:
+            object.__setattr__(fixture, "_value_", original_value)
 
     def test_authorized_synthetic_content_succeeds_with_deterministic_serialization(self) -> None:
         cfg = config("http://127.0.0.1:1/v1/chat/completions")

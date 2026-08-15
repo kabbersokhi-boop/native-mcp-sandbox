@@ -7,7 +7,7 @@ to the serial orchestrator.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field, fields, replace
+from dataclasses import dataclass, fields, replace
 from enum import Enum
 import http.client
 import json
@@ -16,6 +16,7 @@ import re
 import socket
 import ssl
 import time
+import weakref
 from typing import Any, Callable, Mapping, Sequence
 
 from .contracts import (
@@ -43,14 +44,9 @@ _JSON_CONTENT_TYPE = "application/json"
 class _AuthorizedSyntheticMessage(ProviderMessage):
     """A provider message issued by this project's synthetic-egress authority.
 
-    The marker is deliberately non-serializable and has no caller-supplied
-    constructor argument.  Plain ``ProviderMessage`` values, including values
-    with identical text, do not carry this authority.
+    Its egress authority is held in a private identity registry, never in
+    caller-held fields. Plain or copied values cannot acquire that authority.
     """
-
-    _synthetic_authorization: object | None = field(default=None, init=False, repr=False, compare=False)
-    _synthetic_fixture: SyntheticFixture | None = field(default=None, init=False, repr=False, compare=False)
-
 
 class SyntheticFixture(Enum):
     """Closed project-owned content permitted by Phase 10.4 synthetic-only egress.
@@ -72,35 +68,80 @@ class SyntheticFixture(Enum):
         return self.value[1]
 
 
+@dataclass(frozen=True)
+class _SyntheticFixtureSpec:
+    """Private immutable fixture data used for all synthetic-only egress."""
+
+    fixture: SyntheticFixture
+    expected_fixture_value: tuple[MessageRole, str]
+    message_role: MessageRole
+    wire_role: str
+    content: str
+
+
 def _synthetic_message_authority() -> tuple[
     Callable[[SyntheticFixture], _AuthorizedSyntheticMessage],
-    Callable[[ProviderMessage], bool],
+    Callable[[ProviderMessage], _SyntheticFixtureSpec | None],
 ]:
-    """Keep the capability identity private to the project-owned factory."""
-    issuer = object()
+    """Keep non-transferable issued-message identity private to this module."""
+    committed = {
+        id(SyntheticFixture.PHASE_10_4_TEST_PROMPT): _SyntheticFixtureSpec(
+            SyntheticFixture.PHASE_10_4_TEST_PROMPT,
+            (MessageRole.USER, "synthetic-only prompt"),
+            MessageRole.USER,
+            "user",
+            "synthetic-only prompt",
+        ),
+        id(SyntheticFixture.PHASE_10_4_MANUAL_SMOKE_PROMPT): _SyntheticFixtureSpec(
+            SyntheticFixture.PHASE_10_4_MANUAL_SMOKE_PROMPT,
+            (MessageRole.USER, "Return a short synthetic acknowledgement."),
+            MessageRole.USER,
+            "user",
+            "Return a short synthetic acknowledgement.",
+        ),
+    }
+    issued: dict[int, tuple[weakref.ReferenceType[_AuthorizedSyntheticMessage], _SyntheticFixtureSpec]] = {}
 
-    def authorize(fixture: SyntheticFixture) -> _AuthorizedSyntheticMessage:
+    def committed_fixture(fixture: SyntheticFixture) -> _SyntheticFixtureSpec:
         if type(fixture) is not SyntheticFixture:
             raise ProviderError(failure(FailureClass.LOCAL_AUTHORIZATION_FAILURE, "synthetic fixture is not project-authorized"))
-        message = _AuthorizedSyntheticMessage(fixture.role, fixture.content)
-        object.__setattr__(message, "_synthetic_authorization", issuer)
-        object.__setattr__(message, "_synthetic_fixture", fixture)
+        spec = committed.get(id(fixture))
+        if spec is None or fixture is not spec.fixture or fixture.value != spec.expected_fixture_value:
+            raise ProviderError(failure(FailureClass.LOCAL_AUTHORIZATION_FAILURE, "synthetic fixture was changed or is not project-authorized"))
+        return spec
+
+    def authorize(fixture: SyntheticFixture) -> _AuthorizedSyntheticMessage:
+        spec = committed_fixture(fixture)
+        message = _AuthorizedSyntheticMessage(spec.message_role, spec.content)
+        message_id = id(message)
+
+        def discard(reference: weakref.ReferenceType[_AuthorizedSyntheticMessage]) -> None:
+            current = issued.get(message_id)
+            if current is not None and current[0] is reference:
+                issued.pop(message_id, None)
+
+        issued[message_id] = (weakref.ref(message, discard), spec)
         return message
 
-    def is_authorized(message: ProviderMessage) -> bool:
-        fixture = message._synthetic_fixture if type(message) is _AuthorizedSyntheticMessage else None
-        return (
-            type(message) is _AuthorizedSyntheticMessage
-            and message._synthetic_authorization is issuer
-            and type(fixture) is SyntheticFixture
-            and message.role is fixture.role
-            and message.content == fixture.content
-        )
+    def authorized_fixture(message: ProviderMessage) -> _SyntheticFixtureSpec | None:
+        if type(message) is not _AuthorizedSyntheticMessage:
+            return None
+        entry = issued.get(id(message))
+        if entry is None or entry[0]() is not message:
+            return None
+        spec = entry[1]
+        if (
+            spec.fixture.value != spec.expected_fixture_value
+            or message.role is not spec.message_role
+            or message.content != spec.content
+        ):
+            return None
+        return spec
 
-    return authorize, is_authorized
+    return authorize, authorized_fixture
 
 
-_authorize_synthetic_message, _is_authorized_synthetic_message = _synthetic_message_authority()
+_authorize_synthetic_message, _authorized_synthetic_fixture = _synthetic_message_authority()
 
 
 def synthetic_fixture_message(fixture: SyntheticFixture) -> ProviderMessage:
@@ -175,9 +216,14 @@ def openai_request_bytes(request: ProviderRequest, config: OpenAICompatibleConfi
     if not isinstance(request, ProviderRequest) or request.model != config.model:
         raise ProviderError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "provider request model does not match configured model"))
     # Phase 10.4 has only a synthetic-only egress mode.  The authorization is
-    # an opaque project capability, never an inference from message text.
-    if any(not _is_authorized_synthetic_message(message) for message in request.messages):
-        raise ProviderError(failure(FailureClass.LOCAL_AUTHORIZATION_FAILURE, "synthetic-only request is not project-authorized"))
+    # a private, non-transferable issuance record bound to immutable committed
+    # fixture literals, never an inference from caller-held message text.
+    authorized_messages: list[_SyntheticFixtureSpec] = []
+    for message in request.messages:
+        fixture = _authorized_synthetic_fixture(message)
+        if fixture is None:
+            raise ProviderError(failure(FailureClass.LOCAL_AUTHORIZATION_FAILURE, "synthetic-only request is not project-authorized"))
+        authorized_messages.append(fixture)
     # Reapply all local cardinality/schema/byte checks before mapping.
     request.to_json_bytes(config.limits)
     tools = [
@@ -186,7 +232,7 @@ def openai_request_bytes(request: ProviderRequest, config: OpenAICompatibleConfi
     ]
     value: dict[str, Any] = {
         "model": str(config.model),
-        "messages": [{"role": item.role.value, "content": item.content} for item in request.messages],
+        "messages": [{"role": item.wire_role, "content": item.content} for item in authorized_messages],
         "tools": tools,
         "tool_choice": "auto" if tools else "none",
         "max_tokens": request.max_output_tokens,
