@@ -85,10 +85,22 @@ class ConfigAndMappingTests(unittest.TestCase):
 
     def test_synthetic_only_rejects_unmarked_content_and_closed_fixture_rejects_arbitrary_strings(self) -> None:
         cfg = config("http://127.0.0.1:1/v1/chat/completions")
-        unmarked = ProviderRequest("synthetic-model", (ProviderMessage(MessageRole.USER, "arbitrary host evidence"),), TOOLS, 32, RequestCorrelationId("req-10-4"))
-        with self.assertRaises(ProviderError) as raised:
-            openai_request_bytes(unmarked, cfg)
-        self.assertEqual(raised.exception.failure.classification, FailureClass.LOCAL_AUTHORIZATION_FAILURE)
+        authorized = synthetic_fixture_message(SyntheticFixture.PHASE_10_4_TEST_PROMPT)
+        tampered = synthetic_fixture_message(SyntheticFixture.PHASE_10_4_TEST_PROMPT)
+        object.__setattr__(tampered, "content", "arbitrary host evidence")
+        role_tampered = synthetic_fixture_message(SyntheticFixture.PHASE_10_4_TEST_PROMPT)
+        object.__setattr__(role_tampered, "role", MessageRole.ASSISTANT)
+        for message in (
+            ProviderMessage(MessageRole.USER, "arbitrary host evidence"),
+            replace(authorized),
+            tampered,
+            role_tampered,
+        ):
+            with self.subTest(message_type=type(message).__name__):
+                unmarked = ProviderRequest("synthetic-model", (message,), TOOLS, 32, RequestCorrelationId("req-10-4"))
+                with self.assertRaises(ProviderError) as raised:
+                    openai_request_bytes(unmarked, cfg)
+                self.assertEqual(raised.exception.failure.classification, FailureClass.LOCAL_AUTHORIZATION_FAILURE)
         for forged_fixture in ("arbitrary host evidence", (MessageRole.USER, "arbitrary host evidence")):
             with self.subTest(forged_fixture=forged_fixture), self.assertRaises(ProviderError) as raised:
                 synthetic_fixture_message(forged_fixture)  # type: ignore[arg-type]

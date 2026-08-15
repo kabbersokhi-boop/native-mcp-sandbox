@@ -49,6 +49,7 @@ class _AuthorizedSyntheticMessage(ProviderMessage):
     """
 
     _synthetic_authorization: object | None = field(default=None, init=False, repr=False, compare=False)
+    _synthetic_fixture: SyntheticFixture | None = field(default=None, init=False, repr=False, compare=False)
 
 
 class SyntheticFixture(Enum):
@@ -83,12 +84,17 @@ def _synthetic_message_authority() -> tuple[
             raise ProviderError(failure(FailureClass.LOCAL_AUTHORIZATION_FAILURE, "synthetic fixture is not project-authorized"))
         message = _AuthorizedSyntheticMessage(fixture.role, fixture.content)
         object.__setattr__(message, "_synthetic_authorization", issuer)
+        object.__setattr__(message, "_synthetic_fixture", fixture)
         return message
 
     def is_authorized(message: ProviderMessage) -> bool:
+        fixture = message._synthetic_fixture if type(message) is _AuthorizedSyntheticMessage else None
         return (
             type(message) is _AuthorizedSyntheticMessage
             and message._synthetic_authorization is issuer
+            and type(fixture) is SyntheticFixture
+            and message.role is fixture.role
+            and message.content == fixture.content
         )
 
     return authorize, is_authorized

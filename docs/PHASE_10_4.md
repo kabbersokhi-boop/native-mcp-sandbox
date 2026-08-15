@@ -48,7 +48,8 @@ requirement. `synthetic-only` is the only accepted data-flow mode: every
 initial outbound message must be minted from the adapter's closed, committed
 `SyntheticFixture` set under immutable project-issued authorization. There is
 no public plain-string authorization factory; matching text alone is never
-sufficient. Later tool evidence cannot silently leave the agent.
+sufficient, and a post-issuance role/content mutation invalidates the
+authorization. Later tool evidence cannot silently leave the agent.
 
 An operator may run the non-gating manual smoke with explicit endpoint, model,
 credential variable name, and `--enable-synthetic-live`:
