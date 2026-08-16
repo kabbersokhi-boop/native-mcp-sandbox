@@ -4,42 +4,28 @@ Native MCP Sandbox is designed around a narrow claim: an MCP client can inspect 
 
 This document explains how that claim is tested, what evidence is available, and what the evidence does **not** prove.
 
-## Current implementation baseline
+## Current release evidence
 
-The completed Phase 10 implementation is on `main` at merge commit:
+Project version `v0.11.0` includes the completed Phase 10 implementation: provider-neutral contracts, bounded serial MCP orchestration, deterministic adversarial assurance and the optional OpenAI-compatible adapter. When published, its immutable release tag and GitHub Release identify the exact source commit and validation context.
 
-```text
-6125964b03e76277f42df1d60c52933e7ce0e861
-```
+The earlier Phase 10.4 exact-head run, `31915393822`, completed successfully across all five required CI jobs before this release pass. It is useful historical evidence for that exact head, not a substitute for release-head validation.
 
-The reviewed Phase 10.4 head was:
+## Claim → mechanism → evidence
 
-```text
-ee663aa0904862495ed75e7722b455117d6c3afc
-```
+| Claim | Mechanism | Evidence |
+| --- | --- | --- |
+| Native server has no networking surface | Stdio-only native architecture; provider adapter is external | [`ARCHITECTURE.md`](../ARCHITECTURE.md), [ADR 0013](adr/0013-external-model-client-boundary.md), source review of `src/` |
+| Client cannot select raw file paths or PIDs | Operator policy maps aliases to roots and processes | [`tests/file_policy_tests.cpp`](../tests/file_policy_tests.cpp), [`tests/process_memory_tests.cpp`](../tests/process_memory_tests.cpp) |
+| Strict file access is contained below a root | `openat2` resolve restrictions and retained descriptors | [`src/file_policy.cpp`](../src/file_policy.cpp), [`tests/security_regression_tests.cpp`](../tests/security_regression_tests.cpp) |
+| Strict process identity is pinned | Same-UID checks, retained proc directory, start-time validation and pidfd | [`src/process_memory.cpp`](../src/process_memory.cpp), [`tests/process_memory_tests.cpp`](../tests/process_memory_tests.cpp) |
+| Protocol parsing and work admission are bounded | Byte/token/depth limits, duplicate-key rejection and closed schemas | [`src/json_safety.cpp`](../src/json_safety.cpp), [`tests/protocol_tests.cpp`](../tests/protocol_tests.cpp), [`fuzz/`](../fuzz/) |
+| Native scheduling is bounded | Fixed workers, unfinished-call cap, cancellation, deadlines and serialized output | [`src/orchestration.cpp`](../src/orchestration.cpp), [`tests/orchestration_stress_tests.cpp`](../tests/orchestration_stress_tests.cpp) |
+| Provider cannot execute a tool directly | Captured surface and local schema/authorization validation construct MCP calls | [`tests/phase_10_2_tests.py`](../tests/phase_10_2_tests.py), [`docs/PHASE_10_2.md`](PHASE_10_2.md) |
+| Duplicate proposals cannot repeat execution | Stable action identity and bounded replay state with serial execution | [`tests/phase_10_3_tests.py`](../tests/phase_10_3_tests.py), [`agent/native_mcp_agent/mcp_orchestrator.py`](../agent/native_mcp_agent/mcp_orchestrator.py) |
+| Loopback fake transport is credential-free | Separate loopback-only test transport and child environment scrubbing | [`tests/phase_10_4_tests.py`](../tests/phase_10_4_tests.py), [`SECURITY.md`](../SECURITY.md) |
+| Hosted egress is synthetic-only | Project-issued, non-transferable authorization bound to exact content | [`tests/phase_10_4_tests.py`](../tests/phase_10_4_tests.py), [`docs/PHASE_10_4.md`](PHASE_10_4.md) |
 
-Exact-head GitHub Actions run `31915393822` completed successfully across all five required jobs.
-
-The latest tagged release remains `v0.10.1`. The Phase 10 agent and optional provider adapter are complete on `main` but have not been assigned a new release tag.
-
-## What is covered
-
-| Area | Evidence |
-| --- | --- |
-| Native protocol and lifecycle | Closed JSON-RPC schemas, duplicate-key rejection, bounded framing, lifecycle tests, process-level stdio integration |
-| Filesystem containment | Strict `openat2` tests, traversal/symlink/magic-link/mount-crossing rejection, descriptor pinning |
-| Process identity | Same-UID policy, proc-directory retention, start-time validation, strict pidfd tests |
-| Scheduling and cancellation | Fixed worker pool, bounded unfinished work, duplicate-ID rejection, deadlines, cancellation, shutdown and race tests |
-| Agent contracts | Closed provider-neutral request/response contracts, endpoint policy, redaction, failure taxonomy and retry rules |
-| MCP orchestration | Exact tool-surface capture, closed argument validation, serial execution, stable action identity, replay rejection and at-most-once behavior |
-| Provider adapter | Configurable OpenAI-compatible non-streaming adapter, verified HTTPS, bounded reads, redirect rejection, credential isolation and synthetic-only egress |
-| Adversarial assurance | Malformed input, oversized data, correlation attacks, fabricated evidence, replay attempts, transcript tampering and secret sentinels |
-| Memory and undefined behavior | AddressSanitizer, UndefinedBehaviorSanitizer and leak-enabled test runs |
-| Concurrency | Focused ThreadSanitizer builds and scheduler stress tests |
-| Fuzzing | Deterministic mutation runner and five Clang libFuzzer targets |
-| Determinism | Repeated canonical output checks and committed golden demonstration reports |
-
-## Latest Phase 10 validation snapshot
+## Release validation snapshot
 
 The final Phase 10.4 candidate completed:
 
@@ -55,7 +41,7 @@ The final Phase 10.4 candidate completed:
 - libFuzzer smoke: **2,000 runs each** for protocol, runtime policy, ELF, log and process parsing
 - `git diff --check`: passed
 
-These numbers describe one exact tested implementation. They are not a general proof that the project has no defect.
+These numbers describe the release-candidate validation. Exact-head CI and clean-checkout verification identify the candidate source; its tag identifies the published release source. They are not a general proof that the project has no defect.
 
 ## Reproduce the normal test gate
 
@@ -113,11 +99,11 @@ NMS_FUZZ_SECONDS=300 ./scripts/run_fuzz_campaign.sh
 
 See [`docs/FUZZING.md`](FUZZING.md) for target-specific commands, corpus handling and finding triage.
 
-## Extended assurance
+## Historical assurance
 
 The manual `Extended Assurance` workflow performs longer campaigns on Ubuntu 24.04. It includes repeated deterministic fuzzing, ThreadSanitizer repetitions, strict `openat2` and pidfd integration, AF_UNIX/FIFO policy checks and five long-running libFuzzer campaigns.
 
-The recorded Phase 7 campaign executed **61,925,751** libFuzzer inputs without an observed crash, sanitizer report, timeout or crash artifact. That evidence applies only to the tested source head, platform and inputs.
+The recorded Phase 7 campaign executed **61,925,751** libFuzzer inputs without an observed crash, sanitizer report, timeout or crash artifact. That historical number applies only to its recorded source head, platform and inputs; it is not carried forward as a result for `v0.11.0`.
 
 ## Evidence interpretation
 
@@ -137,8 +123,9 @@ A green test run does **not** mean:
 
 ## Public proof links
 
+- [v0.11.0 release pull request](https://github.com/kabbersokhi-boop/native-mcp-sandbox/pull/22) — the PR records its reviewed head and exact-head checks before publication.
 - [CI workflow](https://github.com/kabbersokhi-boop/native-mcp-sandbox/actions/workflows/ci.yml)
-- [Final Phase 10.4 exact-head run](https://github.com/kabbersokhi-boop/native-mcp-sandbox/actions/runs/31915393822)
+- [Phase 10.4 historical exact-head run](https://github.com/kabbersokhi-boop/native-mcp-sandbox/actions/runs/31915393822)
 - [Phase 10.4 pull request](https://github.com/kabbersokhi-boop/native-mcp-sandbox/pull/20)
 - [Architecture](../ARCHITECTURE.md)
 - [Threat model](../THREAT_MODEL.md)

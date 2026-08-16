@@ -1,0 +1,33 @@
+name: Design or feature proposal
+description: Propose a focused change with its trust-boundary impact.
+title: "proposal: "
+labels: [design]
+body:
+  - type: textarea
+    id: use_case
+    attributes:
+      label: Use case
+      description: What concrete problem does this solve?
+    validations:
+      required: true
+  - type: textarea
+    id: authority
+    attributes:
+      label: Requested authority and trust-boundary impact
+      description: State any new filesystem, process, network, credential, protocol, scheduler or egress authority.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Explain why a smaller change is insufficient.
+    validations:
+      required: true
+  - type: textarea
+    id: validation
+    attributes:
+      label: Test and threat-model plan
+      description: Identify accepted and rejected paths, limits, and documentation or ADR updates.
+    validations:
+      required: true

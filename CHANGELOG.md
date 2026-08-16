@@ -2,9 +2,9 @@
 
 This file records notable project changes.
 
-The project follows semantic versioning before 1.0 with the usual caveat that interfaces can still change. The completed Phase 10 work is on `main` and has not yet been assigned a release version.
+The project follows semantic versioning before 1.0 with the usual caveat that interfaces can still change.
 
-## Unreleased
+## 0.11.0
 
 ### Added
 
@@ -22,11 +22,12 @@ The project follows semantic versioning before 1.0 with the usual caveat that in
 
 - Updated `README.md`, `ARCHITECTURE.md`, `SECURITY.md` and `THREAT_MODEL.md` to describe the completed Phase 10 system rather than the earlier plan.
 - Clarified that the native C++ server remains stdio-only, network-free, credential-free and unchanged in tool authority.
-- Clarified the difference between the latest tagged release (`v0.10.1`) and the completed Phase 10 implementation on `main`.
+- Added an engineering highlights guide, release procedure, documentation-integrity check and focused issue forms.
+- Pinned GitHub Actions to immutable official commits and added Dependabot coverage for action updates.
 
 ### Assurance
 
-The reviewed Phase 10.4 implementation passed:
+The `v0.11.0` release candidate passed:
 
 - 16 Phase 10.4 focused tests;
 - 34 Phase 10.3 adversarial tests;

@@ -15,7 +15,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install --yes ninja-build nlohmann-json3-dev
       - name: Configure sanitizers
@@ -31,7 +31,7 @@ jobs:
         run: |
           ./build/native_mcp_fuzz_smoke --iterations 100000 --seed 828927513140 | tee deterministic-seed-1.log
           ./build/native_mcp_fuzz_smoke --iterations 100000 --seed 11400714819323198485 | tee deterministic-seed-2.log
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with:
           name: deterministic-mutation-logs
@@ -41,7 +41,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install --yes ninja-build nlohmann-json3-dev
       - name: Configure ThreadSanitizer
@@ -56,7 +56,7 @@ jobs:
         run: |
           ctest --test-dir build --output-on-failure --repeat until-fail:50 -R '^orchestration\.unit$' | tee tsan-unit.log
           ctest --test-dir build --output-on-failure --repeat until-fail:25 -R '^orchestration\.stress$' | tee tsan-stress.log
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with:
           name: scheduler-tsan-logs
@@ -66,7 +66,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install --yes ninja-build nlohmann-json3-dev
       - name: Require openat2 and pidfd
@@ -106,7 +106,7 @@ jobs:
           ctest --test-dir build --output-on-failure --repeat until-fail:50 -R '^policy\.unit$' | tee policy-repeat.log
           ctest --test-dir build --output-on-failure --repeat until-fail:20 -R '^protocol\.stdio_integration$' | tee integration-repeat.log
           ./build/native-mcp-sandbox --self-check | tee self-check.log
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with:
           name: strict-integration-logs
@@ -143,7 +143,7 @@ jobs:
             dictionary: process.dict
             max_len: 262144
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install --yes ninja-build nlohmann-json3-dev
       - name: Configure libFuzzer build
@@ -161,7 +161,7 @@ jobs:
           cp -a fuzz/corpus/${{ matrix.corpus }}/. campaign/corpus/
           ./build/${{ matrix.target }} campaign/corpus -runs=0 -timeout=10 -rss_limit_mb=2048 -max_len=${{ matrix.max_len }} -dict=fuzz/dictionaries/${{ matrix.dictionary }} -artifact_prefix=campaign/artifacts/ 2>&1 | tee corpus-replay.log
           ./build/${{ matrix.target }} campaign/corpus -max_total_time=600 -timeout=10 -rss_limit_mb=2048 -max_len=${{ matrix.max_len }} -dict=fuzz/dictionaries/${{ matrix.dictionary }} -artifact_prefix=campaign/artifacts/ -print_final_stats=1 2>&1 | tee campaign.log
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with:
           name: fuzz-${{ matrix.corpus }}
