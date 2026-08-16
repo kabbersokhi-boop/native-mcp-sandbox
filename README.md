@@ -1,102 +1,114 @@
 # Native MCP Sandbox
 
-> A security-first C++20 MCP server that gives AI agents narrow, read-only access to Linux evidence.
+> A security-first C++20 MCP server and bounded investigation agent for narrow, read-only Linux evidence access.
 
 [![CI](https://github.com/kabbersokhi-boop/native-mcp-sandbox/actions/workflows/ci.yml/badge.svg)](https://github.com/kabbersokhi-boop/native-mcp-sandbox/actions/workflows/ci.yml)
-[![Tag](https://img.shields.io/github/v/tag/kabbersokhi-boop/native-mcp-sandbox?label=tag)](https://github.com/kabbersokhi-boop/native-mcp-sandbox/tags)
+[![Latest tag](https://img.shields.io/github/v/tag/kabbersokhi-boop/native-mcp-sandbox?label=latest%20tag)](https://github.com/kabbersokhi-boop/native-mcp-sandbox/tags)
 [![License](https://img.shields.io/github/license/kabbersokhi-boop/native-mcp-sandbox)](LICENSE)
 [![C++20](https://img.shields.io/badge/C%2B%2B-20-blue.svg)](https://en.cppreference.com/w/cpp/20)
-[![Linux](https://img.shields.io/badge/platform-Linux-lightgrey.svg)](https://www.kernel.org/)
+[![Python 3](https://img.shields.io/badge/Python-3-blue.svg)](https://www.python.org/)
+[![Platform](https://img.shields.io/badge/platform-Linux-lightgrey.svg)](https://www.kernel.org/)
+[![Roadmap](https://img.shields.io/badge/roadmap-Phase%2010.4%20complete-success.svg)](#project-status)
 
-Native MCP Sandbox explores a practical question:
+Native MCP Sandbox explores one practical question:
 
-**How can an AI agent inspect useful host evidence without receiving a shell, arbitrary file access, raw process memory, or broad operating-system authority?**
+**How can an AI agent inspect useful host evidence without receiving a shell, arbitrary filesystem access, raw process memory, networking inside the native server, or broad operating-system authority?**
 
-The answer in this repository is a small native server with a deliberately narrow trust boundary. An operator chooses the files and processes that can be observed. The MCP client can then use four bounded, read-only tools through standard input and standard output.
+The project answers with two deliberately separate components:
 
-The latest tagged release is **v0.10.1**, at commit
-`2e19b5b6a14f5fbe26c5b4094c1750c6c5205db1`. Phases 0–9 are complete. The
-immutable **v0.10.0** release remains available as historical context; v0.10.1
-is the correction release. Phase 10.4 is implemented in PR #20 as an optional,
-bounded OpenAI-compatible adapter in the external Python agent. The native C++
-server remains stdio-only, network-free, credential-free, and exposes no new
-MCP tools.
+1. a small native MCP server that exposes only operator-approved, read-only tools over stdio; and
+2. an optional external Python agent that can use a bounded OpenAI-compatible provider while preserving local validation, authorization, replay protection and evidence provenance.
+
+The complete roadmap through Phase 10.4 is implemented on `main`. The latest tagged release remains `v0.10.1`; the completed Phase 10 agent has not yet been assigned a new release tag.
 
 ## Why this project exists
 
-Many agent tools begin with a powerful primitive such as a shell, a filesystem browser, or a general process API. That approach is convenient, but it also creates a large security boundary.
+Many agent integrations begin with a powerful primitive such as a shell, a filesystem browser, a general process API or unrestricted network access. That is convenient, but it creates a large trust boundary.
 
 Native MCP Sandbox takes the opposite approach:
 
 - expose a small set of purpose-built tools;
-- require explicit operator policy;
-- accept symbolic names instead of raw paths and PIDs;
-- enforce fixed resource limits;
-- fail closed when strict kernel protections are unavailable;
-- test malformed input, races, cancellation, and resource pressure as first-class behavior.
+- require an explicit operator policy;
+- use symbolic resource names instead of client-selected paths or PIDs;
+- bound input, output, work, memory and time;
+- treat protocol, provider and evidence data as untrusted;
+- fail closed when strict controls are unavailable;
+- retain reproducible tests and public verification evidence.
 
-This project is useful as:
+It is intended as:
 
-- a reference for secure MCP tool design;
-- a portfolio example of modern C++ systems engineering;
-- a study of Linux descriptor and process-identity controls;
-- a reproducible demonstration of deterministic agent evidence collection;
-- a foundation for future benchmark and interoperability work.
+- a reference implementation for narrow MCP tool design;
+- a portfolio-quality systems-security project;
+- a reproducible study of Linux descriptor and process-identity controls;
+- a foundation for bounded agent interoperability experiments.
 
-## What the server can do
+It is **not** a remote-administration framework, a shell replacement, an autonomous incident-response product or proof that all vulnerabilities are absent.
 
-A trusted runtime policy can enable four tools.
+## At a glance
+
+| Component | Responsibility | Security boundary |
+| --- | --- | --- |
+| Native C++ MCP server | Validates MCP lifecycle and exposes approved Linux evidence tools | stdio-only, network-free, credential-free |
+| Runtime policy | Maps symbolic names to approved roots and processes | operator-controlled; no client-selected raw authority |
+| External Python agent | Captures the exact tool surface, validates proposals and executes serially | bounded, replay-resistant and at-most-once |
+| Optional provider adapter | Maps provider-neutral requests to OpenAI-compatible non-streaming HTTPS | configurable, credential-isolated and synthetic-only |
+| Deterministic fixtures | Exercise provider, MCP, timeout, retry and adversarial paths | offline and credential-free |
+
+## Security boundary
+
+The native server intentionally does **not** provide:
+
+- a shell;
+- arbitrary file reads or recursive filesystem search;
+- filesystem mutation;
+- raw process memory;
+- process maps, command lines, environments or file descriptors;
+- process discovery or control;
+- native-server networking;
+- provider credentials inside the native process;
+- model-defined MCP methods or tools.
+
+Without a trusted runtime policy, the server advertises no host tools.
+
+Strict filesystem mode uses Linux `openat2` containment. Strict process mode requires same-UID validation and pidfd-backed identity pinning. Compatibility modes are explicit opt-ins with documented limitations.
+
+See [`SECURITY.md`](SECURITY.md) and [`THREAT_MODEL.md`](THREAT_MODEL.md) before changing any authority boundary.
+
+## Architecture
+
+```mermaid
+flowchart LR
+    P[Optional hosted provider] -->|Verified HTTPS\nnon-streaming| A[External bounded agent]
+    A -->|JSON-RPC 2.0 over stdio| S[Native C++ MCP server]
+    O[Trusted operator policy] --> S
+    S --> L[logs.search / logs.tail]
+    S --> E[elf.inspect]
+    S --> M[proc.memory]
+
+    classDef native fill:#eef6ff,stroke:#2563eb,color:#111827;
+    classDef agent fill:#f5f3ff,stroke:#7c3aed,color:#111827;
+    classDef policy fill:#f0fdf4,stroke:#16a34a,color:#111827;
+    class S,L,E,M native;
+    class A,P agent;
+    class O policy;
+```
+
+The provider never executes a tool directly. It can only propose a tool call. The external agent validates each proposal against the exact captured tool surface and the local closed schema before constructing a fixed `tools/call` request.
+
+MCP execution is serial. Stable local action identities, duplicate detection and replay state enforce at-most-once execution within a bounded investigation.
+
+See [`ARCHITECTURE.md`](ARCHITECTURE.md) for lifecycle, scheduling, containment, cancellation and shutdown details.
+
+## Read-only tools
+
+A trusted policy can enable four tools.
 
 | Tool | Purpose | Important boundary |
 | --- | --- | --- |
-| `logs.search` | Search one approved log file for literal text | No recursive search or arbitrary paths |
-| `logs.tail` | Read bounded previews of final log lines | No file watching or unbounded output |
-| `elf.inspect` | Inspect selected ELF32 and ELF64 metadata | The target is never executed or loaded |
-| `proc.memory` | Read aggregate memory counters for one named process | No raw memory, maps, command line, environment, or process discovery |
-
-Without a policy, the server exposes no host tools.
-
-## What makes it different
-
-### The client does not choose raw authority
-
-The MCP client selects operator-defined names such as `evidence` or `server`. It cannot submit an arbitrary absolute path or raw PID.
-
-### Files stay inside approved roots
-
-Strict filesystem mode uses Linux `openat2` with containment controls for traversal, symbolic links, magic links, and mount crossings. Accepted files remain pinned through owned descriptors.
-
-### Process identity is pinned
-
-Strict process mode requires the same effective UID and a pidfd. The server also retains the process directory and revalidates process identity before and after each observation.
-
-### Work is bounded
-
-The server uses a fixed two-worker scheduler. It limits unfinished calls, request size, response size, JSON depth, token count, file reads, search results, and tool deadlines.
-
-### Failure is part of the design
-
-The test suite covers malformed JSON, duplicate keys, oversized input, policy denial, process exit, cancellation, deadline races, saturation, worker-construction failure, concurrent shutdown, and output framing.
-
-## Deterministic investigation demonstration
-
-The released v0.10.1 correction includes a complete investigation client that
-uses the real server.
-
-The demonstration:
-
-1. starts `native-mcp-sandbox` through its MCP stdio interface;
-2. loads one synthetic incident log;
-3. creates one non-executable ELF fixture;
-4. verifies the exact four-tool surface;
-5. runs a fixed sequence of log, ELF, and process observations;
-6. correlates responses by JSON-RPC ID, even when they complete out of order;
-7. writes canonical JSON and Markdown reports;
-8. proves that two independent runs produce byte-identical output.
-
-The scenario follows a service restart, an authentication failure, a bounded retry, recovery, and a healthy final state.
-
-The report contains stable evidence only. It excludes runtime PIDs, UIDs, memory totals, temporary paths, addresses, and current timestamps.
+| `logs.search` | Search one approved log file for literal text | no recursive search or arbitrary paths |
+| `logs.tail` | Read bounded previews of final log lines | no file watching or unbounded output |
+| `elf.inspect` | Inspect selected ELF32/ELF64 metadata | the target is never executed or loaded |
+| `proc.memory` | Read bounded aggregate memory counters for one named process | no raw memory, maps, command line, environment or discovery |
 
 ## Quick start
 
@@ -109,10 +121,9 @@ The report contains stable evidence only. It excludes runtime PIDs, UIDs, memory
 - Python 3
 - nlohmann/json 3.11 or newer
 - procfs
-- Linux `openat2` support
-- pidfd support for strict process mode
+- Linux `openat2` and pidfd support for strict modes
 
-On Ubuntu, install the common build dependencies:
+Ubuntu example:
 
 ```bash
 sudo apt-get update
@@ -137,31 +148,11 @@ Check the executable:
 ./build/dev/native-mcp-sandbox --self-check
 ```
 
-### Run the deterministic demonstration
+## Configure the native server
 
-```bash
-mkdir -p ./build/agent-investigation-output
+The runtime policy maps symbolic names to approved resources. The client selects the symbolic name, not the raw path or PID.
 
-python3 scripts/run_agent_investigation_demo.py \
-  --server ./build/dev/native-mcp-sandbox \
-  --fixture ./demo/investigation/application.log \
-  --output-dir ./build/agent-investigation-output
-```
-
-The command creates:
-
-```text
-build/agent-investigation-output/report.json
-build/agent-investigation-output/report.md
-```
-
-The committed golden reports are in [`demo/investigation/`](demo/investigation/).
-
-## Configure the server
-
-The runtime policy maps symbolic names to operator-approved resources.
-
-Example version 2 policy:
+Example policy:
 
 ```json
 {
@@ -188,162 +179,115 @@ Start the configured server:
 ./build/dev/native-mcp-sandbox --policy-config ./policy.json
 ```
 
-The server uses newline-delimited JSON-RPC 2.0 over standard input and standard output. It targets MCP revision `2025-11-25`.
+The server uses newline-delimited JSON-RPC 2.0 over standard input and standard output and targets MCP revision `2025-11-25`.
 
-See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the protocol path and [`SECURITY.md`](SECURITY.md) for security expectations.
+## Demonstration
 
-## Example MCP lifecycle
+### Deterministic offline investigation
 
-An unconfigured server supports the MCP lifecycle but advertises no tools:
+The primary demo uses the real native server, synthetic evidence and canonical reports. It needs no provider, credential or internet connection.
 
 ```bash
-./build/dev/native-mcp-sandbox <<'MCP_INPUT'
-{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"demo-client","version":"1.0"}}}
-{"jsonrpc":"2.0","method":"notifications/initialized"}
-{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}
-MCP_INPUT
+mkdir -p build/agent-investigation-output
+
+python3 scripts/run_agent_investigation_demo.py \
+  --server ./build/dev/native-mcp-sandbox \
+  --fixture ./demo/investigation/application.log \
+  --output-dir ./build/agent-investigation-output
 ```
 
-A configured server advertises only the tools enabled by its policy.
-
-## Architecture at a glance
+It creates:
 
 ```text
-MCP client
-    |
-    | newline-delimited JSON-RPC 2.0
-    v
-Protocol parser and lifecycle gate
-    |
-    +--> bounded JSON preflight
-    +--> closed request schemas
-    +--> cancellation and deadline context
-    v
-Fixed two-worker scheduler
-    |
-    +--> filesystem policy --> logs.search / logs.tail / elf.inspect
-    |
-    +--> process policy ----> proc.memory
-    v
-Serialized bounded JSON-RPC responses
+build/agent-investigation-output/report.json
+build/agent-investigation-output/report.md
 ```
 
-Core design choices include:
+The committed reference outputs are in [`demo/investigation/`](demo/investigation/). The demo validates the MCP lifecycle, exact tool surface, response correlation and byte-identical report generation.
 
-- C++20 with a small coroutine bridge and fixed worker pool;
-- no thread-per-request model;
-- descriptor-based filesystem containment;
-- same-UID and pidfd-backed process observation;
-- bounded parsers and explicit output schemas;
-- deterministic and coverage-guided adversarial testing;
-- native Linux execution with no container requirement.
+### Optional OpenAI-compatible synthetic smoke
 
-The design decisions are recorded in [`docs/adr/`](docs/adr/).
+The hosted-provider smoke is manual, disabled by default, synthetic, redacted, observational and non-gating.
 
-## Engineering and assurance
+```bash
+python3 scripts/phase_10_4_openai_smoke.py \
+  --enable-synthetic-live \
+  --endpoint https://provider.example/v1/chat/completions \
+  --model operator-selected-model \
+  --credential-env NATIVE_MCP_PROVIDER_TOKEN
+```
 
-The project is tested across multiple compilers and analysis modes.
+Do not place a real credential in a command line, committed file or documentation. The credential value is loaded only at explicit production HTTPS execution. The loopback fake-provider path is structurally credential-free.
 
-| Area | Coverage |
+See [`docs/DEMO.md`](docs/DEMO.md) for the full walkthrough and limitations.
+
+## Testing and proof
+
+The project uses layered verification rather than one headline test count.
+
+| Layer | Examples |
 | --- | --- |
-| Compilers | GCC Debug and Clang Release |
-| Memory safety | AddressSanitizer, UndefinedBehaviorSanitizer, and leak detection |
-| Concurrency | Focused ThreadSanitizer scheduler tests |
-| Mutation testing | Deterministic mutation runner in normal CTest builds |
-| Coverage-guided fuzzing | Five optional Clang libFuzzer targets |
-| Integration | Real stdio server execution, strict `openat2`, pidfd, AF_UNIX, and FIFO checks |
-| Determinism | Two-run byte equality and committed golden reports |
-| Negative behavior | Output flooding, stale reports, malformed protocol input, forbidden report fields, and resource limits |
+| Unit and integration | protocol, runtime policy, tools, real stdio process, strict Linux controls |
+| Negative and adversarial | malformed JSON, duplicate keys, oversized input, replay, fabricated evidence, transcript tampering |
+| Memory safety | ASan, UBSan and leak-enabled runs |
+| Concurrency | focused ThreadSanitizer and scheduler stress |
+| Deterministic fuzzing | fixed-seed mutation campaigns |
+| Coverage-guided fuzzing | protocol, runtime policy, ELF, log and process parser targets |
+| Determinism | repeated canonical transcript and report equality |
+| Provider isolation | fake loopback HTTP, TLS/endpoint policy, credential and synthetic-egress tests |
 
-### Recorded release evidence
+The final Phase 10.4 candidate passed:
 
-For **v0.10.0**:
+- 16 Phase 10.4 tests;
+- 34 Phase 10.3 adversarial tests;
+- 32 Phase 10.2 orchestration tests;
+- 25 Phase 10.1 contract tests plus 10 security regressions;
+- 21/21 CTest cases in dev, sanitizer and ThreadSanitizer presets;
+- 100,000 deterministic fuzz iterations;
+- five 2,000-run libFuzzer smoke campaigns.
 
-- all five post-merge GitHub Actions jobs passed;
-- the demonstration passed in GCC, Clang, and sanitizer CTest suites;
-- the strict demonstration used no legacy compatibility flags;
-- deterministic JSON and Markdown reports matched committed golden files;
-- output-flood and forbidden-field negative tests passed.
-- Phase 9 added bounded reproducibility benchmarks with offline report validation
-  and measurement-only comparison groups.
+The exact reviewed implementation and CI evidence are documented in [`docs/ASSURANCE.md`](docs/ASSURANCE.md).
 
-The immutable v0.10.0 tag contains a historical stale compiled version
-identifier of 0.9.0. The correction release v0.10.1 is tagged at
-`2e19b5b6a14f5fbe26c5b4094c1750c6c5205db1`.
+A clean campaign is evidence for the tested source, environment and paths. It is not proof of complete correctness or security.
 
-For the Phase 7 assurance campaign:
+## Project status
 
-- two deterministic campaigns completed 100,000 iterations each;
-- repeated ThreadSanitizer scheduler tests passed;
-- strict `openat2`, pidfd, AF_UNIX, and FIFO integration passed;
-- five 600-second libFuzzer campaigns executed **61,925,751 inputs** in total;
-- those recorded campaigns produced no observed crash, sanitizer finding, timeout, or crash artifact.
+- Phases 0–9: complete.
+- Phase 10.1: provider-neutral contracts and deterministic provider double — complete.
+- Phase 10.2: bounded serial MCP orchestration — complete.
+- Phase 10.3: deterministic adversarial assurance — complete.
+- Phase 10.4: optional OpenAI-compatible non-streaming adapter — complete.
+- Current `main`: includes the full Phase 10 implementation.
+- Latest tagged release: `v0.10.1`, before Phase 10.
+- Phase 11: not defined.
 
-These results apply to the tested builds and inputs. They do not prove complete correctness, memory safety, or security.
+No new release version has been selected for the completed Phase 10 work.
 
-Detailed evidence is recorded in [`PHASE_8_MANIFEST.md`](PHASE_8_MANIFEST.md), [`PHASE_7_MANIFEST.md`](PHASE_7_MANIFEST.md), and [`docs/FUZZING.md`](docs/FUZZING.md).
+## Documentation
 
-## Security boundary
-
-This repository intentionally does **not** provide:
-
-- a shell;
-- arbitrary file reads;
-- recursive filesystem search;
-- filesystem mutation;
-- networking;
-- raw process memory;
-- process maps, command lines, environments, or file descriptors;
-- process discovery;
-- process control;
-- disassembly or malware classification;
-- hard real-time cancellation;
-- MCP tasks or durable job queues.
-
-Compatibility modes exist for older kernels, but they are explicit opt-ins and have documented limits. Strict mode is the default security target.
-
-Read [`THREAT_MODEL.md`](THREAT_MODEL.md) before extending host authority.
-
-## Repository guide
-
-```text
-include/native_mcp/                     Public C++ interfaces
-src/                                    Server and policy implementation
-tests/                                  Unit, integration, stress, and security tests
-fuzz/                                   Corpora, dictionaries, and fuzz targets
-scripts/run_agent_investigation_demo.py Deterministic Phase 8 client
-demo/investigation/                     Synthetic fixture and golden reports
-docs/adr/                               Architecture decision records
-ARCHITECTURE.md                         Detailed architecture
-SECURITY.md                             Security policy
-THREAT_MODEL.md                         Assets, controls, and residual risks
-docs/FUZZING.md                         Native fuzzing and triage guide
-```
-
-## Project roadmap
-
-- Phases 0–9: complete; `v0.10.0` remains immutable historical release state
-  and `v0.10.1` is the current correction release at
-  `2e19b5b6a14f5fbe26c5b4094c1750c6c5205db1`.
-- Phase 10.4: PR #20 implements the optional, bounded OpenAI-compatible
-  adapter in the external Python agent. The native server remains unchanged in
-  authority: stdio-only, network-free, credential-free, and with no new MCP
-  tools. Normal CI remains offline and credential-free; the live smoke is
-  manual, synthetic, redacted, non-gating, and observational.
-
-Each phase is developed as a bounded, reviewable increment. New authority requires an explicit threat-model decision.
-
-## Documentation style
-
-The README is written for developers, reviewers, and recruiters.
-
-Technical specifications and procedures use an ASD-STE100 Issue 9 aligned style. See [`docs/WRITING_STYLE.md`](docs/WRITING_STYLE.md).
+| Document | Purpose |
+| --- | --- |
+| [`docs/DEMO.md`](docs/DEMO.md) | Offline and optional hosted-provider demonstrations |
+| [`docs/ASSURANCE.md`](docs/ASSURANCE.md) | Test evidence, reproducible commands and proof limitations |
+| [`ARCHITECTURE.md`](ARCHITECTURE.md) | Protocol, scheduler, containment and agent architecture |
+| [`THREAT_MODEL.md`](THREAT_MODEL.md) | Assets, threats, controls and residual risk |
+| [`SECURITY.md`](SECURITY.md) | Security policy and vulnerability reporting |
+| [`docs/FUZZING.md`](docs/FUZZING.md) | Fuzz targets, campaigns and triage |
+| [`CONTRIBUTING.md`](CONTRIBUTING.md) | Contribution and review requirements |
+| [`CHANGELOG.md`](CHANGELOG.md) | Notable project changes |
+| [`docs/adr/`](docs/adr/) | Architecture decision records |
 
 ## Contributing
 
-Contributions are welcome when they preserve the narrow security boundary and include appropriate tests.
+Contributions are welcome when they preserve the narrow trust boundary and include accepted/rejected-path tests. Open an issue before changing a dependency, protocol, tool, policy gate, scheduler or authority boundary.
 
-Start with [`CONTRIBUTING.md`](CONTRIBUTING.md). Security-sensitive changes must also follow [`SECURITY.md`](SECURITY.md) and update [`THREAT_MODEL.md`](THREAT_MODEL.md) when assumptions change.
+Start with [`CONTRIBUTING.md`](CONTRIBUTING.md).
+
+## Security
+
+Please report vulnerabilities through GitHub private vulnerability reporting. Do not publish working exploit details in a public issue.
+
+See [`SECURITY.md`](SECURITY.md).
 
 ## License
 
