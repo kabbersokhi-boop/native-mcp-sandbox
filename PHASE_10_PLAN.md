@@ -1,340 +1,320 @@
-# Phase 10 plan: provider-neutral bounded investigation agent
+# Phase 10 plan and implementation record
 
 ## Status
 
-Phase 10.2 implements the deterministic, offline stdio orchestration subset:
-minimal child environment, initialize/tools-list capture, closed tool schemas,
-serial at-most-once `tools/call` execution, bounded lifecycle, validated
-evidence, and deterministic control transcript.  Live provider networking,
-credentials, streaming, and final reporting remain outside this phase.
+Phase 10 is complete on `main`.
 
-Planning only through PR #13. No provider transport, credential handling, live
-model call, new MCP tool, or native-server authority is implemented by this
-document. No Phase 10 release version is selected here.
+| Increment | Scope | Status |
+| --- | --- | --- |
+| 10.1 | Provider-neutral contracts and deterministic provider double | Complete — PR #14 |
+| 10.2 | Bounded serial MCP orchestration | Complete — PR #16 |
+| 10.3 | Deterministic adversarial assurance | Complete — PR #18 |
+| 10.4 | Optional OpenAI-compatible non-streaming adapter | Complete — PR #20 |
 
-Phase 10 begins from released tag `v0.10.1` at commit
-`2e19b5b6a14f5fbe26c5b4094c1750c6c5205db1`.
+The completed Phase 10 implementation is included in `main` at and after merge commit:
+
+```text
+6125964b03e76277f42df1d60c52933e7ce0e861
+```
+
+The latest tagged release remains `v0.10.1`, which predates Phase 10. No Phase 10 release version has been selected. Phase 11 is not defined.
+
+This document records the intent and security boundaries that governed the implementation. Current public architecture, security and assurance details are in:
+
+- [`README.md`](README.md)
+- [`ARCHITECTURE.md`](ARCHITECTURE.md)
+- [`THREAT_MODEL.md`](THREAT_MODEL.md)
+- [`SECURITY.md`](SECURITY.md)
+- [`docs/ASSURANCE.md`](docs/ASSURANCE.md)
 
 ## Goal
 
-Build a separate, bounded agent process that can ask a hosted language model
-for investigation guidance and then use only the MCP tools advertised by the
-existing native server.
+Build a separate, bounded agent process that can ask a hosted language model for investigation guidance and use only the MCP tools advertised by the existing native server.
 
-The agent must preserve the boundary established by ADR 0013:
+The design preserves the boundary established before Phase 10:
 
-- the C++ server remains stdio-only, network-free, and credential-free;
-- hosted model access belongs to a separate client process;
+- the C++ server remains stdio-only, network-free and credential-free;
+- hosted-provider access belongs to the external Python agent;
 - provider output is untrusted;
-- normal CI and release evidence remain deterministic and offline;
-- live provider access is optional, manual, synthetic, non-gating, and deferred
-  until PRs 10.1–10.3 pass.
+- every tool proposal is validated locally;
+- normal CI and merge evidence remain deterministic, offline and credential-free;
+- live provider access is optional, manual, synthetic, redacted and non-gating.
 
 ## Non-goals
 
 Phase 10 does not authorize:
 
-- networking or credentials inside `native-mcp-sandbox`;
-- shell execution, arbitrary filesystem paths, raw PIDs, process discovery, or
-  process control;
+- networking or credentials inside the native C++ server;
+- shell execution;
+- arbitrary filesystem paths;
+- raw PIDs, process discovery or process control;
+- raw process memory;
 - model-defined MCP methods or tools;
-- automatic execution of free-form model text;
-- sending host evidence to a provider without explicit operator approval;
-- a live hosted provider as a normal CI or release dependency;
-- a fixed dependency on NVIDIA NIM or any single model;
-- parallel MCP execution in PRs 10.1–10.3;
-- streaming before the non-streaming implementation and tests are complete.
+- automatic execution of free-form provider text;
+- automatic host-evidence egress;
+- streaming;
+- parallel MCP execution;
+- a fixed dependency on NVIDIA NIM, OpenAI or one model;
+- a live provider as a CI or release dependency;
+- release or tag creation.
 
-## Architecture
-
-The planned system has three independent boundaries.
+## Architecture boundaries
 
 ### Native MCP server
 
-The existing C++ executable remains unchanged in authority. It validates MCP
-lifecycle and closed tool schemas, enforces runtime policy, and exposes only
-the operator-approved tool surface. It remains credential-free.
+The native executable keeps the existing authority:
 
-### Agent orchestrator
+- newline-delimited JSON-RPC 2.0 over stdio;
+- closed MCP lifecycle and tool schemas;
+- runtime-policy-gated read-only tools;
+- bounded work, cancellation and deadlines;
+- no provider credentials or networking.
 
-A new external process owns the investigation loop. It:
+### External agent
 
-1. creates a deliberately scrubbed environment before starting the native
-   server or any other child process;
-2. starts or connects to the MCP server over stdio;
-3. discovers and records the exact advertised tool surface;
-4. sends a bounded, redacted prompt to a configured provider client;
-5. validates every proposal against a closed local schema and the advertised
-   allowlist;
-6. issues approved MCP requests with explicit request IDs and deadlines;
-7. validates MCP responses before using them as later model context;
-8. stops on bounded turn, call, byte, retry, and time budgets; and
-9. emits a redacted transcript and provenance-typed deterministic summary.
+The Python agent owns:
 
-The child environment must use a minimal explicit allowlist. It must not copy
-the parent environment and delete a few known keys. It must not contain
-provider API keys, authorization tokens or headers, secret-store access tokens,
-proxy credentials, live-provider configuration, or debugging variables that
-could disclose secrets. Provider endpoint or model variables are excluded
-unless explicitly allowlisted for a non-provider child. `HTTP_PROXY`,
-`HTTPS_PROXY`, `ALL_PROXY`, and `NO_PROXY` are excluded unless explicitly
-allowlisted for that child. The same scrubbed-environment rule applies to every
-other child process.
+1. minimal child-environment construction;
+2. MCP child lifecycle;
+3. exact `tools/list` capture;
+4. provider-neutral request construction;
+5. proposal validation and local authorization;
+6. stable request and action correlation;
+7. serial at-most-once MCP execution;
+8. validated evidence and provenance;
+9. bounded deterministic transcripts;
+10. turn, call, byte, retry, cancellation and wall-clock budgets.
 
-### Provider client
+### Provider adapter
 
-The provider client uses a provider-neutral request and response contract. An
-OpenAI-compatible adapter may target NVIDIA NIM, but endpoint and model
-identifiers remain configurable rather than source-code assumptions.
+The optional OpenAI-compatible adapter owns:
 
-The provider client owns HTTP, TLS, authentication, response-size enforcement,
-deadlines, transport retries, and provider error classification. Streaming is
-deferred until after the non-streaming implementation and deterministic tests.
-The provider client never executes tools directly.
+- configurable endpoint and model;
+- production verified HTTPS;
+- credential loading at explicit execution time;
+- bounded non-streaming HTTP;
+- content-type and response-size enforcement;
+- failure classification and bounded retries;
+- closed provider-specific response parsing.
 
-### Endpoint, redirect, and TLS policy
+The adapter never executes a tool directly.
 
-Production provider endpoints must use verified HTTPS. Before any request, the
-adapter must validate the configured scheme and authority, reject URL user-info,
-fragments, unsupported or ambiguous URL forms, and reject disabled certificate
-verification. It must verify the server certificate and hostname.
+## Environment and credential isolation
 
-Redirects are disabled by default. If a future explicitly configured redirect
-mode is added, it must be bounded, must never forward credentials across
-origins, must never downgrade HTTPS to HTTP, and must reject loopback,
-link-local, private, multicast, or otherwise disallowed destinations from a
-production endpoint.
+Before starting the native server or another child, the external agent builds a new environment from a minimal explicit allowlist.
 
-The deterministic fake HTTP provider may use plain HTTP only when the test
-explicitly opts into loopback HTTP, the destination resolves exclusively to
-loopback, the listener binds only to loopback, and no live credential is loaded
-or sent. The fake provider is test-harness authority only.
+It excludes provider secrets, Authorization material, secret-store tokens, proxy credentials, live-provider configuration and secret-disclosing debug variables.
 
-## Required contracts
+Production credentials:
 
-Before implementation, the first code PR must define and test these contracts.
+- are loaded only in the external provider process;
+- load only at explicit verified-HTTPS execution;
+- enter only the bounded provider Authorization header;
+- never enter native child environment, argv, transcript or evidence.
 
-### Provider request and response
+The deterministic loopback HTTP path is explicit, loopback-only and structurally credential-free.
 
-The local request object contains only:
+## Endpoint, redirect and TLS policy
+
+Production provider endpoints must:
+
+- use verified HTTPS;
+- reject URL user-info, fragments, queries and ambiguous forms;
+- verify certificate and hostname;
+- reject disabled verification;
+- reject redirects;
+- re-resolve immediately before connection;
+- reject an answer set containing a non-global destination.
+
+The fake provider may use plain HTTP only under explicit loopback test authority and without a live credential.
+
+## Provider request and response contracts
+
+The provider-neutral request contains only:
 
 - configured model identifier;
-- bounded system and user messages;
-- the exact advertised tool definitions;
-- deterministic generation controls where supported;
-- maximum output budget; and
-- a stable provider-request correlation identifier.
+- bounded messages;
+- exact advertised tool definitions;
+- bounded generation controls;
+- maximum output budget;
+- project-owned correlation ID.
 
-Production request construction and production response parsing must reject
-unknown fields, as must tool-call proposal parsing, transcript parsing, and
-serialization where applicable. Deterministic fixtures and tests must exercise
-the same closed schemas. Provider-specific metadata may be discarded only
-inside an adapter after bounded parsing and only when the project-owned
-contract explicitly permits it; it must never pass implicitly to the
-orchestrator.
-
-The accepted response is one of:
+The accepted provider response is one of:
 
 - a final assistant message;
-- one or more structured tool-call proposals; or
+- one or more structured tool-call proposals;
 - a classified provider failure.
 
-Every proposal requires a non-empty call identifier, an exact advertised tool
-name, and arguments that pass the locally owned closed schema. Unknown fields,
-duplicate call identifiers, malformed argument JSON, mixed final-text/tool-call
-ambiguity, and unsupported content are rejected.
+Unknown fields, malformed JSON, duplicate keys, mixed final-text/tool-call ambiguity, unsupported content, missing IDs, invalid tool names and malformed arguments fail closed.
 
-### Environment and secret isolation
+## Proposal authority
 
-Credentials may be loaded only by the future external provider agent from an
-environment variable or secret store. They are never command-line values and
-are never available to the native server. The orchestrator must construct the
-minimal allowlisted child environment before `exec` and must prove, with
-deterministic sentinel tests, that secret values do not appear in child
-environment, process arguments, stdout, stderr, exceptions, logs, transcripts,
-reports, or crash artifacts.
+The provider can propose but cannot authorize.
 
-### Action identity, retries, and replay
+Every proposal must pass:
 
-Provider retries are transport-level retries only. One stable local
-provider-request correlation ID must identify all attempts. For each accepted
-proposal, the orchestrator must derive one stable local action identity from
-the validated action content and relevant execution context; a provider call ID
-alone is not sufficient.
+- project-owned call-ID validation;
+- exact membership in the captured tool surface;
+- closed argument-schema validation;
+- byte, nesting and collection limits;
+- immutable local authorization;
+- stable action identity;
+- duplicate and replay checks.
 
-Completed and in-flight action identities must reject duplicate proposals
-across provider attempts and agent turns. Each accepted action identity has
-at-most-once MCP execution. A provider retry must never repeat an MCP action
-that was already accepted or executed. Bounded retry state must survive
-response ambiguity for the lifetime of the investigation.
+Only a locally constructed `tools/call` request can reach MCP execution.
 
-The implementation and tests must distinguish:
+## Action identity, replay and retries
 
-- repeating an idempotent provider HTTP request before any tool execution;
-- replaying a model proposal after transport ambiguity; and
-- repeating an MCP tool call.
+Provider transport retries reuse one stable request correlation ID.
 
-Only the first may be an automatic transport retry. The third must not happen
-automatically; duplicate or ambiguous proposals are rejected or reported as a
-bounded local failure.
+Local action identity derives from validated tool name, canonical arguments, captured surface and investigation context. Provider call ID alone is insufficient.
 
-### Multiple tool calls
+Completed, in-flight and ambiguous action identities reject:
 
-The initial policy accepts multiple valid proposals and executes them serially
-in provider-declared order, subject to per-turn and total-call budgets. PRs
-10.1–10.3 must not execute MCP calls in parallel or reorder them. After the
-first rejection, failure, cancellation, or timeout, processing of the
-remaining calls in that provider response stops; later calls do not become
-implicitly authorized. Parallel execution requires a separate threat-model and
-concurrency decision.
+- duplicate IDs;
+- changed content under one ID;
+- identical content under different IDs;
+- later-turn replay;
+- replay after ambiguous MCP transmission or completion.
 
-### Evidence provenance and report schema
+Provider retries may repeat the provider HTTP request only before tool execution. They must never repeat an MCP action automatically.
 
-Provider text is guidance, never evidence. Every factual investigation claim in
-the deterministic summary or report must trace to one of:
+## Multiple tool calls
 
-- a validated MCP response ID;
-- a locally computed stable predicate derived from a validated MCP response;
-- a committed synthetic fixture assertion; or
-- a local control event such as timeout, rejection, or cancellation.
+Valid proposals execute serially in provider-declared order.
 
-The report schema must distinguish provider suggestion, accepted tool proposal,
-rejected proposal, validated MCP evidence, locally derived predicate, and final
-supported conclusion. Provider-generated claims must not appear as established
-facts, citations must not be fabricated, uncited model summaries must not be
-released, provider text must not overwrite or reinterpret failed MCP evidence,
-and provider text must not become a release assertion. Unsupported claims must
-be omitted or explicitly classified as unsupported provider output.
+After the first rejection, failure, cancellation or timeout:
 
-## Fixed budgets and failure taxonomy
+- later calls are skipped;
+- they are not authorized;
+- no MCP request is written for them;
+- they do not become evidence or completed actions.
 
-Implementation must expose configuration with safe defaults and hard maximums
-for total agent wall-clock duration, provider connect/read/total timeouts,
-attempts, backoff, request and response bytes, agent turns, calls per turn,
-total calls, MCP request/response bytes, and transcript bytes.
+Parallel MCP execution requires a separate future threat-model decision.
 
-The project-owned taxonomy must distinguish these classes:
+## Evidence and transcripts
 
-- invalid provider configuration;
-- credential unavailable;
-- endpoint-policy rejection;
-- insecure scheme;
-- TLS verification failure;
-- redirect rejected;
-- DNS or selected connection failure;
-- connect timeout;
-- read timeout;
-- total request timeout;
-- invalid content type;
-- request too large before transmission;
-- HTTP 400 invalid request;
-- HTTP 413 payload too large;
-- HTTP 422 semantic request rejection;
-- other permanent 4xx client-request failure;
-- HTTP 401 authentication failure;
-- HTTP 403 authorization failure;
-- HTTP 404 endpoint or model not found;
-- HTTP 408 request timeout;
-- HTTP 429 rate limited;
-- selected transient 5xx provider failure;
-- other permanent or malformed provider failure;
-- malformed JSON;
-- duplicate-key JSON;
-- truncated response;
-- unsupported content;
-- oversized response;
-- invalid tool proposal;
-- replay or duplicate proposal;
-- retry exhausted; and
-- cancelled.
+Provider text is guidance, never evidence.
 
-Configuration, credential unavailable, endpoint policy, insecure scheme, TLS,
-redirects, invalid
-content, request-too-large, 400, 401, 403, 404, 413, 422, other permanent
-4xx, malformed/duplicate/truncated/unsupported/oversized responses, invalid
-proposals, replay, validation, authorization, and local-policy failures must
-not be retried. 408, 429, selected connection failures, and selected 5xx
-failures may be retried only while attempt and total wall-clock budgets allow.
-The adapter must honor a valid bounded `Retry-After` value without exceeding
-the remaining time budget. Raw response headers and bodies must never enter
-diagnostics without bounded redaction.
+Validated evidence must retain:
 
-The transcript records stable control evidence, not raw secrets or unrestricted
-host data. It may include schema version, adapter name without credentials,
-model identifier, deterministic request and action identifiers, proposal
-classification, provenance references, retry/deadline outcomes, bounded byte
-counts and hashes, MCP method and symbolic resource aliases, and the final
-bounded outcome. It must not include API keys, authorization headers, raw
-environment values, absolute host paths, raw PIDs, command lines, provider
-request dumps containing secrets, or unapproved evidence.
+- project-owned action identity;
+- exact correlated MCP response ID;
+- closed and redacted result content;
+- explicit provenance.
+
+Transcripts use closed per-event schemas, bounded project-owned metadata and deterministic terminal-space reservation.
+
+Parsing rejects orphan, stale, duplicate, mismatched and nonexistent action/response references.
 
 ## Data-flow policy
 
-Evidence sent to a hosted provider is denied by default. The operator must
-select one explicit mode:
+The implemented Phase 10.4 mode is:
 
-- `synthetic-only`: only committed or generated synthetic fixtures may leave;
-- `redacted-summary`: only locally transformed, schema-validated summaries may
-  leave; or
-- `approved-evidence`: specifically approved evidence fields may leave.
+### `synthetic-only`
 
-The initial implementation and every automated test use `synthetic-only`.
+Only project-authorized committed or generated synthetic material may leave through the provider adapter.
 
-## Delivery sequence
+Authorization is non-transferable and bound to the exact approved message content. Plain strings, copied state and post-authorization mutation fail closed.
 
-### PR 10.1: contracts and deterministic provider double
+Later MCP evidence is blocked in this mode.
 
-Implement provider-neutral types, the complete error taxonomy, closed
-production and fixture schemas, a bounded non-streaming transport abstraction,
-the loopback-only fake HTTP provider, transcript redaction primitives, and
-unit tests for limits, endpoint policy, redirects, TLS rejection, environment
-scrubbing, and error mappings. The fake provider binds only to loopback and
-has test-harness authority only.
+`redacted-summary` and `approved-evidence` remain unimplemented.
 
-### PR 10.2: bounded MCP orchestration
+## Budgets and failure taxonomy
 
-Implement process lifecycle with scrubbed child environments, exact
-`tools/list` allowlist capture, validated proposal-to-MCP conversion, stable
-request/action correlation, serial provider-order execution, at-most-once
-deduplication, bounded multi-turn looping, and deterministic cancellation and
-deadline behavior. No parallel MCP execution is authorized.
+The implementation exposes safe defaults and hard ceilings for:
 
-### PR 10.3: adversarial assurance
+- total agent wall-clock time;
+- provider connect, read and total timeouts;
+- provider attempts and backoff;
+- provider request and response bytes;
+- turns, calls per turn and total calls;
+- MCP request and response bytes;
+- transcript bytes;
+- child stdout and stderr bytes;
+- startup, initialize, tools-list, MCP-call and shutdown deadlines.
 
-Add deterministic tests for malformed, duplicate-key, unknown-field, fabricated-
-evidence, false-claim, missing-provenance, incorrect-response-correlation, and
-nonexistent-request-ID citations; identical proposals on two provider attempts;
-duplicate and content-identical call IDs; truncation; retries after execution;
-later-turn duplicates; multiple-call stop behavior; all failure classes and
-retry eligibility; secret sentinels across every output surface; endpoint and
-redirect rejection; and oversized input/output.
+The failure taxonomy distinguishes configuration, credentials, endpoint policy, TLS, redirects, DNS/connect/read/total timeouts, content type, request size, HTTP status classes, malformed/duplicate/truncated/unsupported/oversized responses, invalid proposals, replay, retry exhaustion, cancellation and local MCP failures.
 
-### PR 10.4: optional OpenAI-compatible/NIM adapter
+Only authorized transient classes retry, within attempt and remaining-time budgets. Valid bounded `Retry-After` is honored without exceeding the remaining deadline.
 
-Only after PRs 10.1–10.3 pass independent review, add a configurable adapter,
-keep endpoint and model configurable, load credentials only in the external
-agent, keep live access disabled by default, and add an opt-in manual synthetic
-smoke path. The live NIM smoke remains manual, synthetic, redacted,
-non-gating, and deferred. Normal CI has no internet access or credential
-requirement.
+## Delivery record
 
-## CI and review gates
+### Phase 10.1 — contracts and deterministic provider double
 
-Every implementation PR must pass the existing GCC Debug, Clang Release,
-sanitizer, TSan, fuzz-smoke, and integration suites plus deterministic
-fake-provider tests, no-network tests, closed production-schema tests,
-secret-pattern and redaction tests, endpoint and redirect policy tests,
-allowlist tests, bounded failure/timeout tests, and byte-identical report
-tests. A live provider result is observational only.
+Implemented:
 
-A Phase 10 implementation PR is not ready to merge until independent review
-confirms no native-server authority change, no provider networking or
-credentials in the server, local validation of every proposal, bounded loops
-and transcripts, provenance for every factual claim, at-most-once execution,
-and deterministic coverage for every introduced failure class.
+- provider-neutral types;
+- complete failure taxonomy;
+- closed schemas;
+- bounded non-streaming transport seam;
+- loopback fake HTTP provider;
+- endpoint/TLS/redirect policy;
+- environment scrubbing;
+- redaction and transcript primitives;
+- security regressions.
+
+### Phase 10.2 — bounded MCP orchestration
+
+Implemented:
+
+- scrubbed child process lifecycle;
+- initialize and exact tool-surface capture;
+- immutable authorization;
+- stable action identity;
+- serial at-most-once execution;
+- bounded turns, calls, bytes and deadlines;
+- cancellation and shutdown;
+- validated evidence and deterministic control transcript.
+
+### Phase 10.3 — adversarial assurance
+
+Added deterministic coverage for:
+
+- hostile provider and MCP data;
+- fabricated evidence and false claims;
+- correlation and nonexistent references;
+- replay and ambiguous completion;
+- stop-after-first-control-failure behavior;
+- retry delay boundaries;
+- secret sentinels;
+- endpoint/TLS/redirect attacks;
+- transcript tampering;
+- exact-at-limit and one-over budgets;
+- lifecycle and authority containment.
+
+### Phase 10.4 — optional OpenAI-compatible adapter
+
+Implemented:
+
+- configurable endpoint and model;
+- project-owned bounded provider marker;
+- verified-HTTPS production transport;
+- credential-free loopback test transport;
+- bounded OpenAI-compatible request/response mapping;
+- classified errors and retries;
+- synthetic-only egress authorization;
+- manual synthetic redacted smoke;
+- offline credential-free automated tests.
+
+## Verification gate
+
+Every Phase 10 increment required:
+
+- focused tests;
+- all earlier Phase 10 regressions;
+- dev, sanitizer and ThreadSanitizer CTest suites;
+- deterministic fuzz smoke;
+- five libFuzzer smoke targets;
+- `git diff --check`;
+- exact-head GitHub Actions;
+- independent exact-head review before merge.
+
+The final Phase 10.4 evidence is summarized in [`docs/ASSURANCE.md`](docs/ASSURANCE.md).
 
 ## Release policy
 
-Phase 10 should be released only after the deterministic agent, fake-provider
-suite, adversarial coverage, and optional adapter have passed separate review.
-No release version is selected by this planning PR.
+The completed Phase 10 implementation is merged but untagged.
+
+A future release requires a separate version decision, release notes and release-specific verification. No release version is selected by this document.

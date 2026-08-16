@@ -1,248 +1,254 @@
 # Architecture
 
-## System boundary
+## Overview
 
-The latest tagged release is `v0.10.1` at commit
-`2e19b5b6a14f5fbe26c5b4094c1750c6c5205db1`. It provides four read-only MCP
-tools with the same boundary as the immutable `v0.10.0` release. The v0.10.0
-tag intentionally remains immutable and contains the historical stale compiled
-identifier; v0.10.1 is the correction release.
-The server enables a tool only when the operator supplies a trusted runtime policy.
+Native MCP Sandbox separates host authority, agent orchestration and hosted-provider access into distinct trust boundaries.
 
-The tools are:
+```text
+Optional hosted provider
+        |
+        | verified HTTPS, bounded non-streaming JSON
+        v
+External Python agent
+        |
+        | newline-delimited JSON-RPC 2.0 over stdio
+        v
+Native C++ MCP server
+        |
+        +--> trusted runtime policy
+        +--> logs.search / logs.tail
+        +--> elf.inspect
+        +--> proc.memory
+```
 
-- `logs.search`
-- `logs.tail`
-- `elf.inspect`
-- `proc.memory`
+The native server remains stdio-only, network-free and credential-free. The optional OpenAI-compatible adapter exists only in the external Python agent. Provider output is untrusted and cannot directly execute a tool or become evidence.
 
-The server exposes no tools when it has no runtime policy.
-The server does not add these capabilities:
+The completed implementation is on `main`. The latest tagged release remains `v0.10.1`, which predates the Phase 10 agent.
 
-- filesystem changes
-- process control
-- raw process memory
-- shell execution
-- networking
-- MCP tasks
+## Trust boundaries
 
-## Phase 10.4 adapter status
+### Native server
 
-PR #20 implements the optional OpenAI-compatible adapter in the external
-Python agent. It uses a bounded non-streaming HTTP transport with configurable
-endpoint and model, verified HTTPS for production credentials, and a
-credential-free loopback fake-provider path. The native server remains
-stdio-only, network-free, credential-free, and unchanged in authority; no MCP
-tool was added. Normal CI remains offline and credential-free. The live
-provider smoke is opt-in, synthetic, redacted, observational, and non-gating.
+The C++ server owns:
 
-Phase 8 adds a demonstration client.
-The client uses the existing tools only.
-It does not change the server boundary.
-The client starts the real executable through standard input and standard output.
-It uses a temporary root and a version 2 runtime policy.
-It uses the `self` process alias.
-It does not pass legacy compatibility flags.
-It correlates every response by JSON-RPC request ID.
-It writes fixed JSON and Markdown evidence.
+- MCP lifecycle and JSON-RPC framing;
+- closed request and tool schemas;
+- runtime-policy enforcement;
+- filesystem and process identity controls;
+- bounded scheduling, cancellation and deadlines;
+- complete serialized protocol output.
 
-## Protocol path
+It does not own:
 
-The server processes a request in this sequence:
+- hosted-provider networking;
+- provider credentials;
+- arbitrary shell, filesystem or process authority;
+- model-defined methods or tools.
+
+### Runtime policy
+
+The operator supplies a trusted policy that maps symbolic names to approved resources. The MCP client selects a symbolic name; it cannot choose an arbitrary absolute path or raw PID.
+
+With no policy, the server advertises no host tools.
+
+### External agent
+
+The Python agent owns:
+
+- child-process startup with a scrubbed environment;
+- MCP initialize and `tools/list` capture;
+- immutable tool-surface identity;
+- provider request construction;
+- local tool proposal validation and authorization;
+- stable action identity and replay state;
+- serial, at-most-once MCP execution;
+- validated evidence and deterministic control transcripts.
+
+### OpenAI-compatible adapter
+
+The optional adapter owns bounded provider HTTP, TLS, authentication, retries, content-type validation and provider-specific response parsing.
+
+Production access requires verified HTTPS. Endpoint and model remain configurable. Credentials load only at explicit production execution. The loopback fake-provider path is credential-free.
+
+The adapter is non-streaming. Normal CI does not require internet access or credentials.
+
+## Native request path
+
+The server processes one request in this sequence:
 
 1. The main thread reads one size-limited JSON-RPC line from standard input.
-2. The SAX preflight checks JSON syntax, duplicate keys, depth, and token count.
-3. The reader checks the MCP lifecycle and the closed request schema.
-4. The reader writes immediate protocol and discovery responses.
-5. A valid `tools/call` reserves one slot in the unfinished-work set.
-6. A C++20 coroutine suspends and puts its handle in reserved queue storage.
-7. One worker resumes the coroutine.
-8. The selected tool uses the applicable policy gate.
-9. The analyzer checks cancellation and the deadline at bounded points.
-10. The serialized writer writes one complete response line.
+2. SAX preflight checks syntax, duplicate keys, depth and token count.
+3. The protocol layer validates lifecycle state and the closed request schema.
+4. Immediate protocol or discovery responses are serialized directly.
+5. A valid `tools/call` reserves one unfinished-work slot.
+6. A C++20 coroutine suspends into reserved queue storage.
+7. One fixed worker resumes the coroutine.
+8. The selected analyzer applies its runtime-policy gate.
+9. Cancellation and deadline checks run at bounded points.
+10. One serialized writer emits a complete JSON-RPC response line.
 
-A tool response can finish before an earlier tool response.
-The JSON-RPC ID identifies the applicable request.
-Worker threads do not change the MCP lifecycle state.
+Tool calls can complete out of request order. Clients must correlate each response by JSON-RPC ID.
 
-## JSON preflight
+## JSON and resource bounds
 
-`preflight_json` uses the nlohmann/json SAX interface.
-It does not construct a DOM.
+`preflight_json` uses the nlohmann/json SAX interface before DOM construction.
 
-The preflight counts these items:
+Protocol JSON limits:
 
-- scalar values
-- arrays
-- objects
-- object keys
+- 1 MiB input;
+- 64 nested containers;
+- 32,768 tokens.
 
-It keeps object keys only until the applicable object closes.
-It rejects a duplicate key in the same object.
+Runtime-policy JSON limits:
 
-Protocol JSON has these limits:
+- 64 KiB input;
+- 32 nested containers;
+- 4,096 tokens.
 
-- 64 nested containers
-- 32,768 tokens
-- 1 MiB of input
+The server then applies closed-schema validation. The two-stage parse is intentional: preflight bounds syntax and structure; the DOM pass validates meaning.
 
-Runtime-policy JSON has these limits:
+The scheduler uses:
 
-- 32 nested containers
-- 4,096 tokens
-- 64 KiB of input
+- two worker threads;
+- at most 16 unfinished tool calls;
+- a 30-second deadline for each accepted native call;
+- bounded request and response sizes;
+- duplicate in-flight request-ID rejection;
+- reserved coroutine queue capacity.
 
-The normal DOM parser runs after the preflight.
-Closed schema validation runs after DOM construction.
-This double parse uses bounded CPU to reduce ambiguity and resource risk.
-
-## Work control
-
-The scheduler has these fixed limits:
-
-- 16 unfinished tool calls
-- two worker threads
-- a 30-second deadline for each accepted call
-- 16 submissions in one second
-- 1 MiB for each request and response
-
-The unfinished-work limit includes queued and running work.
-The server returns `server_busy` when the limit is full.
-The server rejects a duplicate in-flight request ID.
-
-The scheduler uses one canonical key for equal non-negative signed and unsigned numeric IDs.
-A string ID stays different from a numeric ID.
-
-The scheduler reserves queue capacity during construction.
-A suspension callback does not allocate queue storage.
-The server does not create one thread for each request.
-
-Worker construction is exception-safe.
-If worker creation fails, the constructor stops and joins each worker that already started.
-Then the constructor propagates the exception.
-
-A worker callback can request shutdown.
-This request closes admission and returns without a wait or a join.
-A non-worker shutdown drains accepted work and joins all workers.
-The join operation has one owner.
-
-## Cancellation and deadlines
-
-The server accepts `notifications/cancelled` only as a notification.
-The notification must contain a valid `requestId`.
-
-For matching work, the server does these actions:
-
-- It requests stop through `std::stop_source`.
-- It suppresses the normal tool response.
-- It lets the analyzer stop at its next bounded check.
-
-The server ignores an unknown or completed request ID.
-
-Deadlines use `std::chrono::steady_clock`.
-The server returns `deadline_exceeded` when work expires.
-A prior client cancellation keeps response suppression in control.
-
-Cancellation is cooperative.
-The server does not forcibly terminate a worker.
-It does not claim hard real-time interruption of an arbitrary system call.
+The server does not create one thread per request.
 
 ## Filesystem boundary
 
-Filesystem tools accept a root name and a relative path.
-The client cannot supply an absolute path.
+Filesystem tools receive a configured root name and relative path.
 
-Strict mode uses `openat2` with these controls:
+Strict mode uses Linux `openat2` with:
 
-- `RESOLVE_BENEATH`
-- `RESOLVE_NO_SYMLINKS`
-- `RESOLVE_NO_MAGICLINKS`
-- `RESOLVE_NO_XDEV`
+- `RESOLVE_BENEATH`;
+- `RESOLVE_NO_SYMLINKS`;
+- `RESOLVE_NO_MAGICLINKS`;
+- `RESOLVE_NO_XDEV`.
 
-The policy checks the file type, access mode, and size.
-It keeps the accepted inode through an owned descriptor.
+The policy validates file type, access mode and size, then keeps the accepted inode pinned through an owned descriptor.
 
-The compatibility descriptor walk is an explicit option.
-It cannot detect every bind-mount boundary.
+The descriptor-walk compatibility mode is explicit and cannot prove every bind-mount boundary.
 
 ## Process boundary
 
-The operator configures each process target.
-The MCP client selects a process name only.
-The client cannot supply a raw PID.
+The operator configures named process targets. The MCP client cannot provide a raw PID.
 
-The policy requires the same effective UID.
-It keeps the `/proc/<pid>` directory descriptor.
-It records process start time.
-Strict mode also requires a pidfd.
+Strict process mode requires:
 
-The tool reads only bounded aggregate data from these files:
+- the same effective UID;
+- a retained `/proc/<pid>` directory descriptor;
+- process start-time capture and revalidation;
+- pidfd identity pinning.
 
-- `status`
-- `statm`
-- optional `smaps_rollup`
+`proc.memory` reads only bounded aggregate values from `status`, `statm` and optional `smaps_rollup`. It does not read raw memory, maps, command lines, environments, descriptors or discover processes.
 
-The tool does not read process memory, maps, command lines, environments, or file descriptors.
-It verifies process identity before and after an observation.
+## Cancellation and shutdown
 
-## Output and shutdown
+The server accepts `notifications/cancelled` only as a notification with a valid `requestId`.
 
-EOF stops new admission.
-The server drains accepted work before it joins workers.
+Matching work receives a cooperative stop request. The normal tool response is suppressed after client cancellation. Unknown or completed IDs are ignored.
 
-One mutex protects the protocol writer.
-Standard output contains complete JSON-RPC lines only.
-Standard error contains generic diagnostics.
-Diagnostics do not echo request, file, or process data.
+Deadlines use `std::chrono::steady_clock`. Cancellation is cooperative; the project does not claim hard real-time interruption of arbitrary system calls.
+
+EOF closes admission. Accepted work drains before workers join. Shutdown has one join owner, and standard output remains complete protocol lines only.
+
+## Agent orchestration path
+
+The external agent performs this bounded sequence:
+
+1. Construct a minimal child environment.
+2. Start the native server without a shell.
+3. Send `initialize` and validate the correlated response.
+4. Send `notifications/initialized`.
+5. Request `tools/list` and freeze the exact advertised surface.
+6. Construct a bounded provider-neutral request.
+7. Receive either a final message or structured tool proposals.
+8. Validate every proposal against the captured name and closed input schema.
+9. Derive a project-owned action identity.
+10. Reject duplicates, replays and ambiguous repeats.
+11. Execute accepted calls serially in provider-declared order.
+12. Validate MCP responses before creating evidence.
+13. Record deterministic, bounded transcript events.
+14. Stop at configured turn, call, byte, cancellation or wall-clock limits.
+
+Later proposals in one provider response do not execute after the first rejection, failure, cancellation or timeout.
+
+## Evidence and provenance
+
+Provider text is guidance, not evidence.
+
+Validated evidence retains:
+
+- a project-owned action identity;
+- the correlated MCP response ID;
+- closed and redacted result content;
+- explicit `VALIDATED_MCP_EVIDENCE` provenance.
+
+Transcript parsing validates both event schemas and cross-event action/response references. Orphan, mismatched, stale, duplicate and nonexistent provenance references fail closed.
+
+## Provider transport
+
+The OpenAI-compatible adapter:
+
+- maps only provider-neutral request fields;
+- forces `stream: false`;
+- derives tool definitions from the captured MCP surface;
+- enforces request bytes before transmission;
+- bounds response bytes while reading;
+- validates JSON content type;
+- rejects redirects;
+- classifies HTTP/TLS/timeout failures through the project taxonomy;
+- applies bounded retries and `Retry-After` rules;
+- parses a closed response envelope into existing neutral types.
+
+Production DNS is re-resolved immediately before TLS connection. Any non-global answer rejects the destination. TLS hostname verification uses the configured public hostname even when the socket connects to a validated resolved address.
+
+## Synthetic-only egress
+
+Automated tests and the manual smoke use the `synthetic-only` policy.
+
+Outbound initial content must carry project-issued, non-transferable synthetic authorization. Arbitrary strings, copied authorization state and mutated content fail closed. Later MCP evidence is not sent to the provider in this mode.
+
+## Demonstrations
+
+The deterministic offline investigation client uses the real server, committed synthetic evidence and canonical JSON/Markdown reports. It validates the exact tool surface and produces byte-identical outputs across repeated runs.
+
+The optional hosted-provider smoke uses only project-authorized synthetic content. It is manual, redacted, observational and non-gating.
+
+See [`docs/DEMO.md`](docs/DEMO.md).
 
 ## Assurance design
 
-The Phase 8 client validates the MCP lifecycle, the exact tool list, each tool
-result, strict pidfd pinning, and the required process counters.
-It rejects a changed file, a protocol error, a schema mismatch, a timeout, a
-non-zero server exit, and non-empty standard error.
-It converts runtime process values to stable predicates before it writes a
-report.
+Native and agent assurance includes:
 
-`native_mcp_fuzz_support` contains shared invariants for these surfaces:
+- unit and process-level integration tests;
+- accepted and rejected schema paths;
+- malformed, duplicate-key and oversized data;
+- replay, correlation and fabricated-evidence attacks;
+- ASan, UBSan, leak detection and ThreadSanitizer;
+- deterministic mutation campaigns;
+- five Clang libFuzzer targets;
+- strict `openat2`, pidfd, AF_UNIX and FIFO integration;
+- byte-identical report and transcript checks;
+- secret-sentinel coverage across owned output surfaces.
 
-- protocol and JSON safety
-- runtime-policy parsing
-- ELF analysis
-- log analysis
-- bounded proc-text parsing
+The shared fuzz support covers protocol, runtime policy, ELF, log and supplied proc-text parsing. The proc parser target does not open host procfs.
 
-The deterministic mutation runner uses these invariants in normal CTest builds.
-The optional Clang libFuzzer targets use the same invariants.
-The proc parser fuzz target accepts supplied bytes only.
-It does not open host procfs.
+See [`docs/ASSURANCE.md`](docs/ASSURANCE.md) and [`docs/FUZZING.md`](docs/FUZZING.md).
 
-Curated corpora and dictionaries are in `fuzz/`.
-Generated artifacts stay under `build/` until review and minimization.
+## Residual boundaries
 
-Concurrency tests are separate from byte fuzzing.
-They test admission, cancellation, deadlines, callback failures, and shutdown races.
-A focused ThreadSanitizer build runs these tests.
+The project does not claim:
 
-The project runs directly on Linux.
-It does not require a container runtime.
+- hard real-time cancellation;
+- fairness between multiple clients;
+- durable replay state across separate investigations;
+- universal OpenAI-compatible provider interoperability;
+- protection against a compromised kernel or toolchain;
+- proof of complete correctness or security.
 
-## Recorded Phase 7 evidence
-
-Phase 7 assurance used Ubuntu 24.04.
-It tested source head `df576168fd44561254736a60c45188333bd1bc50`.
-
-The tests included:
-
-- two deterministic campaigns with 100,000 iterations each
-- 50 ThreadSanitizer unit repetitions
-- 25 ThreadSanitizer stress repetitions
-- strict `openat2` and pidfd checks
-- 50 AF_UNIX and FIFO policy repetitions
-- 20 configured standard-I/O integration repetitions
-- five libFuzzer campaigns of 600 seconds each
-
-The libFuzzer campaigns executed 61,925,751 inputs.
-The runs found no crash, sanitizer finding, timeout, or crash artifact.
-This evidence applies to the tested build and inputs only.
-It is not proof of complete correctness or security.
+New authority requires an explicit threat-model decision and focused review.

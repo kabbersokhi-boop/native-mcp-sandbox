@@ -2,174 +2,234 @@
 
 ## Supported versions
 
-The project is before version 1.0.
-Only the latest tagged release and the default branch receive security corrections.
+Native MCP Sandbox is before version 1.0. Security corrections target:
 
-The latest tagged release is `v0.10.1`, at commit
-`2e19b5b6a14f5fbe26c5b4094c1750c6c5205db1`. It provides the local stdio MCP
-server, the deterministic read-only investigation client, and bounded
-reproducibility benchmarks. A trusted policy can enable read-only log, ELF, and
-process-memory tools.
+- the latest tagged release; and
+- the default branch, `main`.
 
-The immutable `v0.10.0` tag contains the historical stale compiled version
-identifier `0.9.0`. `v0.10.1` is the correction release at the tag target above.
-Phase 10.4 adds an optional bounded OpenAI-compatible adapter only in the
-external Python agent. The native C++ server remains stdio-only, network-free,
-credential-free, and exposes no new MCP tool. Production credentials are
-restricted to verified-HTTPS adapter execution; normal CI remains offline and
-credential-free.
+The latest tag is `v0.10.1` at commit `2e19b5b6a14f5fbe26c5b4094c1750c6c5205db1`.
 
-The security scope includes these areas:
-
-- protocol framing
-- JSON preflight
-- lifecycle control
-- filesystem containment
-- process identity
-- bounded parsing
-- work scheduling
-- cancellation
-- deadlines
-- output serialization
-- fuzz harnesses
-- dependencies
-- deterministic demonstration output
-- benchmark report integrity
+`main` additionally contains the completed Phase 10 external agent and optional OpenAI-compatible adapter. The native C++ server remains stdio-only, network-free, credential-free and exposes no new MCP tool.
 
 ## Report a vulnerability
 
-Do not put a working exploit in a public issue.
-Use GitHub private vulnerability reporting.
+Do not publish a working exploit or sensitive reproduction in a public issue.
 
-If private reporting is not available, do these steps:
+Use GitHub private vulnerability reporting when available.
+
+If private reporting is unavailable:
 
 1. Open a public issue without exploit details.
 2. Ask for a private communication channel.
-3. Do not add confidential data to the issue.
+3. Do not add credentials, host evidence or confidential data to the issue.
 
-Include this information when possible:
+Include these details when possible:
 
-- affected version and commit
-- operating system and kernel
-- compiler and sanitizer configuration
-- minimum reproduction steps
-- minimized fuzz input, when applicable
-- fuzz target, seed, dictionary, flags, and duration
-- expected behavior
-- observed behavior
-- security effect
-- current public-disclosure status
+- affected version, tag or commit;
+- operating system and kernel;
+- compiler and sanitizer configuration;
+- minimum reproduction steps;
+- minimized fuzz input, when applicable;
+- fuzz target, seed, dictionary, flags and duration;
+- expected behavior;
+- observed behavior;
+- security impact;
+- current disclosure status.
 
-The maintainers respond on a best-effort basis.
-This project does not provide a service-level agreement.
+The project is maintained on a best-effort basis and does not provide a service-level agreement.
 
-## Requirements for a security-related change
+## Security boundary
 
-For a protocol or JSON change, add tests for these conditions:
+The project intentionally separates two components.
 
-- accepted input
-- rejected input
-- duplicate keys
-- excessive depth
-- excessive token count
-- malformed encoding
-- request and response limits
+### Native server
 
-For a scheduler change, add tests for these conditions:
+The C++ MCP server owns local policy enforcement and read-only evidence access. It must remain:
 
-- saturation
-- duplicate IDs
-- cancellation
-- deadline order
-- EOF
-- worker-construction failure
-- simultaneous shutdown
-- callback failure
-- output framing
+- stdio-only;
+- network-free;
+- credential-free;
+- closed-schema and bounded;
+- free of generic shell, arbitrary path and raw PID authority.
 
-For each confirmed crash, hang, sanitizer report, or data race, add a permanent regression.
-Minimize the input before you commit it.
+### External agent
 
-Update the threat model when an assumption changes.
-Run the applicable sanitizers.
-Run focused ThreadSanitizer tests for a concurrency change.
-Check object lifetime, lock order, coroutine destruction, identity, lifecycle, cancellation races, and exception cleanup.
+The Python agent may perform bounded provider networking, but it must:
 
-Do not add one of these capabilities without a separate threat-model decision:
+- keep provider credentials out of the native process;
+- treat provider output as untrusted;
+- validate every proposed tool against the exact captured MCP surface;
+- execute serially and at most once;
+- retain action/response provenance;
+- use explicit data-flow authorization;
+- keep normal CI offline and credential-free.
 
-- raw process memory
-- client-selected PIDs
-- filesystem changes
-- process control
-- shell access
-- networking
+## Prohibited authority changes
 
-A hosted model provider must remain outside the native MCP server. The provider
-client must be a separate process that treats model output as untrusted, rejects
-unknown fields in production request/response and transcript schemas, validates
-closed tool-call schemas, uses only symbolic aliases, and communicates with the
-server through the existing stdio MCP interface. The native server must remain
-credential-free and must not gain HTTP or other networking support.
+Do not add any of these capabilities without a separate threat-model and architecture decision:
 
-Before starting the server or any child, the external agent must build a
-deliberately scrubbed environment from a minimal allowlist. It must not inherit
-provider API keys, authorization tokens or headers, secret-store tokens, proxy
-credentials, live-provider configuration, secret-disclosing debug variables, or
-`HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, and `NO_PROXY` unless a child-specific
-allowlist explicitly requires them. Deterministic sentinel tests must prove
-that secrets do not appear in child environments, arguments, stdout, stderr,
-exceptions, logs, transcripts, reports, or crash artifacts.
+- raw process memory;
+- client-selected PIDs;
+- filesystem mutation;
+- arbitrary filesystem reads;
+- process discovery or control;
+- shell access;
+- networking inside the native server;
+- provider credentials inside the native server;
+- provider-defined MCP methods or tools;
+- parallel MCP execution;
+- automatic host-evidence egress.
 
-Production endpoints must use verified HTTPS, validate scheme and authority,
-reject URL user-info and fragments, verify certificate and hostname, and reject
-disabled verification and ambiguous forms. Redirects are disabled by default;
-future bounded redirects must not forward credentials across origins, downgrade
-HTTPS, or reach disallowed address classes. Plain HTTP is allowed only for an
-explicit loopback-only fake-provider test with no live credential loaded or
-sent.
+## Native server requirements
 
-The agent must use stable request correlation and locally derived action
-identities, deduplicate proposals across attempts and turns, and execute each
-accepted action at most once. Multiple calls are serialized in provider order;
-PRs 10.1–10.3 must not execute them in parallel, and processing stops after
-the first rejection, failure, cancellation, or timeout. Provider retries are
-transport-only and must not repeat an MCP call.
+### Protocol and JSON
 
-Provider text is guidance, never evidence. Factual report claims must trace to
-validated MCP response IDs, stable local predicates, committed synthetic
-fixture assertions, or local control events. Reports must distinguish
-suggestions, proposals, rejections, validated evidence, derived predicates,
-and supported conclusions.
+Protocol and configuration changes must retain tests for:
 
-Normal CI has no internet access or credential requirement and uses deterministic
-local provider doubles. Streaming remains deferred until non-streaming tests
-pass. A live NIM smoke, if later added, must be manual, synthetic, redacted,
-non-gating, and deferred until PRs 10.1–10.3 pass.
+- accepted input;
+- rejected input;
+- duplicate keys;
+- excessive depth;
+- excessive token count;
+- malformed encoding;
+- request and response limits;
+- closed-schema unknown-field rejection.
 
-Run longer native tests with these commands:
+### Scheduler and lifecycle
+
+Scheduler changes must retain tests for:
+
+- saturation;
+- duplicate IDs;
+- queued and running cancellation;
+- deadline order;
+- EOF;
+- worker-construction failure;
+- simultaneous shutdown;
+- callback failure;
+- output framing.
+
+### Filesystem and process identity
+
+Strict filesystem mode must preserve `openat2` containment, descriptor ownership and rejection of traversal, symlinks, magic links and mount crossings.
+
+Strict process mode must preserve same-UID checks, proc-directory retention, start-time validation and pidfd identity pinning.
+
+## External agent requirements
+
+### Child environment
+
+Before starting the native server or another child, construct a minimal environment from an explicit allowlist.
+
+Do not inherit:
+
+- provider API keys;
+- Authorization values;
+- secret-store tokens;
+- proxy credentials;
+- live-provider configuration;
+- secret-disclosing debug variables;
+- `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY` or `NO_PROXY`, unless a child-specific policy explicitly permits a structurally validated value.
+
+Sentinel tests must prove secret absence from owned child environments, argv, retained stdout/stderr, exceptions, diagnostics, transcripts, evidence, reports and available crash-artifact surfaces.
+
+### Endpoint and TLS policy
+
+Production provider endpoints must:
+
+- use verified HTTPS;
+- reject URL user-info, fragments, queries and ambiguous forms;
+- verify certificate and hostname;
+- reject disabled verification;
+- reject redirects;
+- re-resolve and reject non-global destination addresses immediately before connection.
+
+Plain HTTP is allowed only for the explicit loopback fake provider. That path is structurally credential-free and test-only.
+
+### Credentials
+
+Production credentials:
+
+- load only at explicit adapter execution;
+- remain in the external provider process;
+- enter only the bounded provider Authorization header;
+- must not enter argv, transcripts, evidence, native child state or diagnostics.
+
+The absence of a production credential must fail as `CREDENTIAL_UNAVAILABLE` when production execution is explicitly requested.
+
+### Data flow
+
+The implemented automated and manual smoke path uses `synthetic-only` egress.
+
+Synthetic outbound content requires project-issued, non-transferable authorization. Arbitrary strings, copied authorization state and mutated content fail closed. Later MCP evidence remains blocked in this mode.
+
+`redacted-summary` and `approved-evidence` are not implemented by Phase 10.4.
+
+### Tool authority and replay
+
+Provider text is guidance, never evidence.
+
+Every tool proposal must pass:
+
+- exact advertised-name membership;
+- closed argument-schema validation;
+- local authorization;
+- stable action identity;
+- duplicate and replay checks;
+- serial execution;
+- at-most-once enforcement.
+
+Transport retries must not repeat an MCP action.
+
+### Evidence and transcripts
+
+Validated evidence must retain an exact project-owned action identity, correlated MCP response ID and explicit provenance.
+
+Transcript parsers must reject unknown fields, malformed metadata, orphan references, mismatched action/response pairs, duplicate or stale provenance and appended data after terminal exhaustion.
+
+## Verification requirements
+
+For each confirmed crash, hang, sanitizer report, data race, secret leak or authority bypass:
+
+1. reproduce the issue with an exact command;
+2. confirm it with the relevant sanitizer or detector;
+3. minimize the input or scenario;
+4. correct the implementation without weakening the boundary;
+5. add a named regression;
+6. add a corpus input only when it provides durable new coverage.
+
+Run the applicable normal, sanitizer, ThreadSanitizer and fuzz gates. See [`docs/ASSURANCE.md`](docs/ASSURANCE.md) and [`docs/FUZZING.md`](docs/FUZZING.md).
+
+Longer native campaigns:
 
 ```bash
 NMS_STRESS_ITERATIONS=20000 ./scripts/run_security_stress.sh
 NMS_FUZZ_SECONDS=60 ./scripts/run_fuzz_campaign.sh
 ```
 
-A clean test run is evidence for the exact tested build and paths.
-It is not proof that the project has no vulnerability.
+A clean run is evidence for the exact tested source and environment. It is not proof that no vulnerability exists.
 
-The Phase 8 demonstration uses strict `openat2` and pidfd operation.
-It does not pass either legacy compatibility flag.
-It does not execute or import its generated ELF fixture.
-Its reports do not contain PIDs, UIDs, memory totals, addresses, temporary
-paths, or runtime timestamps.
+## Optional hosted-provider smoke
 
-Do not commit these items:
+The OpenAI-compatible smoke is:
 
-- credentials or API keys
-- environment files that contain secrets
-- confidential data
-- local absolute paths
-- build output
-- release archives
-- raw crash dumps
-- unreviewed fuzz artifacts
-- live-provider request or response captures that contain sensitive evidence
+- disabled by default;
+- manually enabled;
+- synthetic-only;
+- redacted;
+- non-gating;
+- observational.
+
+A live provider result must not become CI, release or factual evidence.
+
+## Do not commit
+
+- credentials or API keys;
+- secret-bearing environment files;
+- confidential host evidence;
+- local absolute paths;
+- build output;
+- release archives;
+- raw crash dumps;
+- unreviewed fuzz artifacts;
+- live-provider request or response captures containing sensitive data.
