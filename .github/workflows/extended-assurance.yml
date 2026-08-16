@@ -31,7 +31,7 @@ jobs:
         run: |
           ./build/native_mcp_fuzz_smoke --iterations 100000 --seed 828927513140 | tee deterministic-seed-1.log
           ./build/native_mcp_fuzz_smoke --iterations 100000 --seed 11400714819323198485 | tee deterministic-seed-2.log
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
           name: deterministic-mutation-logs
@@ -56,7 +56,7 @@ jobs:
         run: |
           ctest --test-dir build --output-on-failure --repeat until-fail:50 -R '^orchestration\.unit$' | tee tsan-unit.log
           ctest --test-dir build --output-on-failure --repeat until-fail:25 -R '^orchestration\.stress$' | tee tsan-stress.log
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
           name: scheduler-tsan-logs
@@ -106,7 +106,7 @@ jobs:
           ctest --test-dir build --output-on-failure --repeat until-fail:50 -R '^policy\.unit$' | tee policy-repeat.log
           ctest --test-dir build --output-on-failure --repeat until-fail:20 -R '^protocol\.stdio_integration$' | tee integration-repeat.log
           ./build/native-mcp-sandbox --self-check | tee self-check.log
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
           name: strict-integration-logs
@@ -161,7 +161,7 @@ jobs:
           cp -a fuzz/corpus/${{ matrix.corpus }}/. campaign/corpus/
           ./build/${{ matrix.target }} campaign/corpus -runs=0 -timeout=10 -rss_limit_mb=2048 -max_len=${{ matrix.max_len }} -dict=fuzz/dictionaries/${{ matrix.dictionary }} -artifact_prefix=campaign/artifacts/ 2>&1 | tee corpus-replay.log
           ./build/${{ matrix.target }} campaign/corpus -max_total_time=600 -timeout=10 -rss_limit_mb=2048 -max_len=${{ matrix.max_len }} -dict=fuzz/dictionaries/${{ matrix.dictionary }} -artifact_prefix=campaign/artifacts/ -print_final_stats=1 2>&1 | tee campaign.log
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
           name: fuzz-${{ matrix.corpus }}
