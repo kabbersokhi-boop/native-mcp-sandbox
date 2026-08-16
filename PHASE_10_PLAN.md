@@ -17,7 +17,7 @@ The completed Phase 10 implementation is included in `main` at and after merge c
 6125964b03e76277f42df1d60c52933e7ce0e861
 ```
 
-Phase 10 shipped in `v0.11.0`. Phase 11 is not defined.
+Phase 10 is assigned project version `v0.11.0`. Phase 11 is not defined.
 
 This document records the intent and security boundaries that governed the implementation. Current public architecture, security and assurance details are in:
 

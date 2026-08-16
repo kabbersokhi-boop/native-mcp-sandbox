@@ -19,7 +19,7 @@ The project answers with two deliberately separate components:
 1. a small native MCP server that exposes only operator-approved, read-only tools over stdio; and
 2. an optional external Python agent that can use a bounded OpenAI-compatible provider while preserving local validation, authorization, replay protection and evidence provenance.
 
-Release [`v0.11.0`](https://github.com/kabbersokhi-boop/native-mcp-sandbox/releases/latest) packages the completed roadmap through Phase 10.4: the native server and the separate bounded agent are deliberately different trust boundaries.
+Version `v0.11.0` packages the completed roadmap through Phase 10.4: the native server and the separate bounded agent are deliberately different trust boundaries.
 
 ## Why this project exists
 
@@ -266,7 +266,7 @@ A clean campaign is evidence for the tested source, environment and paths. It is
 
 ## Project status
 
-- Phases 0–10.4: complete and released as `v0.11.0`.
+- Phases 0–10.4: complete at project version `v0.11.0`.
 - The native C++ authority is unchanged by Phase 10.
 - Phase 11 is not defined.
 

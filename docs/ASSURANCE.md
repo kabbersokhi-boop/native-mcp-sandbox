@@ -6,7 +6,7 @@ This document explains how that claim is tested, what evidence is available, and
 
 ## Current release evidence
 
-Release `v0.11.0` includes the completed Phase 10 implementation: provider-neutral contracts, bounded serial MCP orchestration, deterministic adversarial assurance and the optional OpenAI-compatible adapter. The immutable release tag and GitHub Release identify the exact source commit and published validation context.
+Project version `v0.11.0` includes the completed Phase 10 implementation: provider-neutral contracts, bounded serial MCP orchestration, deterministic adversarial assurance and the optional OpenAI-compatible adapter. When published, its immutable release tag and GitHub Release identify the exact source commit and validation context.
 
 The earlier Phase 10.4 exact-head run, `31915393822`, completed successfully across all five required CI jobs before this release pass. It is useful historical evidence for that exact head, not a substitute for release-head validation.
 
@@ -41,7 +41,7 @@ The final Phase 10.4 candidate completed:
 - libFuzzer smoke: **2,000 runs each** for protocol, runtime policy, ELF, log and process parsing
 - `git diff --check`: passed
 
-These numbers describe the release candidate validation. The tag, exact-head CI and clean-checkout verification identify the release source. They are not a general proof that the project has no defect.
+These numbers describe the release-candidate validation. Exact-head CI and clean-checkout verification identify the candidate source; its tag identifies the published release source. They are not a general proof that the project has no defect.
 
 ## Reproduce the normal test gate
 
@@ -123,8 +123,7 @@ A green test run does **not** mean:
 
 ## Public proof links
 
-- [v0.11.0 release](https://github.com/kabbersokhi-boop/native-mcp-sandbox/releases/tag/v0.11.0)
-- [v0.11.0 release pull request](https://github.com/kabbersokhi-boop/native-mcp-sandbox/pull/22) — the PR records its reviewed head and exact-head checks.
+- [v0.11.0 release pull request](https://github.com/kabbersokhi-boop/native-mcp-sandbox/pull/22) — the PR records its reviewed head and exact-head checks before publication.
 - [CI workflow](https://github.com/kabbersokhi-boop/native-mcp-sandbox/actions/workflows/ci.yml)
 - [Phase 10.4 historical exact-head run](https://github.com/kabbersokhi-boop/native-mcp-sandbox/actions/runs/31915393822)
 - [Phase 10.4 pull request](https://github.com/kabbersokhi-boop/native-mcp-sandbox/pull/20)
