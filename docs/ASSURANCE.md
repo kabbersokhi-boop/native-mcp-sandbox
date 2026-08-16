@@ -123,6 +123,8 @@ A green test run does **not** mean:
 
 ## Public proof links
 
+- [v0.11.0 release](https://github.com/kabbersokhi-boop/native-mcp-sandbox/releases/tag/v0.11.0)
+- [v0.11.0 release pull request](https://github.com/kabbersokhi-boop/native-mcp-sandbox/pull/22) — the PR records its reviewed head and exact-head checks.
 - [CI workflow](https://github.com/kabbersokhi-boop/native-mcp-sandbox/actions/workflows/ci.yml)
 - [Phase 10.4 historical exact-head run](https://github.com/kabbersokhi-boop/native-mcp-sandbox/actions/runs/31915393822)
 - [Phase 10.4 pull request](https://github.com/kabbersokhi-boop/native-mcp-sandbox/pull/20)
