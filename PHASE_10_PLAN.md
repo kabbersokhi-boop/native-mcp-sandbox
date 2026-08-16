@@ -17,7 +17,7 @@ The completed Phase 10 implementation is included in `main` at and after merge c
 6125964b03e76277f42df1d60c52933e7ce0e861
 ```
 
-The latest tagged release remains `v0.10.1`, which predates Phase 10. No Phase 10 release version has been selected. Phase 11 is not defined.
+Phase 10 shipped in `v0.11.0`. Phase 11 is not defined.
 
 This document records the intent and security boundaries that governed the implementation. Current public architecture, security and assurance details are in:
 
@@ -56,7 +56,7 @@ Phase 10 does not authorize:
 - parallel MCP execution;
 - a fixed dependency on NVIDIA NIM, OpenAI or one model;
 - a live provider as a CI or release dependency;
-- release or tag creation.
+- release or tag creation as part of the Phase 10 implementation itself.
 
 ## Architecture boundaries
 
@@ -317,4 +317,4 @@ The final Phase 10.4 evidence is summarized in [`docs/ASSURANCE.md`](docs/ASSURA
 
 The completed Phase 10 implementation is merged but untagged.
 
-A future release requires a separate version decision, release notes and release-specific verification. No release version is selected by this document.
+The release discipline for shipped Phase 10 work is recorded in [`docs/RELEASING.md`](docs/RELEASING.md).

@@ -1,0 +1,46 @@
+name: Bug report
+description: Report a reproducible defect without publishing sensitive evidence or exploit details.
+title: "bug: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: "For a suspected vulnerability, use private vulnerability reporting described in SECURITY.md. Do not include credentials, private host data, or exploit details here."
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      description: Include the release tag or exact commit SHA.
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: OS, kernel and compiler
+      description: Include the Linux distribution, kernel, compiler and relevant sanitizer configuration.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal reproduction
+      description: Provide safe, redacted commands and inputs.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: observed
+    attributes:
+      label: Observed behavior
+    validations:
+      required: true
+  - type: textarea
+    id: security
+    attributes:
+      label: Security impact, if relevant
+      description: Describe the impact at a high level; do not publish exploit details.

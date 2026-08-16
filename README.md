@@ -19,7 +19,7 @@ The project answers with two deliberately separate components:
 1. a small native MCP server that exposes only operator-approved, read-only tools over stdio; and
 2. an optional external Python agent that can use a bounded OpenAI-compatible provider while preserving local validation, authorization, replay protection and evidence provenance.
 
-The complete roadmap through Phase 10.4 is implemented on `main`. The latest tagged release remains `v0.10.1`; the completed Phase 10 agent has not yet been assigned a new release tag.
+Release [`v0.11.0`](https://github.com/kabbersokhi-boop/native-mcp-sandbox/releases/latest) packages the completed roadmap through Phase 10.4: the native server and the separate bounded agent are deliberately different trust boundaries.
 
 ## Why this project exists
 
@@ -43,6 +43,20 @@ It is intended as:
 - a foundation for bounded agent interoperability experiments.
 
 It is **not** a remote-administration framework, a shell replacement, an autonomous incident-response product or proof that all vulnerabilities are absent.
+
+## What makes the engineering interesting
+
+| Design choice | Why it matters |
+| --- | --- |
+| Symbolic policy aliases | A client chooses an operator-defined name, never a raw path or PID. |
+| `openat2` + retained descriptors | Strict filesystem access stays beneath an approved root and resists traversal, symlink, magic-link and mount-crossing escape attempts. |
+| pidfd + start-time verification | Strict process mode pins a named process identity rather than trusting a reusable numeric PID. |
+| Bounded JSON and closed schemas | Byte, token and nesting budgets are checked before work is admitted; unknown fields and duplicate keys fail closed. |
+| Fixed workers and C++20 coroutines | Admission, cancellation, steady-clock deadlines and serialized output are explicit rather than left to unbounded background work. |
+| Separate agent authority | A hosted model can propose a call, but local code validates the captured tool surface, derives a stable action identity and executes serially at most once. |
+| Provider isolation | Networking and credentials exist only in the opt-in external agent; the native server stays stdio-only. |
+
+The rationale, tradeoffs and code-level evidence are collected in [`docs/ENGINEERING_HIGHLIGHTS.md`](docs/ENGINEERING_HIGHLIGHTS.md).
 
 ## At a glance
 
@@ -78,12 +92,12 @@ See [`SECURITY.md`](SECURITY.md) and [`THREAT_MODEL.md`](THREAT_MODEL.md) before
 
 ```mermaid
 flowchart LR
-    P[Optional hosted provider] -->|Verified HTTPS\nnon-streaming| A[External bounded agent]
-    A -->|JSON-RPC 2.0 over stdio| S[Native C++ MCP server]
+    P[Optional hosted provider] -->|Verified HTTPS\nnon-streaming| A[External bounded Python agent]
+    A -->|JSON-RPC / MCP over stdio| S[Native C++ server]
     O[Trusted operator policy] --> S
-    S --> L[logs.search / logs.tail]
-    S --> E[elf.inspect]
-    S --> M[proc.memory]
+    S --> L[Approved log evidence]
+    S --> E[Approved ELF evidence]
+    S --> M[Approved process counters]
 
     classDef native fill:#eef6ff,stroke:#2563eb,color:#111827;
     classDef agent fill:#f5f3ff,stroke:#7c3aed,color:#111827;
@@ -236,7 +250,7 @@ The project uses layered verification rather than one headline test count.
 | Determinism | repeated canonical transcript and report equality |
 | Provider isolation | fake loopback HTTP, TLS/endpoint policy, credential and synthetic-egress tests |
 
-The final Phase 10.4 candidate passed:
+The `v0.11.0` release candidate passed:
 
 - 16 Phase 10.4 tests;
 - 34 Phase 10.3 adversarial tests;
@@ -252,16 +266,9 @@ A clean campaign is evidence for the tested source, environment and paths. It is
 
 ## Project status
 
-- Phases 0–9: complete.
-- Phase 10.1: provider-neutral contracts and deterministic provider double — complete.
-- Phase 10.2: bounded serial MCP orchestration — complete.
-- Phase 10.3: deterministic adversarial assurance — complete.
-- Phase 10.4: optional OpenAI-compatible non-streaming adapter — complete.
-- Current `main`: includes the full Phase 10 implementation.
-- Latest tagged release: `v0.10.1`, before Phase 10.
-- Phase 11: not defined.
-
-No new release version has been selected for the completed Phase 10 work.
+- Phases 0–10.4: complete and released as `v0.11.0`.
+- The native C++ authority is unchanged by Phase 10.
+- Phase 11 is not defined.
 
 ## Documentation
 
@@ -269,6 +276,8 @@ No new release version has been selected for the completed Phase 10 work.
 | --- | --- |
 | [`docs/DEMO.md`](docs/DEMO.md) | Offline and optional hosted-provider demonstrations |
 | [`docs/ASSURANCE.md`](docs/ASSURANCE.md) | Test evidence, reproducible commands and proof limitations |
+| [`docs/ENGINEERING_HIGHLIGHTS.md`](docs/ENGINEERING_HIGHLIGHTS.md) | Design decisions, tradeoffs and code/test entry points |
+| [`docs/RELEASING.md`](docs/RELEASING.md) | Release discipline and tag verification |
 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | Protocol, scheduler, containment and agent architecture |
 | [`THREAT_MODEL.md`](THREAT_MODEL.md) | Assets, threats, controls and residual risk |
 | [`SECURITY.md`](SECURITY.md) | Security policy and vulnerability reporting |

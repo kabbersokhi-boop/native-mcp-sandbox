@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.20)
 
 project(
   native_mcp_sandbox
-  VERSION 0.10.1
+  VERSION 0.11.0
   DESCRIPTION "A security-first, resource-bounded C++20 server for local MCP evidence tools"
   LANGUAGES CXX
 )
