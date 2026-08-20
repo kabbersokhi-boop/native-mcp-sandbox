@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
 """Offline credential-free adversarial MCP stdio fixture."""
 
+from __future__ import annotations
 import json
 import signal
 import sys
 import time
+from typing import Any
 
+
+PROTOCOL_VERSION = "2025-11-25"
 scenario = sys.argv[1] if len(sys.argv) > 1 else "normal"
 listed = 0
 active = 0
@@ -23,9 +27,17 @@ if scenario == "ignore_shutdown":
     signal.signal(signal.SIGTERM, signal.SIG_IGN)
 if scenario == "delayed_start":
     time.sleep(0.2)
+_OUTPUT_SCHEMA = {
+    "type": "object",
+    "properties": {"message": {"type": "string"}},
+    "required": ["message"],
+    "additionalProperties": False,
+}
+
 tools = [
     {
         "name": "logs.search",
+        "title": "Search synthetic logs",
         "description": "synthetic",
         "inputSchema": {
             "type": "object",
@@ -33,34 +45,64 @@ tools = [
             "required": ["query"],
             "additionalProperties": False,
         },
+        "outputSchema": _OUTPUT_SCHEMA,
+        "annotations": {
+            "readOnlyHint": True,
+            "destructiveHint": False,
+            "openWorldHint": False,
+        },
+        "execution": {"taskSupport": "forbidden"},
     },
     {
         "name": "logs.count",
+        "title": "Count synthetic logs",
         "inputSchema": {
             "type": "object",
             "properties": {},
             "required": [],
             "additionalProperties": False,
         },
+        "outputSchema": _OUTPUT_SCHEMA,
+        "annotations": {
+            "readOnlyHint": True,
+            "destructiveHint": False,
+            "openWorldHint": False,
+        },
+        "execution": {"taskSupport": "forbidden"},
     },
 ]
 
 
-def emit(v):
-    sys.stdout.write(json.dumps(v, separators=(",", ":")) + "\n")
+def emit(value: Any) -> None:
+    sys.stdout.write(json.dumps(value, separators=(",", ":")) + "\n")
     sys.stdout.flush()
 
 
-def result(req, v):
-    emit({"jsonrpc": "2.0", "id": req["id"], "result": v})
+def result(request: dict[str, Any], value: Any) -> None:
+    emit({"jsonrpc": "2.0", "id": request["id"], "result": value})
+
+
+def successful_tool_result(message: str) -> dict[str, Any]:
+    structured = {"message": message}
+    return {
+        "content": [
+            {
+                "type": "text",
+                "text": json.dumps(structured, separators=(",", ":")),
+            }
+        ],
+        "isError": False,
+        "structuredContent": structured,
+    }
 
 
 for line in sys.stdin:
     try:
-        req = json.loads(line)
+        request = json.loads(line)
     except json.JSONDecodeError:
         break
-    method = req.get("method")
+
+    method = request.get("method")
     if scenario == "malformed" and method == "initialize":
         sys.stdout.write("{bad\n")
         sys.stdout.flush()
@@ -83,7 +125,15 @@ for line in sys.stdin:
         sys.stdout.flush()
         sys.exit(0)
     if scenario == "oversized" and method == "initialize":
+<<<<<<< HEAD
         sys.stdout.write('{"jsonrpc":"2.0","id":1,"result":"' + ("x" * 70000) + '"}\n')
+=======
+        sys.stdout.write(
+            '{"jsonrpc":"2.0","id":1,"result":"'
+            + ("x" * 70000)
+            + '"}\n'
+        )
+>>>>>>> f3f7fe2 (test: model the real MCP tool and result schemas [skip ci])
         sys.stdout.flush()
         continue
     if scenario == "flood" and method == "initialize":
@@ -96,7 +146,12 @@ for line in sys.stdin:
         if scenario == "delayed_initialize":
             time.sleep(0.2)
         result(
-            req, {"protocolVersion": "2024-11-05", "capabilities": {}, "serverInfo": {}}
+            request,
+            {
+                "protocolVersion": PROTOCOL_VERSION,
+                "capabilities": {},
+                "serverInfo": {"name": "fake-mcp", "version": "0.11.0"},
+            },
         )
     elif method == "tools/list":
         if scenario == "duplicate_completed":
@@ -104,14 +159,8 @@ for line in sys.stdin:
             continue
         if scenario == "delayed_list":
             time.sleep(0.2)
-        result(
-            req,
-            {
-                "tools": tools
-                if scenario != "changing_tools" or listed == 0
-                else tools[:1]
-            },
-        )
+        listed_tools = tools if scenario != "changing_tools" or listed == 0 else tools[:1]
+        result(request, {"tools": listed_tools})
         listed += 1
     elif method == "tools/call":
         active += 1
@@ -120,49 +169,57 @@ for line in sys.stdin:
             time.sleep(0.2)
         active -= 1
         if scenario == "malformed_result":
-            result(req, {"content": [{"type": "text"}], "unknown": 1})
+            result(request, {"content": [{"type": "text"}], "unknown": 1})
         elif scenario == "result_missing_content":
-            result(req, {})
+            result(request, {})
         elif scenario == "result_wrong_content":
-            result(req, {"content": {}})
+            result(request, {"content": {}})
         elif scenario == "result_unknown_block":
-            result(req, {"content": [{"type": "text", "text": "x", "extra": 1}]})
+            result(
+                request,
+                {"content": [{"type": "text", "text": "x", "extra": 1}]},
+            )
         elif scenario == "result_unknown_type":
-            result(req, {"content": [{"type": "resource", "text": "x"}]})
+            result(request, {"content": [{"type": "resource", "text": "x"}]})
         elif scenario == "result_missing_text":
-            result(req, {"content": [{"type": "text"}]})
+            result(request, {"content": [{"type": "text"}]})
         elif scenario == "result_wrong_text":
-            result(req, {"content": [{"type": "text", "text": 1}]})
+            result(request, {"content": [{"type": "text", "text": 1}]})
         elif scenario == "result_oversized_text":
-            result(req, {"content": [{"type": "text", "text": "x" * 9000}]})
+            result(
+                request,
+                {"content": [{"type": "text", "text": "x" * 9000}]},
+            )
         elif scenario == "result_many_blocks":
-            result(req, {"content": [{"type": "text", "text": "x"} for _ in range(33)]})
+            result(
+                request,
+                {"content": [{"type": "text", "text": "x"} for _ in range(33)]},
+            )
         elif scenario == "result_structured":
             result(
-                req,
-                {"content": [{"type": "text", "text": "x"}], "structuredContent": {}},
+                request,
+                {
+                    "content": [{"type": "text", "text": "{}"}],
+                    "isError": False,
+                    "structuredContent": {},
+                },
             )
         elif scenario == "secret_result":
             result(
-                req,
-                {
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": "Authorization: Bearer SECRET_SENTINEL /tmp/host pid=123",
-                        }
-                    ]
-                },
+                request,
+                successful_tool_result(
+                    "Authorization: Bearer SECRET_SENTINEL /tmp/host pid=123"
+                ),
             )
         elif scenario == "unique_secret_output":
-            # This deliberately crosses the real stdout JSON-RPC result and stderr
-            # streams.  The parent must redact/avoid retaining it at every owned output.
             sys.stderr.write(" ".join(UNIQUE_SENTINELS) + "\n")
             sys.stderr.flush()
             result(
-                req,
+                request,
                 {
-                    "content": [{"type": "text", "text": " ".join(UNIQUE_SENTINELS)}],
+                    "content": [
+                        {"type": "text", "text": " ".join(UNIQUE_SENTINELS)}
+                    ],
                     "isError": True,
                 },
             )
@@ -172,14 +229,17 @@ for line in sys.stdin:
             emit(
                 {
                     "jsonrpc": "2.0",
-                    "id": req["id"],
-                    "error": {"code": -32000, "message": " ".join(UNIQUE_SENTINELS)},
+                    "id": request["id"],
+                    "error": {
+                        "code": -32000,
+                        "message": " ".join(UNIQUE_SENTINELS),
+                    },
                 }
             )
         elif scenario == "serial_probe":
-            result(req, {"content": [{"type": "text", "text": f"maxActive={maximum}"}]})
+            result(request, successful_tool_result(f"maxActive={maximum}"))
         else:
-            result(req, {"content": [{"type": "text", "text": "synthetic"}]})
+            result(request, successful_tool_result("synthetic"))
 if scenario == "ignore_shutdown":
     while True:
         time.sleep(0.1)
