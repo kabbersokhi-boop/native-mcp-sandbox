@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import selectors
 import subprocess
@@ -43,11 +44,137 @@ def _canon(value: Any) -> bytes:
     return json.dumps(value, ensure_ascii=True, sort_keys=True, separators=(",", ":")).encode()
 
 
+MCP_PROTOCOL_VERSION = "2025-11-25"
+MCP_CLIENT_VERSION = "0.11.0"
+_TOOL_FIELDS = {"name", "title", "description", "inputSchema", "outputSchema", "annotations", "execution", "icons", "_meta"}
+_INPUT_SCHEMA_FIELDS = {"type", "properties", "required", "items", "enum", "minLength", "maxLength", "minimum", "maximum", "additionalProperties", "description", "default", "title"}
+_OUTPUT_SCHEMA_FIELDS = {"type", "properties", "required", "items", "enum", "minLength", "maxLength", "minimum", "maximum", "additionalProperties"}
+_OUTPUT_SCHEMA_TYPES = {"object", "array", "string", "boolean", "integer", "number", "null"}
 def _closed(value: Any, allowed: set[str], required: set[str]) -> Mapping[str, Any]:
     if not isinstance(value, dict) or set(value) - allowed or required - set(value):
         raise _fail(FailureClass.MCP_PROTOCOL_FAILURE, "closed schema rejected")
     return value
 
+def _normalize_input_schema(schema: Any, limits: Limits, depth: int = 0) -> Mapping[str, Any]:
+    if not isinstance(schema, dict) or depth > limits.json_nesting_depth or set(schema) - _INPUT_SCHEMA_FIELDS:
+        raise _fail(FailureClass.MCP_PROTOCOL_FAILURE, "tool input schema is unsupported")
+    normalized: dict[str, Any] = {}
+    for key, value in schema.items():
+        if key in {"description", "default", "title"}:
+            continue
+        if key == "properties":
+            if not isinstance(value, dict) or len(value) > limits.object_array_items:
+                raise _fail(FailureClass.MCP_PROTOCOL_FAILURE, "tool input schema properties are invalid")
+            normalized[key] = {
+                name: _normalize_input_schema(child, limits, depth + 1)
+                for name, child in value.items()
+            }
+        elif key == "items":
+            normalized[key] = _normalize_input_schema(value, limits, depth + 1)
+        else:
+            normalized[key] = value
+    frozen = _freeze_json(normalized, limits=limits)
+    if not isinstance(frozen, dict):
+        raise _fail(FailureClass.MCP_PROTOCOL_FAILURE, "tool input schema is invalid")
+    return frozen
+
+def _schema_types(schema: Mapping[str, Any]) -> tuple[str, ...]:
+    raw = schema.get("type")
+    if isinstance(raw, str):
+        values = (raw,)
+    elif isinstance(raw, (list, tuple)) and raw and all(isinstance(item, str) for item in raw):
+        values = tuple(raw)
+    else:
+        raise _fail(FailureClass.MCP_PROTOCOL_FAILURE, "tool output schema type is invalid")
+    if len(set(values)) != len(values) or any(item not in _OUTPUT_SCHEMA_TYPES for item in values):
+        raise _fail(FailureClass.MCP_PROTOCOL_FAILURE, "tool output schema type is unsupported")
+    return values
+
+def _schema_type_matches(value: Any, schema_type: str) -> bool:
+    if schema_type == "string": return isinstance(value, str)
+    if schema_type == "boolean": return isinstance(value, bool)
+    if schema_type == "integer": return isinstance(value, int) and not isinstance(value, bool)
+    if schema_type == "number": return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+    if schema_type == "object": return isinstance(value, Mapping)
+    if schema_type == "array": return isinstance(value, (list, tuple))
+    return value is None
+
+def _validate_output_schema_definition(schema: Any, limits: Limits, depth: int = 0) -> Mapping[str, Any]:
+    if not isinstance(schema, dict) or depth > limits.json_nesting_depth or set(schema) - _OUTPUT_SCHEMA_FIELDS:
+        raise _fail(FailureClass.MCP_PROTOCOL_FAILURE, "tool output schema is unsupported")
+    schema_types = _schema_types(schema)
+    if "additionalProperties" in schema and schema["additionalProperties"] is not False:
+        raise _fail(FailureClass.MCP_PROTOCOL_FAILURE, "tool output schema must be closed")
+    object_fields = {"properties", "required", "additionalProperties"}
+    if "object" in schema_types:
+        properties = schema.get("properties", {})
+        required = schema.get("required", [])
+        if not isinstance(properties, dict) or len(properties) > limits.object_array_items:
+            raise _fail(FailureClass.MCP_PROTOCOL_FAILURE, "tool output schema properties are invalid")
+        if not isinstance(required, (list, tuple)) or len(required) > limits.object_array_items or any(not isinstance(item, str) for item in required) or len(set(required)) != len(required) or any(item not in properties for item in required):
+            raise _fail(FailureClass.MCP_PROTOCOL_FAILURE, "tool output schema required fields are invalid")
+        for name, child in properties.items():
+            if not isinstance(name, str) or not name:
+                raise _fail(FailureClass.MCP_PROTOCOL_FAILURE, "tool output schema property name is invalid")
+            _validate_output_schema_definition(child, limits, depth + 1)
+    elif any(key in schema for key in object_fields):
+        raise _fail(FailureClass.MCP_PROTOCOL_FAILURE, "tool output schema has object keywords for a non-object")
+    if "array" in schema_types:
+        if not isinstance(schema.get("items"), dict):
+            raise _fail(FailureClass.MCP_PROTOCOL_FAILURE, "tool output array schema is missing items")
+        _validate_output_schema_definition(schema["items"], limits, depth + 1)
+    elif "items" in schema:
+        raise _fail(FailureClass.MCP_PROTOCOL_FAILURE, "tool output schema has array items for a non-array")
+    if "enum" in schema:
+        values = schema["enum"]
+        if not isinstance(values, (list, tuple)) or not values or len(values) > limits.object_array_items:
+            raise _fail(FailureClass.MCP_PROTOCOL_FAILURE, "tool output schema enum is invalid")
+        if any(not any(_schema_type_matches(item, schema_type) for schema_type in schema_types) for item in values):
+            raise _fail(FailureClass.MCP_PROTOCOL_FAILURE, "tool output schema enum type is invalid")
+    for key in ("minLength", "maxLength"):
+        if key in schema and ("string" not in schema_types or isinstance(schema[key], bool) or not isinstance(schema[key], int) or schema[key] < 0 or schema[key] > limits.mcp_response_bytes):
+            raise _fail(FailureClass.MCP_PROTOCOL_FAILURE, "tool output string bound is invalid")
+    if "minLength" in schema and "maxLength" in schema and schema["minLength"] > schema["maxLength"]:
+        raise _fail(FailureClass.MCP_PROTOCOL_FAILURE, "tool output string bounds are reversed")
+    for key in ("minimum", "maximum"):
+        if key in schema and (not ({"integer", "number"} & set(schema_types)) or isinstance(schema[key], bool) or not isinstance(schema[key], (int, float)) or not math.isfinite(schema[key])):
+            raise _fail(FailureClass.MCP_PROTOCOL_FAILURE, "tool output number bound is invalid")
+    if "minimum" in schema and "maximum" in schema and schema["minimum"] > schema["maximum"]:
+        raise _fail(FailureClass.MCP_PROTOCOL_FAILURE, "tool output number bounds are reversed")
+    frozen = _freeze_json(schema, limits=limits)
+    if not isinstance(frozen, dict):
+        raise _fail(FailureClass.MCP_PROTOCOL_FAILURE, "tool output schema is invalid")
+    return frozen
+
+def _validate_output_value(value: Any, schema: Mapping[str, Any], limits: Limits, depth: int = 0) -> None:
+    if depth > limits.json_nesting_depth:
+        raise _fail(FailureClass.MCP_PROTOCOL_FAILURE, "tool structured output is too deep")
+    schema_types = _schema_types(schema)
+    matching = next((item for item in schema_types if _schema_type_matches(value, item)), None)
+    if matching is None:
+        raise _fail(FailureClass.MCP_PROTOCOL_FAILURE, "tool structured output has the wrong type")
+    if "enum" in schema and not any(type(value) is type(item) and value == item for item in schema["enum"]):
+        raise _fail(FailureClass.MCP_PROTOCOL_FAILURE, "tool structured output is outside its enum")
+    if matching == "object":
+        properties = schema.get("properties", {})
+        if len(value) > limits.object_array_items or set(value) - set(properties):
+            raise _fail(FailureClass.MCP_PROTOCOL_FAILURE, "tool structured output contains unknown fields")
+        if any(item not in value for item in schema.get("required", [])):
+            raise _fail(FailureClass.MCP_PROTOCOL_FAILURE, "tool structured output omits required fields")
+        for key, child in value.items():
+            _validate_output_value(child, properties[key], limits, depth + 1)
+    elif matching == "array":
+        if len(value) > limits.object_array_items:
+            raise _fail(FailureClass.MCP_PROTOCOL_FAILURE, "tool structured output array is oversized")
+        for child in value:
+            _validate_output_value(child, schema["items"], limits, depth + 1)
+    elif matching == "string":
+        size = len(value.encode("utf-8"))
+        if size < schema.get("minLength", 0) or size > min(schema.get("maxLength", limits.mcp_response_bytes), limits.mcp_response_bytes):
+            raise _fail(FailureClass.MCP_PROTOCOL_FAILURE, "tool structured output string is outside its bound")
+    elif matching in {"integer", "number"}:
+        if ("minimum" in schema and value < schema["minimum"]) or ("maximum" in schema and value > schema["maximum"]):
+            raise _fail(FailureClass.MCP_PROTOCOL_FAILURE, "tool structured output number is outside its bound")
 
 @dataclass(frozen=True)
 class Deadline:
@@ -68,6 +195,7 @@ class Deadline:
 class ToolSurface:
     tools: tuple[AdvertisedTool, ...]
     identity: str
+    output_schemas: Mapping[str, Mapping[str, Any] | None]
 
 
 @dataclass(frozen=True)
@@ -185,27 +313,30 @@ def capture_tool_surface(result: Any, limits: Limits = DEFAULT_LIMITS) -> ToolSu
     if not isinstance(tools, (list, tuple)) or len(tools) > limits.advertised_tool_count:
         raise _fail(FailureClass.MCP_PROTOCOL_FAILURE, "tool count invalid")
     captured: list[AdvertisedTool] = []
+    canonical: list[Mapping[str, Any]] = []
+    output_schemas: dict[str, Mapping[str, Any] | None] = {}
     for raw in tools:
-        item = _closed(raw, {"name", "description", "inputSchema"}, {"name", "inputSchema"})
-        if (
-            not isinstance(item["name"], str)
-            or not isinstance(item.get("description", ""), str)
-            or len(_canon(item)) > limits.tool_definition_bytes
-        ):
-            raise _fail(FailureClass.MCP_PROTOCOL_FAILURE, "tool definition invalid")
+        item = _closed(raw, _TOOL_FIELDS, {"name", "inputSchema"})
+        if not isinstance(item["name"], str) or not isinstance(item.get("title", ""), str) or not isinstance(item.get("description", ""), str): raise _fail(FailureClass.MCP_PROTOCOL_FAILURE, "tool definition text is invalid")
+        for field_name in ("inputSchema", "outputSchema", "annotations", "execution", "_meta"):
+            if field_name in item and not isinstance(item[field_name], dict): raise _fail(FailureClass.MCP_PROTOCOL_FAILURE, "tool definition object is invalid")
+        if "icons" in item and not isinstance(item["icons"], (list, tuple)): raise _fail(FailureClass.MCP_PROTOCOL_FAILURE, "tool icons are invalid")
         try:
-            captured.append(
-                AdvertisedTool(item["name"], item["inputSchema"], item.get("description", ""))
-            )
-        except ProviderError:
-            raise _fail(FailureClass.MCP_PROTOCOL_FAILURE, "tool schema invalid") from None
-    if len({x.name for x in captured}) != len(captured):
-        raise _fail(FailureClass.MCP_PROTOCOL_FAILURE, "duplicate tool")
-    value = [
-        {"name": x.name, "description": x.description, "inputSchema": x.parameters}
-        for x in captured
-    ]
-    return ToolSurface(tuple(captured), hashlib.sha256(_canon(value)).hexdigest())
+            normalized_input = _normalize_input_schema(item["inputSchema"], limits)
+            advertised = AdvertisedTool(item["name"], normalized_input, item.get("description", ""))
+            provider_definition = {"name": advertised.name, "description": advertised.description, "inputSchema": advertised.parameters}
+            if len(_canon(provider_definition)) > limits.tool_definition_bytes: raise _fail(FailureClass.MCP_PROTOCOL_FAILURE, "tool definition invalid")
+            output_schema = _validate_output_schema_definition(item["outputSchema"], limits) if "outputSchema" in item else None
+            frozen_item = _freeze_json(item, limits=limits)
+            if not isinstance(frozen_item, dict): raise _fail(FailureClass.MCP_PROTOCOL_FAILURE, "tool definition invalid")
+        except ProviderError: raise _fail(FailureClass.MCP_PROTOCOL_FAILURE, "tool schema invalid") from None
+        captured.append(advertised)
+        canonical.append(frozen_item)
+        output_schemas[advertised.name] = output_schema
+    if len({x.name for x in captured}) != len(captured): raise _fail(FailureClass.MCP_PROTOCOL_FAILURE, "duplicate tool")
+    frozen_outputs = _freeze_json(output_schemas, limits=limits)
+    if not isinstance(frozen_outputs, dict): raise _fail(FailureClass.MCP_PROTOCOL_FAILURE, "tool output schemas are invalid")
+    return ToolSurface(tuple(captured), hashlib.sha256(_canon(canonical)).hexdigest(), frozen_outputs)
 
 
 class McpStdioClient:
@@ -421,54 +552,18 @@ class McpStdioClient:
                     self._startup_pending = False
                 return response
 
-    def initialize_and_capture(
-        self, deadline: Deadline, cancellation: Cancellation | None = None
-    ) -> ToolSurface:
-        init = self._request(
-            "initialize",
-            {
-                "protocolVersion": "2024-11-05",
-                "capabilities": {},
-                "clientInfo": {"name": "native-mcp-agent", "version": "10.2"},
-            },
-            deadline,
-            self.limits.mcp_initialize_timeout_ms,
-            cancellation=cancellation,
-        )
-        self.last_initialize = init
-        value = _closed(
-            init.result,
-            {"protocolVersion", "capabilities", "serverInfo", "instructions"},
-            {"protocolVersion", "capabilities", "serverInfo"},
-        )
-        if (
-            not isinstance(value["protocolVersion"], str)
-            or not isinstance(value["capabilities"], dict)
-            or not isinstance(value["serverInfo"], dict)
-        ):
-            raise _fail(FailureClass.MCP_PROTOCOL_FAILURE, "bad initialize")
-        assert self.process and self.process.stdin
-        deadline.timeout(self.limits.mcp_initialize_timeout_ms)
-        try:
-            self.process.stdin.write(
-                _canon({"jsonrpc": "2.0", "method": "notifications/initialized", "params": {}})
-                + b"\n"
-            )
-            self.process.stdin.flush()
-        except (OSError, BrokenPipeError):
-            raise _fail(
-                FailureClass.MCP_AMBIGUOUS_COMPLETION, "initialized notification failed"
-            ) from None
-        listed = self._request(
-            "tools/list",
-            {},
-            deadline,
-            self.limits.mcp_tools_list_timeout_ms,
-            cancellation=cancellation,
-        )
-        self.last_tools_list = listed
-        self.surface = capture_tool_surface(listed.result, self.limits)
-        return self.surface
+    def initialize_and_capture(self, deadline: Deadline, cancellation: Cancellation|None=None) -> ToolSurface:
+        init=self._request("initialize",{"protocolVersion":MCP_PROTOCOL_VERSION,"capabilities":{},"clientInfo":{"name":"native-mcp-agent","version":MCP_CLIENT_VERSION}},deadline,self.limits.mcp_initialize_timeout_ms,cancellation=cancellation)
+        self.last_initialize=init
+        value=_closed(init.result,{"protocolVersion","capabilities","serverInfo","instructions","_meta"},{"protocolVersion","capabilities","serverInfo"})
+        if value["protocolVersion"]!=MCP_PROTOCOL_VERSION or not isinstance(value["capabilities"],dict) or not isinstance(value["serverInfo"],dict) or ("_meta" in value and not isinstance(value["_meta"],dict)): raise _fail(FailureClass.MCP_PROTOCOL_FAILURE,"bad initialize")
+        assert self.process and self.process.stdin; deadline.timeout(self.limits.mcp_initialize_timeout_ms)
+        try: self.process.stdin.write(_canon({"jsonrpc":"2.0","method":"notifications/initialized","params":{}})+b"\n"); self.process.stdin.flush()
+        except (OSError,BrokenPipeError): raise _fail(FailureClass.MCP_AMBIGUOUS_COMPLETION,"initialized notification failed") from None
+        listed=self._request("tools/list",{},deadline,self.limits.mcp_tools_list_timeout_ms,cancellation=cancellation)
+        self.last_tools_list=listed
+        self.surface=capture_tool_surface(listed.result,self.limits); return self.surface
+
 
     def revalidate_surface(
         self, deadline: Deadline, cancellation: Cancellation | None = None
@@ -539,10 +634,11 @@ class McpStdioClient:
             action,
             cancellation,
         )
+        output_schema = self.surface.output_schemas.get(action.name)
         return CorrelatedMcpResponse(
             response.request_id,
             action.action_id,
-            _validate_tool_result(response.result, self.limits),
+            _validate_tool_result(response.result, self.limits, output_schema),
             response.byte_count,
         )
 
@@ -617,30 +713,28 @@ class McpStdioClient:
             self.process = None
         return mode
 
-
-def _validate_tool_result(value: Any, limits: Limits) -> Mapping[str, Any]:
-    obj = _closed(value, {"content", "isError"}, {"content"})
-    if (
-        not isinstance(obj["content"], (list, tuple))
-        or len(obj["content"]) > limits.object_array_items
-        or ("isError" in obj and type(obj["isError"]) is not bool)
-    ):
-        raise _fail(FailureClass.MCP_PROTOCOL_FAILURE, "bad tool result")
-    blocks = []
+def _validate_tool_result(value: Any, limits: Limits, output_schema: Mapping[str, Any] | None) -> Mapping[str,Any]:
+    obj=_closed(value,{"content","structuredContent","isError","_meta"},{"content"})
+    is_error=obj.get("isError",False)
+    if not isinstance(obj["content"],(list,tuple)) or len(obj["content"])>limits.object_array_items or type(is_error) is not bool: raise _fail(FailureClass.MCP_PROTOCOL_FAILURE,"bad tool result")
+    if "_meta" in obj:
+        metadata=_freeze_json(obj["_meta"],limits=limits)
+        if not isinstance(metadata,dict): raise _fail(FailureClass.MCP_PROTOCOL_FAILURE,"bad tool result metadata")
+    blocks=[]
     for block in obj["content"]:
-        item = _closed(block, {"type", "text"}, {"type", "text"})
-        if (
-            item["type"] != "text"
-            or not isinstance(item["text"], str)
-            or len(item["text"].encode()) > limits.message_bytes
-        ):
-            raise _fail(FailureClass.MCP_PROTOCOL_FAILURE, "unsupported content")
-        blocks.append({"type": "text", "text": redact_json({"message": item["text"]})["message"]})
-    output = {"content": blocks}
-    if "isError" in obj:
-        output["isError"] = obj["isError"]
-    return _freeze_json(output, limits=limits)
-
+        item=_closed(block,{"type","text"},{"type","text"})
+        if item["type"]!="text" or not isinstance(item["text"],str) or len(item["text"].encode())>limits.message_bytes: raise _fail(FailureClass.MCP_PROTOCOL_FAILURE,"unsupported content")
+        blocks.append({"type":"text","text":redact_json({"message":item["text"]})["message"]})
+    output={"content":blocks}
+    if "isError" in obj: output["isError"]=is_error
+    if "structuredContent" in obj:
+        structured=_freeze_json(obj["structuredContent"],limits=limits)
+        if not isinstance(structured,dict): raise _fail(FailureClass.MCP_PROTOCOL_FAILURE,"structured content must be an object")
+        if output_schema is not None and not is_error: _validate_output_value(structured,output_schema,limits)
+        output["structuredContent"]=redact_json(structured)
+    elif output_schema is not None and not is_error:
+        raise _fail(FailureClass.MCP_PROTOCOL_FAILURE,"structured content is required by the output schema")
+    return _freeze_json(output,limits=limits)
 
 @dataclass(frozen=True)
 class OrchestrationOutcome:

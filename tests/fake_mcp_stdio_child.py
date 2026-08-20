@@ -125,15 +125,11 @@ for line in sys.stdin:
         sys.stdout.flush()
         sys.exit(0)
     if scenario == "oversized" and method == "initialize":
-<<<<<<< HEAD
-        sys.stdout.write('{"jsonrpc":"2.0","id":1,"result":"' + ("x" * 70000) + '"}\n')
-=======
         sys.stdout.write(
             '{"jsonrpc":"2.0","id":1,"result":"'
             + ("x" * 70000)
             + '"}\n'
         )
->>>>>>> f3f7fe2 (test: model the real MCP tool and result schemas [skip ci])
         sys.stdout.flush()
         continue
     if scenario == "flood" and method == "initialize":
