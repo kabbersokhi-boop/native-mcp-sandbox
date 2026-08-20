@@ -92,19 +92,6 @@ struct ToolCallPreparation final {
                          "Invalid initialize parameters");
   }
 
-  const auto& requested = protocol_version->get_ref<const std::string&>();
-  if (requested != kProtocolVersion) {
-    Json data{{"requested", requested},
-              {"supported", Json::array({kProtocolVersion})}};
-    return HandlerResult{
-        .response = json_rpc::make_error(id, json_rpc::kInvalidParams,
-                                         "Unsupported protocol version",
-                                         std::move(data)),
-        .diagnostic = std::nullopt,
-        .next_state = std::nullopt,
-    };
-  }
-
   Json result{
       {"protocolVersion", kProtocolVersion},
       {"capabilities", Json{{"tools", Json::object()}}},
