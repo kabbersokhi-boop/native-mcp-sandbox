@@ -585,6 +585,9 @@ class EvidenceAndTranscriptTests(unittest.TestCase):
             "result_structured",
             "result_structured_extra",
             "result_structured_wrong_type",
+            "result_large_structured_overflow",
+            "result_elf_sized_overflow",
+            "result_huge_integer",
         ):
             c = client(case)
             out = Orchestrator(c, provider((proposal("call-1"),)), limits=c.limits).run(
@@ -592,6 +595,26 @@ class EvidenceAndTranscriptTests(unittest.TestCase):
             )
             self.assertEqual(out.outcome, "failed", case)
             self.assertIsNone(c.process)
+
+    def test_schema_bounded_structured_evidence_can_exceed_provider_collection_limit(self):
+        self.assertEqual(DEFAULT_LIMITS.object_array_items, 32)
+        for case, field, count in (
+            ("result_large_structured", "items", 50),
+            ("result_elf_sized", "segments", 64),
+        ):
+            c = client(case)
+            d = deadline(c)
+            c.initialize_and_capture(d)
+            action = c.authorize(
+                proposal("call-1").action_identity,
+                "call-1",
+                "logs.search",
+                {"query": "x"},
+            )
+            response = c.execute(action, d)
+            structured = response.result["structuredContent"]
+            self.assertEqual(len(structured[field]), count, case)
+            c.close(d, suppress=True)
 
     def test_serial_probe_reports_one_active_call_in_provider_order(self):
         c = client("serial_probe")

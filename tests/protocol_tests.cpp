@@ -333,6 +333,15 @@ void test_log_tool_protocol() {
   for (const Json& tool : tools) {
     expect_closed_output_schema(tool["outputSchema"]);
   }
+  expect(tools[0]["outputSchema"]["properties"]["matches"]["maxItems"] ==
+             50U &&
+             tools[1]["outputSchema"]["properties"]["lines"]["maxItems"] ==
+                 50U &&
+             tools[2]["outputSchema"]["properties"]["neededLibraries"]
+                     ["maxItems"] == 64U &&
+             tools[2]["outputSchema"]["properties"]["segments"]["maxItems"] ==
+                 64U,
+         "native output schemas must advertise their bounded array limits");
 
   response = response_json(server.process_line(
       R"({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"logs.search","arguments":{"root":"logs","path":"app.log","query":"error","caseSensitive":false,"maxMatches":5}}})"));

@@ -718,8 +718,8 @@ class BudgetDeadlineLifecycleTests(unittest.TestCase):
         for field, delta in (
             ("mcp_request_bytes", 0),
             ("mcp_request_bytes", -1),
-            ("mcp_response_bytes", 0),
-            ("mcp_response_bytes", -1),
+            ("mcp_evidence_response_bytes", 0),
+            ("mcp_evidence_response_bytes", -1),
         ):
             c = client()
             d = Deadline(c.clock() + 5, c.clock)

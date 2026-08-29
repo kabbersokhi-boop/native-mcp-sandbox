@@ -34,6 +34,31 @@ _OUTPUT_SCHEMA = {
     "additionalProperties": False,
 }
 
+_ARRAY_OUTPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "items": {"type": "array", "maxItems": 50, "items": {"type": "integer"}},
+    },
+    "required": ["items"],
+    "additionalProperties": False,
+}
+
+_ELF_SIZED_OUTPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "segments": {"type": "array", "maxItems": 64, "items": {"type": "integer"}},
+    },
+    "required": ["segments"],
+    "additionalProperties": False,
+}
+
+_NUMBER_OUTPUT_SCHEMA = {
+    "type": "object",
+    "properties": {"value": {"type": "number"}},
+    "required": ["value"],
+    "additionalProperties": False,
+}
+
 tools = [
     {
         "name": "logs.search",
@@ -169,6 +194,15 @@ for line in sys.stdin:
         if scenario == "open_output_schema":
             listed_tools = json.loads(json.dumps(listed_tools))
             del listed_tools[0]["outputSchema"]["additionalProperties"]
+        elif scenario in {"result_large_structured", "result_large_structured_overflow"}:
+            listed_tools = json.loads(json.dumps(listed_tools))
+            listed_tools[0]["outputSchema"] = _ARRAY_OUTPUT_SCHEMA
+        elif scenario in {"result_elf_sized", "result_elf_sized_overflow"}:
+            listed_tools = json.loads(json.dumps(listed_tools))
+            listed_tools[0]["outputSchema"] = _ELF_SIZED_OUTPUT_SCHEMA
+        elif scenario == "result_huge_integer":
+            listed_tools = json.loads(json.dumps(listed_tools))
+            listed_tools[0]["outputSchema"] = _NUMBER_OUTPUT_SCHEMA
         result(request, {"tools": listed_tools})
         listed += 1
     elif method == "tools/call":
@@ -231,6 +265,16 @@ for line in sys.stdin:
                     "structuredContent": {"message": 1},
                 },
             )
+        elif scenario == "result_large_structured":
+            result(request, {"content": [{"type": "text", "text": "{}"}], "isError": False, "structuredContent": {"items": list(range(50))}})
+        elif scenario == "result_large_structured_overflow":
+            result(request, {"content": [{"type": "text", "text": "{}"}], "isError": False, "structuredContent": {"items": list(range(51))}})
+        elif scenario == "result_elf_sized":
+            result(request, {"content": [{"type": "text", "text": "{}"}], "isError": False, "structuredContent": {"segments": list(range(64))}})
+        elif scenario == "result_elf_sized_overflow":
+            result(request, {"content": [{"type": "text", "text": "{}"}], "isError": False, "structuredContent": {"segments": list(range(65))}})
+        elif scenario == "result_huge_integer":
+            result(request, {"content": [{"type": "text", "text": "{}"}], "isError": False, "structuredContent": {"value": 10**400}})
         elif scenario == "secret_result":
             result(
                 request,

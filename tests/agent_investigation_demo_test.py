@@ -212,6 +212,12 @@ def run_real_agent_server_contract(server: Path) -> None:
             encoding="utf-8",
             newline="\n",
         )
+        many = root / "many.log"
+        many.write_text(
+            "".join(f"ERROR INC-050 {chr(1) * 500}\n" for _ in range(50)),
+            encoding="utf-8",
+            newline="\n",
+        )
         policy = root / "policy.json"
         policy.write_text(
             json.dumps(
@@ -233,6 +239,7 @@ def run_real_agent_server_contract(server: Path) -> None:
             newline="\n",
         )
         os.chmod(log, 0o600)
+        os.chmod(many, 0o600)
         os.chmod(policy, 0o600)
 
         client = McpStdioClient(
@@ -279,6 +286,27 @@ def run_real_agent_server_contract(server: Path) -> None:
                 fail("the validated structured result has an unexpected match count")
             if not isinstance(matches[0], dict) or matches[0].get("line") != 2:
                 fail("the validated structured result has an unexpected match")
+
+            large_action = client.authorize(
+                LocalActionIdentity("1" * 32),
+                "call-2",
+                "logs.search",
+                {
+                    "root": "evidence",
+                    "path": "many.log",
+                    "query": "INC-050",
+                    "caseSensitive": True,
+                    "maxMatches": 50,
+                },
+            )
+            large_response = client.execute(large_action, deadline)
+            large_structured = large_response.result.get("structuredContent")
+            if (not isinstance(large_structured, dict) or
+                    not isinstance(large_structured.get("matches"), tuple) or
+                    len(large_structured["matches"]) != 50):
+                fail("the real agent rejected a native 50-match structured result")
+            if large_response.byte_count <= 64 * 1024:
+                fail("the native large-result fixture did not exercise the MCP evidence byte bound")
         finally:
             client.close(deadline, suppress=True)
 

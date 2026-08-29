@@ -11,7 +11,7 @@ import subprocess
 import threading
 import time
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Protocol
 
 from .contracts import (
@@ -48,12 +48,24 @@ MCP_PROTOCOL_VERSION = "2025-11-25"
 MCP_CLIENT_VERSION = "0.11.0"
 _TOOL_FIELDS = {"name", "title", "description", "inputSchema", "outputSchema", "annotations", "execution", "icons", "_meta"}
 _INPUT_SCHEMA_FIELDS = {"type", "properties", "required", "items", "enum", "minLength", "maxLength", "minimum", "maximum", "additionalProperties", "description", "default", "title"}
-_OUTPUT_SCHEMA_FIELDS = {"type", "properties", "required", "items", "enum", "minLength", "maxLength", "minimum", "maximum", "additionalProperties"}
+_OUTPUT_SCHEMA_FIELDS = {"type", "properties", "required", "items", "enum", "minLength", "maxLength", "minimum", "maximum", "maxItems", "additionalProperties"}
 _OUTPUT_SCHEMA_TYPES = {"object", "array", "string", "boolean", "integer", "number", "null"}
+_MIN_MCP_INTEGER = -(2**63)
+_MAX_MCP_INTEGER = 2**64 - 1
 def _closed(value: Any, allowed: set[str], required: set[str]) -> Mapping[str, Any]:
     if not isinstance(value, dict) or set(value) - allowed or required - set(value):
         raise _fail(FailureClass.MCP_PROTOCOL_FAILURE, "closed schema rejected")
     return value
+
+def _bounded_mcp_number(value: Any) -> bool:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    if isinstance(value, int):
+        return _MIN_MCP_INTEGER <= value <= _MAX_MCP_INTEGER
+    return math.isfinite(value)
+
+def _mcp_evidence_limits(limits: Limits) -> Limits:
+    return replace(limits, object_array_items=limits.mcp_evidence_items)
 
 def _normalize_input_schema(schema: Any, limits: Limits, depth: int = 0) -> Mapping[str, Any]:
     if not isinstance(schema, dict) or depth > limits.json_nesting_depth or set(schema) - _INPUT_SCHEMA_FIELDS:
@@ -93,8 +105,8 @@ def _schema_types(schema: Mapping[str, Any]) -> tuple[str, ...]:
 def _schema_type_matches(value: Any, schema_type: str) -> bool:
     if schema_type == "string": return isinstance(value, str)
     if schema_type == "boolean": return isinstance(value, bool)
-    if schema_type == "integer": return isinstance(value, int) and not isinstance(value, bool)
-    if schema_type == "number": return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+    if schema_type == "integer": return isinstance(value, int) and not isinstance(value, bool) and _bounded_mcp_number(value)
+    if schema_type == "number": return _bounded_mcp_number(value)
     if schema_type == "object": return isinstance(value, Mapping)
     if schema_type == "array": return isinstance(value, (list, tuple))
     return value is None
@@ -122,8 +134,10 @@ def _validate_output_schema_definition(schema: Any, limits: Limits, depth: int =
     if "array" in schema_types:
         if not isinstance(schema.get("items"), dict):
             raise _fail(FailureClass.MCP_PROTOCOL_FAILURE, "tool output array schema is missing items")
+        if isinstance(schema.get("maxItems"), bool) or not isinstance(schema.get("maxItems"), int) or schema["maxItems"] < 0 or schema["maxItems"] > limits.mcp_evidence_items:
+            raise _fail(FailureClass.MCP_PROTOCOL_FAILURE, "tool output array bound is invalid")
         _validate_output_schema_definition(schema["items"], limits, depth + 1)
-    elif "items" in schema:
+    elif "items" in schema or "maxItems" in schema:
         raise _fail(FailureClass.MCP_PROTOCOL_FAILURE, "tool output schema has array items for a non-array")
     if "enum" in schema:
         values = schema["enum"]
@@ -137,7 +151,7 @@ def _validate_output_schema_definition(schema: Any, limits: Limits, depth: int =
     if "minLength" in schema and "maxLength" in schema and schema["minLength"] > schema["maxLength"]:
         raise _fail(FailureClass.MCP_PROTOCOL_FAILURE, "tool output string bounds are reversed")
     for key in ("minimum", "maximum"):
-        if key in schema and (not ({"integer", "number"} & set(schema_types)) or isinstance(schema[key], bool) or not isinstance(schema[key], (int, float)) or not math.isfinite(schema[key])):
+        if key in schema and (not ({"integer", "number"} & set(schema_types)) or not _bounded_mcp_number(schema[key])):
             raise _fail(FailureClass.MCP_PROTOCOL_FAILURE, "tool output number bound is invalid")
     if "minimum" in schema and "maximum" in schema and schema["minimum"] > schema["maximum"]:
         raise _fail(FailureClass.MCP_PROTOCOL_FAILURE, "tool output number bounds are reversed")
@@ -164,7 +178,7 @@ def _validate_output_value(value: Any, schema: Mapping[str, Any], limits: Limits
         for key, child in value.items():
             _validate_output_value(child, properties[key], limits, depth + 1)
     elif matching == "array":
-        if len(value) > limits.object_array_items:
+        if len(value) > schema["maxItems"]:
             raise _fail(FailureClass.MCP_PROTOCOL_FAILURE, "tool structured output array is oversized")
         for child in value:
             _validate_output_value(child, schema["items"], limits, depth + 1)
@@ -454,7 +468,7 @@ class McpStdioClient:
             self.close(deadline, suppress=True)
             raise _fail(FailureClass.MCP_PROCESS_EXIT, "startup failed") from None
 
-    def _drain(self, timeout: float) -> list[bytes]:
+    def _drain(self, timeout: float, response_limit: int) -> list[bytes]:
         if self.process is None or self.selector is None:
             raise _fail(FailureClass.LOCAL_POLICY_FAILURE, "child unavailable")
         records = []
@@ -481,9 +495,11 @@ class McpStdioClient:
                 while b"\n" in self.out:
                     line, _, rest = self.out.partition(b"\n")
                     self.out[:] = rest
-                    if len(line) > self.limits.mcp_response_bytes:
+                    if len(line) > response_limit:
                         raise _fail(FailureClass.OVERSIZED_RESPONSE, "response limit")
                     records.append(bytes(line))
+                if len(self.out) > response_limit:
+                    raise _fail(FailureClass.OVERSIZED_RESPONSE, "response limit")
         return records
 
     def _request(
@@ -511,6 +527,20 @@ class McpStdioClient:
         timeout_ms = deadline.timeout(configured)
         request_id = self.next_id
         self.next_id += 1
+        response_limit = (
+            self.limits.mcp_evidence_response_bytes
+            if method == "tools/call"
+            else self.limits.mcp_response_bytes
+        )
+        response_string_limit = (
+            self.limits.mcp_evidence_response_bytes
+            if method == "tools/call"
+            else max(
+                self.limits.message_bytes,
+                self.limits.tool_argument_bytes,
+                self.limits.tool_definition_bytes,
+            )
+        )
         raw = (
             _canon({"jsonrpc": "2.0", "id": request_id, "method": method, "params": params}) + b"\n"
         )
@@ -536,10 +566,14 @@ class McpStdioClient:
             remaining = min(stop - self.clock(), deadline.timeout(operation_ms) / 1000, 0.01)
             if remaining <= 0:
                 raise _fail(FailureClass.MCP_TIMEOUT, "response deadline")
-            for line in self._drain(remaining):
+            for line in self._drain(remaining, response_limit):
+                mcp_limits = _mcp_evidence_limits(self.limits)
                 try:
                     msg = parse_closed_json(
-                        line, self.limits, byte_limit=self.limits.mcp_response_bytes
+                        line,
+                        mcp_limits,
+                        byte_limit=response_limit,
+                        string_bytes=response_string_limit,
                     )
                 except ProviderError as exc:
                     raise _fail(exc.failure.classification, "invalid MCP JSON") from None
@@ -560,7 +594,14 @@ class McpStdioClient:
                         raise _fail(FailureClass.MCP_PROTOCOL_FAILURE, "bad error")
                     raise _fail(FailureClass.MCP_PROTOCOL_FAILURE, "MCP error")
                 response = CorrelatedMcpResponse(
-                    request_id, action, _freeze_json(obj["result"], limits=self.limits), len(line)
+                    request_id,
+                    action,
+                    _freeze_json(
+                        obj["result"],
+                        limits=mcp_limits,
+                        string_bytes=response_string_limit,
+                    ),
+                    len(line),
                 )
                 if method == "initialize":
                     self._startup_pending = False
@@ -735,27 +776,28 @@ class McpStdioClient:
         return mode
 
 def _validate_tool_result(value: Any, limits: Limits, output_schema: Mapping[str, Any] | None) -> Mapping[str,Any]:
+    mcp_limits=_mcp_evidence_limits(limits)
     obj=_closed(value,{"content","structuredContent","isError","_meta"},{"content"})
     is_error=obj.get("isError",False)
     if not isinstance(obj["content"],(list,tuple)) or len(obj["content"])>limits.object_array_items or type(is_error) is not bool: raise _fail(FailureClass.MCP_PROTOCOL_FAILURE,"bad tool result")
     if "_meta" in obj:
-        metadata=_freeze_json(obj["_meta"],limits=limits)
+        metadata=_freeze_json(obj["_meta"],limits=mcp_limits,string_bytes=limits.mcp_evidence_response_bytes)
         if not isinstance(metadata,dict): raise _fail(FailureClass.MCP_PROTOCOL_FAILURE,"bad tool result metadata")
     blocks=[]
     for block in obj["content"]:
         item=_closed(block,{"type","text"},{"type","text"})
-        if item["type"]!="text" or not isinstance(item["text"],str) or len(item["text"].encode())>limits.message_bytes: raise _fail(FailureClass.MCP_PROTOCOL_FAILURE,"unsupported content")
+        if item["type"]!="text" or not isinstance(item["text"],str) or len(item["text"].encode())>limits.mcp_evidence_response_bytes: raise _fail(FailureClass.MCP_PROTOCOL_FAILURE,"unsupported content")
         blocks.append({"type":"text","text":redact_json({"message":item["text"]})["message"]})
     output={"content":blocks}
     if "isError" in obj: output["isError"]=is_error
     if "structuredContent" in obj:
-        structured=_freeze_json(obj["structuredContent"],limits=limits)
+        structured=_freeze_json(obj["structuredContent"],limits=mcp_limits,string_bytes=limits.mcp_evidence_response_bytes)
         if not isinstance(structured,dict): raise _fail(FailureClass.MCP_PROTOCOL_FAILURE,"structured content must be an object")
         if output_schema is not None and not is_error: _validate_output_value(structured,output_schema,limits)
         output["structuredContent"]=redact_json(structured)
     elif output_schema is not None and not is_error:
         raise _fail(FailureClass.MCP_PROTOCOL_FAILURE,"structured content is required by the output schema")
-    return _freeze_json(output,limits=limits)
+    return _freeze_json(output,limits=mcp_limits,string_bytes=limits.mcp_evidence_response_bytes)
 
 @dataclass(frozen=True)
 class OrchestrationOutcome:
