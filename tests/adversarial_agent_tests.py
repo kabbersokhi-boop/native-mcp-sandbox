@@ -744,7 +744,16 @@ class BudgetDeadlineLifecycleTests(unittest.TestCase):
                 {
                     "jsonrpc": "2.0",
                     "id": 3,
-                    "result": {"content": [{"type": "text", "text": "synthetic"}]},
+                    "result": {
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": '{"message":"synthetic"}',
+                            }
+                        ],
+                        "isError": False,
+                        "structuredContent": {"message": "synthetic"},
+                    },
                 },
                 sort_keys=True,
                 separators=(",", ":"),

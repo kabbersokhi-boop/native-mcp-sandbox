@@ -103,10 +103,10 @@ def _validate_output_schema_definition(schema: Any, limits: Limits, depth: int =
     if not isinstance(schema, dict) or depth > limits.json_nesting_depth or set(schema) - _OUTPUT_SCHEMA_FIELDS:
         raise _fail(FailureClass.MCP_PROTOCOL_FAILURE, "tool output schema is unsupported")
     schema_types = _schema_types(schema)
-    if "additionalProperties" in schema and schema["additionalProperties"] is not False:
-        raise _fail(FailureClass.MCP_PROTOCOL_FAILURE, "tool output schema must be closed")
     object_fields = {"properties", "required", "additionalProperties"}
     if "object" in schema_types:
+        if schema.get("additionalProperties") is not False:
+            raise _fail(FailureClass.MCP_PROTOCOL_FAILURE, "tool output schema must be closed")
         properties = schema.get("properties", {})
         required = schema.get("required", [])
         if not isinstance(properties, dict) or len(properties) > limits.object_array_items:
@@ -338,6 +338,20 @@ def capture_tool_surface(result: Any, limits: Limits = DEFAULT_LIMITS) -> ToolSu
     if not isinstance(frozen_outputs, dict): raise _fail(FailureClass.MCP_PROTOCOL_FAILURE, "tool output schemas are invalid")
     return ToolSurface(tuple(captured), hashlib.sha256(_canon(canonical)).hexdigest(), frozen_outputs)
 
+def _tools_list_page(result: Any, limits: Limits) -> tuple[Sequence[Any], str | None]:
+    page = _closed(result, {"tools", "nextCursor", "_meta"}, {"tools"})
+    tools = page["tools"]
+    if not isinstance(tools, (list, tuple)):
+        raise _fail(FailureClass.MCP_PROTOCOL_FAILURE, "tool list is invalid")
+    if "_meta" in page:
+        metadata = _freeze_json(page["_meta"], limits=limits)
+        if not isinstance(metadata, dict):
+            raise _fail(FailureClass.MCP_PROTOCOL_FAILURE, "tool list metadata is invalid")
+    cursor = page.get("nextCursor")
+    if cursor is not None:
+        if not isinstance(cursor, str) or not cursor or len(cursor.encode("utf-8")) > limits.message_bytes:
+            raise _fail(FailureClass.MCP_PROTOCOL_FAILURE, "tool list cursor is invalid")
+    return tools, cursor
 
 class McpStdioClient:
     """One child and exactly one outstanding JSON-RPC request."""
@@ -552,6 +566,25 @@ class McpStdioClient:
                     self._startup_pending = False
                 return response
 
+    def _list_and_capture(self, deadline: Deadline, cancellation: Cancellation|None=None) -> ToolSurface:
+        collected: list[Any] = []
+        seen_cursors: set[str] = set()
+        cursor: str | None = None
+        while True:
+            params: Mapping[str, Any] = {} if cursor is None else {"cursor": cursor}
+            listed = self._request("tools/list", params, deadline, self.limits.mcp_tools_list_timeout_ms, cancellation=cancellation)
+            self.last_tools_list = listed
+            tools, next_cursor = _tools_list_page(listed.result, self.limits)
+            if len(collected) + len(tools) > self.limits.advertised_tool_count:
+                raise _fail(FailureClass.MCP_PROTOCOL_FAILURE, "tool count invalid")
+            collected.extend(tools)
+            if next_cursor is None:
+                return capture_tool_surface({"tools": collected}, self.limits)
+            if next_cursor in seen_cursors or not tools:
+                raise _fail(FailureClass.MCP_PROTOCOL_FAILURE, "tool list pagination is invalid")
+            seen_cursors.add(next_cursor)
+            cursor = next_cursor
+
     def initialize_and_capture(self, deadline: Deadline, cancellation: Cancellation|None=None) -> ToolSurface:
         init=self._request("initialize",{"protocolVersion":MCP_PROTOCOL_VERSION,"capabilities":{},"clientInfo":{"name":"native-mcp-agent","version":MCP_CLIENT_VERSION}},deadline,self.limits.mcp_initialize_timeout_ms,cancellation=cancellation)
         self.last_initialize=init
@@ -560,26 +593,14 @@ class McpStdioClient:
         assert self.process and self.process.stdin; deadline.timeout(self.limits.mcp_initialize_timeout_ms)
         try: self.process.stdin.write(_canon({"jsonrpc":"2.0","method":"notifications/initialized","params":{}})+b"\n"); self.process.stdin.flush()
         except (OSError,BrokenPipeError): raise _fail(FailureClass.MCP_AMBIGUOUS_COMPLETION,"initialized notification failed") from None
-        listed=self._request("tools/list",{},deadline,self.limits.mcp_tools_list_timeout_ms,cancellation=cancellation)
-        self.last_tools_list=listed
-        self.surface=capture_tool_surface(listed.result,self.limits); return self.surface
-
+        self.surface=self._list_and_capture(deadline,cancellation); return self.surface
 
     def revalidate_surface(
         self, deadline: Deadline, cancellation: Cancellation | None = None
     ) -> None:
         if self.surface is None:
             raise _fail(FailureClass.LOCAL_POLICY_FAILURE, "surface absent")
-        later = capture_tool_surface(
-            self._request(
-                "tools/list",
-                {},
-                deadline,
-                self.limits.mcp_tools_list_timeout_ms,
-                cancellation=cancellation,
-            ).result,
-            self.limits,
-        )
+        later = self._list_and_capture(deadline, cancellation)
         if later.identity != self.surface.identity:
             raise _fail(FailureClass.MCP_PROTOCOL_FAILURE, "tool surface changed")
 

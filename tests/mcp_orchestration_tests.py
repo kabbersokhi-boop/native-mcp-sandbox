@@ -106,11 +106,30 @@ class Tests(unittest.TestCase):
             "truncated",
             "oversized",
             "flood",
+            "unsupported_version",
         ):
             c = client(case)
             out = Orchestrator(c, provider()).run(req())
             self.assertEqual(out.outcome, "failed")
             self.assertIsNone(c.process)
+
+    def test_tools_list_pagination_is_bounded_and_complete(self):
+        c = client("paginated")
+        d = deadline(c)
+        surface = c.initialize_and_capture(d)
+        self.assertEqual(
+            tuple(tool.name for tool in surface.tools),
+            ("logs.search", "logs.count"),
+        )
+        self.assertEqual(c.next_id, 4)
+        c.close(d, suppress=True)
+
+    def test_open_output_schemas_are_rejected_at_discovery(self):
+        c = client("open_output_schema")
+        d = deadline(c)
+        with self.assertRaises(ProviderError):
+            c.initialize_and_capture(d)
+        c.close(d, suppress=True)
 
     def test_duplicate_completed_response_is_rejected(self):
         c = client("duplicate_completed")
@@ -564,6 +583,8 @@ class EvidenceAndTranscriptTests(unittest.TestCase):
             "result_oversized_text",
             "result_many_blocks",
             "result_structured",
+            "result_structured_extra",
+            "result_structured_wrong_type",
         ):
             c = client(case)
             out = Orchestrator(c, provider((proposal("call-1"),)), limits=c.limits).run(

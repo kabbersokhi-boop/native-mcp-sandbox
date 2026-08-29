@@ -144,7 +144,7 @@ for line in sys.stdin:
         result(
             request,
             {
-                "protocolVersion": PROTOCOL_VERSION,
+                "protocolVersion": "2024-11-05" if scenario == "unsupported_version" else PROTOCOL_VERSION,
                 "capabilities": {},
                 "serverInfo": {"name": "fake-mcp", "version": "0.11.0"},
             },
@@ -155,7 +155,20 @@ for line in sys.stdin:
             continue
         if scenario == "delayed_list":
             time.sleep(0.2)
+        if scenario == "paginated":
+            cursor = request.get("params", {}).get("cursor")
+            if cursor is None:
+                result(request, {"tools": tools[:1], "nextCursor": "page-2"})
+            elif cursor == "page-2":
+                result(request, {"tools": tools[1:]})
+            else:
+                result(request, {"tools": [], "nextCursor": "page-2"})
+            listed += 1
+            continue
         listed_tools = tools if scenario != "changing_tools" or listed == 0 else tools[:1]
+        if scenario == "open_output_schema":
+            listed_tools = json.loads(json.dumps(listed_tools))
+            del listed_tools[0]["outputSchema"]["additionalProperties"]
         result(request, {"tools": listed_tools})
         listed += 1
     elif method == "tools/call":
@@ -198,6 +211,24 @@ for line in sys.stdin:
                     "content": [{"type": "text", "text": "{}"}],
                     "isError": False,
                     "structuredContent": {},
+                },
+            )
+        elif scenario == "result_structured_extra":
+            result(
+                request,
+                {
+                    "content": [{"type": "text", "text": "{}"}],
+                    "isError": False,
+                    "structuredContent": {"message": "synthetic", "extra": True},
+                },
+            )
+        elif scenario == "result_structured_wrong_type":
+            result(
+                request,
+                {
+                    "content": [{"type": "text", "text": "{}"}],
+                    "isError": False,
+                    "structuredContent": {"message": 1},
                 },
             )
         elif scenario == "secret_result":

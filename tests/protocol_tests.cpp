@@ -6,6 +6,7 @@
 #include "native_mcp/tool_service.hpp"
 #include "native_mcp/server.hpp"
 
+#include <algorithm>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -84,6 +85,33 @@ Json response_json(const ProcessResult& result) {
 
 Json tool_text_json(const Json& response) {
   return Json::parse(response["result"]["content"][0]["text"].get<std::string>());
+}
+
+void expect_closed_output_schema(const Json& schema) {
+  expect(schema.is_object(), "output schema nodes must be objects");
+  const Json& type = schema.at("type");
+  const bool is_object =
+      (type.is_string() && type == "object") ||
+      (type.is_array() && std::any_of(type.begin(), type.end(),
+                                      [](const Json& value) {
+                                        return value == "object";
+                                      }));
+  if (is_object) {
+    expect(schema.contains("additionalProperties") &&
+               schema["additionalProperties"] == false,
+           "native output object schemas must explicitly be closed");
+  }
+  if (const auto properties = schema.find("properties");
+      properties != schema.end()) {
+    expect(properties->is_object(), "output properties must be an object");
+    for (const auto& [unused, property] : properties->items()) {
+      (void)unused;
+      expect_closed_output_schema(property);
+    }
+  }
+  if (const auto items = schema.find("items"); items != schema.end()) {
+    expect_closed_output_schema(*items);
+  }
 }
 
 void expect_no_response(const ProcessResult& result,
@@ -302,6 +330,9 @@ void test_log_tool_protocol() {
   expect(tools[0]["annotations"]["readOnlyHint"] == true &&
              tools[0]["execution"]["taskSupport"] == "forbidden",
          "tool metadata must declare read-only synchronous behavior");
+  for (const Json& tool : tools) {
+    expect_closed_output_schema(tool["outputSchema"]);
+  }
 
   response = response_json(server.process_line(
       R"({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"logs.search","arguments":{"root":"logs","path":"app.log","query":"error","caseSensitive":false,"maxMatches":5}}})"));
