@@ -15,7 +15,7 @@ does not modify the Apache-2.0 license for Native MCP Sandbox source.
 
 ## LLVM libFuzzer
 
-Optional Phase 7 fuzz targets use libFuzzer as supplied by the installed Clang/LLVM
+Optional fuzzing fuzz targets use libFuzzer as supplied by the installed Clang/LLVM
 toolchain. No libFuzzer source or runtime binary is vendored or distributed by this
 repository. The deterministic fuzz-smoke executable does not require libFuzzer.
 

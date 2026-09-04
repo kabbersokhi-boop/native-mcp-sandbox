@@ -14,6 +14,27 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  python-agent-quality:
+    name: Python agent quality and package
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@5a7eac68fb9809dea845d802897dc5c723910fa3 # v7.1.3
+
+      - name: Check format
+        run: uvx --from ruff==0.12.7 ruff format --check --config agent/pyproject.toml agent/native_mcp_agent
+
+      - name: Lint
+        run: uvx --from ruff==0.12.7 ruff check --config agent/pyproject.toml agent/native_mcp_agent
+
+      - name: Build wheel and source archive
+        run: uv build --project agent
+
   build-and-test:
     name: ${{ matrix.compiler }} / ${{ matrix.build_type }}
     runs-on: ubuntu-24.04

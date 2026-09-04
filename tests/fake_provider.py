@@ -1,4 +1,4 @@
-"""Deterministic loopback-only provider double used by Phase 10.1 tests."""
+"""Deterministic loopback-only provider double used by provider contracts tests."""
 
 from __future__ import annotations
 
@@ -8,9 +8,11 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import socket
 import threading
 import time
-from typing import ClassVar
 
-from agent.native_mcp_agent.endpoint_policy import validate_fake_bind_host, validate_fake_loopback_endpoint
+from agent.native_mcp_agent.endpoint_policy import (
+    validate_fake_bind_host,
+    validate_fake_loopback_endpoint,
+)
 
 
 class FakeCase(str, Enum):
@@ -78,7 +80,7 @@ class FakeProviderServer:
 
         class Handler(BaseHTTPRequestHandler):
             protocol_version = "HTTP/1.1"
-            server_version = "Phase10Fake/1"
+            server_version = "BoundedFake/1"
             sys_version = ""
 
             def log_message(self, _format: str, *_args: object) -> None:
@@ -93,12 +95,18 @@ class FakeProviderServer:
                 owner.request_bodies.append(body)
                 if owner.request_headers is None:
                     owner.request_headers = []
-                owner.request_headers.append({key.lower(): value for key, value in self.headers.items()})
+                owner.request_headers.append(
+                    {key.lower(): value for key, value in self.headers.items()}
+                )
                 status, response, content_type, declared, delay, close = owner.script()
                 if owner.openai_compatible:
                     response = owner.openai_response(response)
                     if declared is not None:
-                        declared = len(response) if owner.case != FakeCase.TRUNCATED else len(response) + 3
+                        declared = (
+                            len(response)
+                            if owner.case != FakeCase.TRUNCATED
+                            else len(response) + 3
+                        )
                 if delay:
                     time.sleep(delay)
                 if close:
@@ -113,17 +121,33 @@ class FakeProviderServer:
                     self.send_header("Content-Type", content_type)
                 if owner.case == FakeCase.RETRY_AFTER:
                     self.send_header("Retry-After", "0")
-                elif owner.case == FakeCase.RETRY_AFTER_INTEGER and owner.request_count == 1:
+                elif (
+                    owner.case == FakeCase.RETRY_AFTER_INTEGER
+                    and owner.request_count == 1
+                ):
                     self.send_header("Retry-After", "1")
-                elif owner.case == FakeCase.RETRY_AFTER_DECIMAL and owner.request_count == 1:
+                elif (
+                    owner.case == FakeCase.RETRY_AFTER_DECIMAL
+                    and owner.request_count == 1
+                ):
                     self.send_header("Retry-After", "0.5")
                 elif owner.case == FakeCase.MALFORMED_RETRY_AFTER:
                     self.send_header("Retry-After", "not-a-delay")
                 elif owner.case == FakeCase.EXCESSIVE_RETRY_AFTER:
                     self.send_header("Retry-After", "99")
-                if owner.case in {FakeCase.REDIRECT, FakeCase.REDIRECT_301, FakeCase.REDIRECT_302, FakeCase.REDIRECT_303, FakeCase.REDIRECT_307, FakeCase.REDIRECT_308}:
+                if owner.case in {
+                    FakeCase.REDIRECT,
+                    FakeCase.REDIRECT_301,
+                    FakeCase.REDIRECT_302,
+                    FakeCase.REDIRECT_303,
+                    FakeCase.REDIRECT_307,
+                    FakeCase.REDIRECT_308,
+                }:
                     self.send_header("Location", "https://provider.invalid/redirect")
-                self.send_header("Content-Length", str(declared if declared is not None else len(response)))
+                self.send_header(
+                    "Content-Length",
+                    str(declared if declared is not None else len(response)),
+                )
                 self.end_headers()
                 try:
                     self.wfile.write(response)
@@ -137,7 +161,9 @@ class FakeProviderServer:
         self.request_headers = []
         self._server = ThreadingHTTPServer((self.host, 0), Handler)
         self._server.daemon_threads = True
-        self._thread = threading.Thread(target=self._server.serve_forever, name="phase10-fake-provider", daemon=True)
+        self._thread = threading.Thread(
+            target=self._server.serve_forever, name="bounded-fake-provider", daemon=True
+        )
         self._thread.start()
         return self
 
@@ -160,7 +186,11 @@ class FakeProviderServer:
         return validate_fake_loopback_endpoint(self.endpoint, allow_loopback_http=True)
 
     def openai_response(self, response: bytes) -> bytes:
-        if self.case == FakeCase.FINAL or response == b'{"message":{"role":"assistant","content":"synthetic guidance"}}':
+        if (
+            self.case == FakeCase.FINAL
+            or response
+            == b'{"message":{"role":"assistant","content":"synthetic guidance"}}'
+        ):
             return b'{"choices":[{"message":{"role":"assistant","content":"synthetic guidance"}}]}'
         if self.case == FakeCase.ONE_CALL:
             return b'{"choices":[{"message":{"role":"assistant","tool_calls":[{"id":"call-1","type":"function","function":{"name":"logs.search","arguments":"{\\"query\\":\\"ERROR\\"}"}}]}}]}'
@@ -190,7 +220,14 @@ class FakeProviderServer:
         if case == FakeCase.MALFORMED_JSON:
             return 200, b"{", "application/json", None, 0.0, False
         if case == FakeCase.DUPLICATE_KEYS:
-            return 200, b'{"message":{"role":"assistant","content":"a"},"message":{"role":"assistant","content":"b"}}', "application/json", None, 0.0, False
+            return (
+                200,
+                b'{"message":{"role":"assistant","content":"a"},"message":{"role":"assistant","content":"b"}}',
+                "application/json",
+                None,
+                0.0,
+                False,
+            )
         if case == FakeCase.TRUNCATED:
             return 200, final[:-3], "application/json", len(final), 0.0, False
         if case == FakeCase.INVALID_CONTENT_TYPE:
@@ -220,30 +257,92 @@ class FakeProviderServer:
         if case == FakeCase.OVERSIZED_DECLARED_LENGTH:
             return 200, final, "application/json", 999999, 0.0, False
         status_cases = {
-            FakeCase.STATUS_400: 400, FakeCase.STATUS_401: 401, FakeCase.STATUS_403: 403,
-            FakeCase.STATUS_404: 404, FakeCase.STATUS_408: 408, FakeCase.STATUS_413: 413,
-            FakeCase.STATUS_422: 422, FakeCase.STATUS_409: 409, FakeCase.STATUS_429: 429, FakeCase.STATUS_500: 500,
-            FakeCase.STATUS_502: 502, FakeCase.STATUS_503: 503, FakeCase.STATUS_504: 504,
+            FakeCase.STATUS_400: 400,
+            FakeCase.STATUS_401: 401,
+            FakeCase.STATUS_403: 403,
+            FakeCase.STATUS_404: 404,
+            FakeCase.STATUS_408: 408,
+            FakeCase.STATUS_413: 413,
+            FakeCase.STATUS_422: 422,
+            FakeCase.STATUS_409: 409,
+            FakeCase.STATUS_429: 429,
+            FakeCase.STATUS_500: 500,
+            FakeCase.STATUS_502: 502,
+            FakeCase.STATUS_503: 503,
+            FakeCase.STATUS_504: 504,
         }
         if case in status_cases:
-            return status_cases[case], b'{"error":"bounded"}', "application/json", None, 0.0, False
-        if case in {FakeCase.RETRY_AFTER, FakeCase.MALFORMED_RETRY_AFTER, FakeCase.EXCESSIVE_RETRY_AFTER}:
+            return (
+                status_cases[case],
+                b'{"error":"bounded"}',
+                "application/json",
+                None,
+                0.0,
+                False,
+            )
+        if case in {
+            FakeCase.RETRY_AFTER,
+            FakeCase.MALFORMED_RETRY_AFTER,
+            FakeCase.EXCESSIVE_RETRY_AFTER,
+        }:
             return 429, b'{"error":"bounded"}', "application/json", None, 0.0, False
         redirect_cases = {
-            FakeCase.REDIRECT: 302, FakeCase.REDIRECT_301: 301, FakeCase.REDIRECT_302: 302,
-            FakeCase.REDIRECT_303: 303, FakeCase.REDIRECT_307: 307, FakeCase.REDIRECT_308: 308,
+            FakeCase.REDIRECT: 302,
+            FakeCase.REDIRECT_301: 301,
+            FakeCase.REDIRECT_302: 302,
+            FakeCase.REDIRECT_303: 303,
+            FakeCase.REDIRECT_307: 307,
+            FakeCase.REDIRECT_308: 308,
         }
         if case in redirect_cases:
             return redirect_cases[case], b"", "text/plain", None, 0.0, False
         if case == FakeCase.UNEXPECTED_FIELDS:
-            return 200, b'{"message":{"role":"assistant","content":"a"},"extra":1}', "application/json", None, 0.0, False
+            return (
+                200,
+                b'{"message":{"role":"assistant","content":"a"},"extra":1}',
+                "application/json",
+                None,
+                0.0,
+                False,
+            )
         if case == FakeCase.MIXED:
-            return 200, b'{"message":{"role":"assistant","content":"a"},"toolCalls":[]}', "application/json", None, 0.0, False
+            return (
+                200,
+                b'{"message":{"role":"assistant","content":"a"},"toolCalls":[]}',
+                "application/json",
+                None,
+                0.0,
+                False,
+            )
         if case == FakeCase.DUPLICATE_CALL_IDS:
-            return 200, b'{"toolCalls":[{"id":"same","name":"logs.search","arguments":"{}"},{"id":"same","name":"logs.search","arguments":"{}"}]}', "application/json", None, 0.0, False
+            return (
+                200,
+                b'{"toolCalls":[{"id":"same","name":"logs.search","arguments":"{}"},{"id":"same","name":"logs.search","arguments":"{}"}]}',
+                "application/json",
+                None,
+                0.0,
+                False,
+            )
         if case == FakeCase.MALFORMED_ARGUMENTS:
-            return 200, b'{"toolCalls":[{"id":"call-1","name":"logs.search","arguments":"{"}]}', "application/json", None, 0.0, False
+            return (
+                200,
+                b'{"toolCalls":[{"id":"call-1","name":"logs.search","arguments":"{"}]}',
+                "application/json",
+                None,
+                0.0,
+                False,
+            )
         if case == FakeCase.EXCESSIVE_PROPOSALS:
-            calls = b",".join(b'{"id":"call-%d","name":"logs.search","arguments":"{}"}' % index for index in range(17))
-            return 200, b'{"toolCalls":[' + calls + b"]}", "application/json", None, 0.0, False
+            calls = b",".join(
+                b'{"id":"call-%d","name":"logs.search","arguments":"{}"}' % index
+                for index in range(17)
+            )
+            return (
+                200,
+                b'{"toolCalls":[' + calls + b"]}",
+                "application/json",
+                None,
+                0.0,
+                False,
+            )
         return 500, b"", "application/json", None, 0.0, False

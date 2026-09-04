@@ -5,7 +5,7 @@
 
 ## Context
 
-Phase 1 must parse untrusted JSON-RPC messages.
+initial protocol must parse untrusted JSON-RPC messages.
 A custom JSON parser would add unnecessary correctness and security risk.
 A configuration-time download would make restricted and offline builds less predictable.
 

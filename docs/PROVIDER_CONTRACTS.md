@@ -1,4 +1,4 @@
-# Phase 10.1 provider contracts
+# Provider Contracts
 
 This module is an external-agent foundation. It is intentionally separate from
 the C++ server and has no MCP client, provider SDK, credential loader, live
@@ -145,5 +145,5 @@ values, are discarded and use the local bounded `retry_backoff_ms`. The
 rejected header text itself is never included in an exception or log.
 
 The test suite is standard-library-only, offline, and registered as
-`agent.phase_10_1` and `agent.phase_10_1_security_regressions` in normal CTest
+`agent.provider_contracts` and `agent.provider_security_regressions` in normal CTest
 execution.

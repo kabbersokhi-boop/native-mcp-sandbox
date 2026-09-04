@@ -36,13 +36,13 @@ Implementation: [`src/orchestration.cpp`](../src/orchestration.cpp). Evidence: [
 
 The external agent captures the native server's exact `tools/list` surface, validates a provider proposal against that surface and the local closed schema, then constructs the MCP `tools/call` itself. Stable action identities and bounded replay state reject duplicate, changed and later-turn proposals. Accepted calls run serially and at most once within one bounded investigation.
 
-Implementation: [`agent/native_mcp_agent/mcp_orchestrator.py`](../agent/native_mcp_agent/mcp_orchestrator.py). Evidence: [`tests/phase_10_2_tests.py`](../tests/phase_10_2_tests.py), [`tests/phase_10_3_tests.py`](../tests/phase_10_3_tests.py), and [`docs/PHASE_10_2.md`](PHASE_10_2.md).
+Implementation: [`agent/native_mcp_agent/mcp_orchestrator.py`](../agent/native_mcp_agent/mcp_orchestrator.py). Evidence: [`tests/mcp_orchestration_tests.py`](../tests/mcp_orchestration_tests.py), [`tests/adversarial_agent_tests.py`](../tests/adversarial_agent_tests.py), and [`docs/MCP_ORCHESTRATION.md`](MCP_ORCHESTRATION.md).
 
 ## 7. Provider networking and credentials
 
 Networking is intentionally absent from the C++ server. The optional adapter in the external agent owns endpoint validation, verified HTTPS, bounded non-streaming reads, redirect rejection and credential loading at explicit production execution. A loopback fake-provider path is separate, credential-free and used for offline tests. The implemented egress mode allows only project-authorized synthetic content; later MCP evidence is not sent to a provider.
 
-Implementation: [`agent/native_mcp_agent/openai_compatible.py`](../agent/native_mcp_agent/openai_compatible.py). Evidence: [`tests/phase_10_4_tests.py`](../tests/phase_10_4_tests.py), [`docs/PHASE_10_4.md`](PHASE_10_4.md), and [`SECURITY.md`](../SECURITY.md).
+Implementation: [`agent/native_mcp_agent/openai_compatible.py`](../agent/native_mcp_agent/openai_compatible.py). Evidence: [`tests/openai_adapter_tests.py`](../tests/openai_adapter_tests.py), [`docs/OPENAI_COMPATIBLE_ADAPTER.md`](OPENAI_COMPATIBLE_ADAPTER.md), and [`SECURITY.md`](../SECURITY.md).
 
 ## 8. Assurance
 

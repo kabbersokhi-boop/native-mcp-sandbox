@@ -184,7 +184,7 @@ Controls include:
 - project-issued, non-transferable synthetic egress authorization;
 - rejection of unmarked, copied or mutated outbound message content;
 - rejection of later MCP evidence in this mode;
-- no implementation of `redacted-summary` or `approved-evidence` in Phase 10.4.
+- no implementation of `redacted-summary` or `approved-evidence` in OpenAI-compatible adapter.
 
 ### Provider instability and resource abuse
 

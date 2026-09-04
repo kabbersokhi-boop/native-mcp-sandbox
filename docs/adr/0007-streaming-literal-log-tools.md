@@ -37,4 +37,4 @@ Use a small process-wide burst limit.
 
 The tools are deterministic and memory-bounded.
 They are not a regular-expression engine, recursive search service, file watcher, or high-throughput log platform.
-Phase 3 does not provide cancellation or hard deadlines.
+log tools does not provide cancellation or hard deadlines.

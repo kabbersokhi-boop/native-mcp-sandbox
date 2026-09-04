@@ -32,7 +32,7 @@ Hosted model output is probabilistic and externally controlled. A free or
 shared development endpoint may be throttled, changed, or unavailable. It
 cannot provide deterministic merge evidence.
 
-The existing Phase 8 client already demonstrates the correct separation: a
+The existing deterministic demonstration client already demonstrates the correct separation: a
 bounded client starts the real server, communicates over MCP stdio, validates
 closed response schemas, correlates request IDs, and emits stable evidence.
 

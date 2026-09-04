@@ -46,9 +46,13 @@ def check_relative_links() -> None:
             try:
                 destination.relative_to(ROOT)
             except ValueError:
-                fail(f"{document.relative_to(ROOT)} links outside the repository: {target}")
+                fail(
+                    f"{document.relative_to(ROOT)} links outside the repository: {target}"
+                )
             if not destination.exists():
-                fail(f"{document.relative_to(ROOT)} has a missing relative link: {target}")
+                fail(
+                    f"{document.relative_to(ROOT)} has a missing relative link: {target}"
+                )
 
 
 def check_current_version() -> None:

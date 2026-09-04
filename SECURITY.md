@@ -9,7 +9,8 @@ Native MCP Sandbox is before version 1.0. Security corrections target:
 
 The current project version is `v0.11.0`. A published release tag identifies its exact release commit; release tags are never rewritten.
 
-Version `v0.11.0` includes the completed Phase 10 external agent and optional OpenAI-compatible adapter. The native C++ server remains stdio-only, network-free, credential-free and exposes no new MCP tool.
+Version `v0.11.0` includes a preview external agent and optional OpenAI-compatible adapter. The
+native C++ server remains stdio-only, network-free, credential-free, and exposes no new MCP tool.
 
 ## Report a vulnerability
 
@@ -163,7 +164,7 @@ The implemented automated and manual smoke path uses `synthetic-only` egress.
 
 Synthetic outbound content requires project-issued, non-transferable authorization. Arbitrary strings, copied authorization state and mutated content fail closed. Later MCP evidence remains blocked in this mode.
 
-`redacted-summary` and `approved-evidence` are not implemented by Phase 10.4.
+`redacted-summary` and `approved-evidence` are not implemented by OpenAI-compatible adapter.
 
 ### Tool authority and replay
 

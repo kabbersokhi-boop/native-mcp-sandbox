@@ -1,4 +1,4 @@
-"""Exact, conservative Phase 10.1 defaults and hard ceilings."""
+"""Exact, conservative provider contracts defaults and hard ceilings."""
 
 from __future__ import annotations
 
@@ -78,7 +78,12 @@ class Limits:
             name = item.name
             value = getattr(self, name)
             maximum = self.HARD_MAX[name]
-            if not isinstance(value, int) or isinstance(value, bool) or value <= 0 or value > maximum:
+            if (
+                not isinstance(value, int)
+                or isinstance(value, bool)
+                or value <= 0
+                or value > maximum
+            ):
                 raise ProviderError(
                     failure(
                         FailureClass.INVALID_PROVIDER_CONFIGURATION,

@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import ipaddress
 import socket
-from typing import Callable, Iterable
+from collections.abc import Callable, Iterable
+from dataclasses import dataclass
 from urllib.parse import urlsplit
 
 from .errors import FailureClass, ProviderError, failure
-
 
 Resolver = Callable[[str, int, int, int], Iterable[tuple[int, int, int, str, tuple[object, ...]]]]
 
@@ -27,48 +26,84 @@ class ValidatedEndpoint:
 
 def _split(url: str):
     if not isinstance(url, str) or not url or any(ord(char) < 0x20 for char in url):
-        raise ProviderError(failure(FailureClass.ENDPOINT_POLICY_REJECTION, "endpoint text is invalid or oversized"))
+        raise ProviderError(
+            failure(FailureClass.ENDPOINT_POLICY_REJECTION, "endpoint text is invalid or oversized")
+        )
     try:
         if len(url.encode("utf-8")) > 2_048:
-            raise ProviderError(failure(FailureClass.ENDPOINT_POLICY_REJECTION, "endpoint text is invalid or oversized"))
+            raise ProviderError(
+                failure(
+                    FailureClass.ENDPOINT_POLICY_REJECTION, "endpoint text is invalid or oversized"
+                )
+            )
     except UnicodeEncodeError:
-        raise ProviderError(failure(FailureClass.ENDPOINT_POLICY_REJECTION, "endpoint text is invalid or oversized")) from None
+        raise ProviderError(
+            failure(FailureClass.ENDPOINT_POLICY_REJECTION, "endpoint text is invalid or oversized")
+        ) from None
     try:
         parsed = urlsplit(url)
         port = parsed.port
         hostname = parsed.hostname
     except (TypeError, ValueError):
-        raise ProviderError(failure(FailureClass.ENDPOINT_POLICY_REJECTION, "endpoint port is malformed")) from None
+        raise ProviderError(
+            failure(FailureClass.ENDPOINT_POLICY_REJECTION, "endpoint port is malformed")
+        ) from None
     if not parsed.netloc or parsed.username is not None or parsed.password is not None:
-        raise ProviderError(failure(FailureClass.ENDPOINT_POLICY_REJECTION, "endpoint authority is missing or contains user-info"))
+        raise ProviderError(
+            failure(
+                FailureClass.ENDPOINT_POLICY_REJECTION,
+                "endpoint authority is missing or contains user-info",
+            )
+        )
     if parsed.fragment or parsed.query:
-        raise ProviderError(failure(FailureClass.ENDPOINT_POLICY_REJECTION, "endpoint contains a fragment or query"))
+        raise ProviderError(
+            failure(FailureClass.ENDPOINT_POLICY_REJECTION, "endpoint contains a fragment or query")
+        )
     if hostname is None or not hostname or any(char.isspace() for char in hostname):
-        raise ProviderError(failure(FailureClass.ENDPOINT_POLICY_REJECTION, "endpoint hostname is invalid"))
+        raise ProviderError(
+            failure(FailureClass.ENDPOINT_POLICY_REJECTION, "endpoint hostname is invalid")
+        )
     if port is None:
         port = 443 if parsed.scheme.lower() == "https" else 80
     if not 1 <= port <= 65535:
-        raise ProviderError(failure(FailureClass.ENDPOINT_POLICY_REJECTION, "endpoint port is outside range"))
+        raise ProviderError(
+            failure(FailureClass.ENDPOINT_POLICY_REJECTION, "endpoint port is outside range")
+        )
     if parsed.path == "":
         path = "/"
     elif not parsed.path.startswith("/") or any(ord(char) < 0x20 for char in parsed.path):
-        raise ProviderError(failure(FailureClass.ENDPOINT_POLICY_REJECTION, "endpoint request path is invalid"))
+        raise ProviderError(
+            failure(FailureClass.ENDPOINT_POLICY_REJECTION, "endpoint request path is invalid")
+        )
     else:
         path = parsed.path
     try:
         if len(path.encode("utf-8")) > 2_048:
-            raise ProviderError(failure(FailureClass.ENDPOINT_POLICY_REJECTION, "endpoint request path is oversized"))
+            raise ProviderError(
+                failure(
+                    FailureClass.ENDPOINT_POLICY_REJECTION, "endpoint request path is oversized"
+                )
+            )
     except UnicodeEncodeError:
-        raise ProviderError(failure(FailureClass.ENDPOINT_POLICY_REJECTION, "endpoint request path is invalid")) from None
+        raise ProviderError(
+            failure(FailureClass.ENDPOINT_POLICY_REJECTION, "endpoint request path is invalid")
+        ) from None
     return parsed, hostname, port, path
 
 
 def validate_production_endpoint(url: str, *, verify_tls: bool = True) -> ValidatedEndpoint:
     parsed, host, port, path = _split(url)
     if parsed.scheme.lower() != "https":
-        raise ProviderError(failure(FailureClass.INSECURE_SCHEME, "production provider endpoints require HTTPS"))
+        raise ProviderError(
+            failure(FailureClass.INSECURE_SCHEME, "production provider endpoints require HTTPS")
+        )
     if verify_tls is not True:
-        raise ProviderError(failure(FailureClass.TLS_VERIFICATION_FAILURE, "certificate and hostname verification may not be disabled"))
+        raise ProviderError(
+            failure(
+                FailureClass.TLS_VERIFICATION_FAILURE,
+                "certificate and hostname verification may not be disabled",
+            )
+        )
     # No DNS resolution is performed here. A future live adapter must resolve
     # and verify the destination immediately before a TLS connection.
     return ValidatedEndpoint(url, "https", host, host, port, path, False)
@@ -89,7 +124,8 @@ def resolve_production_transport_endpoint(
     try:
         checked = validate_production_endpoint(endpoint.url, verify_tls=True)
         if (
-            endpoint != checked or endpoint.connect_host != endpoint.host
+            endpoint != checked
+            or endpoint.connect_host != endpoint.host
             or endpoint.loopback_only is not False
         ):
             raise ValueError
@@ -97,7 +133,9 @@ def resolve_production_transport_endpoint(
     except ProviderError:
         raise
     except (OSError, ValueError, TypeError):
-        raise ProviderError(failure(FailureClass.DNS_OR_CONNECTION_FAILURE, "production endpoint resolution failed")) from None
+        raise ProviderError(
+            failure(FailureClass.DNS_OR_CONNECTION_FAILURE, "production endpoint resolution failed")
+        ) from None
     addresses: list[str] = []
     try:
         for family, _socktype, _proto, _canonname, sockaddr in records:
@@ -110,10 +148,19 @@ def resolve_production_transport_endpoint(
                 raise ValueError
             addresses.append(str(address))
     except (IndexError, ValueError, TypeError):
-        raise ProviderError(failure(FailureClass.ENDPOINT_POLICY_REJECTION, "production endpoint destination is disallowed")) from None
+        raise ProviderError(
+            failure(
+                FailureClass.ENDPOINT_POLICY_REJECTION,
+                "production endpoint destination is disallowed",
+            )
+        ) from None
     if not addresses:
-        raise ProviderError(failure(FailureClass.DNS_OR_CONNECTION_FAILURE, "production endpoint resolution failed"))
-    return ValidatedEndpoint(checked.url, checked.scheme, checked.host, addresses[0], checked.port, checked.path, False)
+        raise ProviderError(
+            failure(FailureClass.DNS_OR_CONNECTION_FAILURE, "production endpoint resolution failed")
+        )
+    return ValidatedEndpoint(
+        checked.url, checked.scheme, checked.host, addresses[0], checked.port, checked.path, False
+    )
 
 
 def _is_loopback_address(value: object) -> bool:
@@ -127,22 +174,34 @@ def _resolved_addresses(host: str, port: int, resolver: Resolver) -> list[tuple[
     try:
         records = list(resolver(host, port, socket.AF_UNSPEC, socket.SOCK_STREAM))
     except (OSError, ValueError):
-        raise ProviderError(failure(FailureClass.ENDPOINT_POLICY_REJECTION, "fake endpoint resolution failed")) from None
+        raise ProviderError(
+            failure(FailureClass.ENDPOINT_POLICY_REJECTION, "fake endpoint resolution failed")
+        ) from None
     addresses: list[tuple[int, str]] = []
     try:
         for family, _socktype, _proto, _canonname, sockaddr in records:
-            if family == socket.AF_INET:
-                addresses.append((family, str(sockaddr[0])))
-            elif family == socket.AF_INET6:
+            if family == socket.AF_INET or family == socket.AF_INET6:
                 addresses.append((family, str(sockaddr[0])))
             else:
-                raise ProviderError(failure(FailureClass.ENDPOINT_POLICY_REJECTION, "fake endpoint has an unsupported address family"))
+                raise ProviderError(
+                    failure(
+                        FailureClass.ENDPOINT_POLICY_REJECTION,
+                        "fake endpoint has an unsupported address family",
+                    )
+                )
     except ProviderError:
         raise
     except (IndexError, KeyError, TypeError, ValueError):
-        raise ProviderError(failure(FailureClass.ENDPOINT_POLICY_REJECTION, "fake endpoint resolution failed")) from None
+        raise ProviderError(
+            failure(FailureClass.ENDPOINT_POLICY_REJECTION, "fake endpoint resolution failed")
+        ) from None
     if not addresses or any(not _is_loopback_address(address) for _family, address in addresses):
-        raise ProviderError(failure(FailureClass.ENDPOINT_POLICY_REJECTION, "fake endpoint does not resolve exclusively to loopback"))
+        raise ProviderError(
+            failure(
+                FailureClass.ENDPOINT_POLICY_REJECTION,
+                "fake endpoint does not resolve exclusively to loopback",
+            )
+        )
     return addresses
 
 
@@ -153,18 +212,35 @@ def validate_fake_loopback_endpoint(
     resolver: Resolver = socket.getaddrinfo,
 ) -> ValidatedEndpoint:
     if allow_loopback_http is not True:
-        raise ProviderError(failure(FailureClass.ENDPOINT_POLICY_REJECTION, "loopback HTTP requires explicit test-only opt-in"))
+        raise ProviderError(
+            failure(
+                FailureClass.ENDPOINT_POLICY_REJECTION,
+                "loopback HTTP requires explicit test-only opt-in",
+            )
+        )
     parsed, host, port, path = _split(url)
     if parsed.scheme.lower() != "http":
-        raise ProviderError(failure(FailureClass.INSECURE_SCHEME, "fake provider must use explicit loopback HTTP"))
+        raise ProviderError(
+            failure(FailureClass.INSECURE_SCHEME, "fake provider must use explicit loopback HTTP")
+        )
     if host in {"0.0.0.0", "::", "[::]", ""}:
-        raise ProviderError(failure(FailureClass.ENDPOINT_POLICY_REJECTION, "wildcard fake-provider destination is forbidden"))
+        raise ProviderError(
+            failure(
+                FailureClass.ENDPOINT_POLICY_REJECTION,
+                "wildcard fake-provider destination is forbidden",
+            )
+        )
     try:
         host_is_loopback = ipaddress.ip_address(host).is_loopback
     except ValueError:
         host_is_loopback = host.lower() == "localhost"
     if not host_is_loopback:
-        raise ProviderError(failure(FailureClass.ENDPOINT_POLICY_REJECTION, "fake endpoint hostname is not explicit loopback"))
+        raise ProviderError(
+            failure(
+                FailureClass.ENDPOINT_POLICY_REJECTION,
+                "fake endpoint hostname is not explicit loopback",
+            )
+        )
     addresses = _resolved_addresses(host, port, resolver)
     family, connect_host = addresses[0]
     del family
@@ -173,7 +249,12 @@ def validate_fake_loopback_endpoint(
 
 def validate_fake_bind_host(host: str) -> None:
     if host not in {"127.0.0.1", "::1", "localhost"}:
-        raise ProviderError(failure(FailureClass.ENDPOINT_POLICY_REJECTION, "fake provider must bind to explicit loopback"))
+        raise ProviderError(
+            failure(
+                FailureClass.ENDPOINT_POLICY_REJECTION,
+                "fake provider must bind to explicit loopback",
+            )
+        )
 
 
 def validate_loopback_transport_endpoint(endpoint: ValidatedEndpoint) -> None:
@@ -190,18 +271,39 @@ def validate_loopback_transport_endpoint(endpoint: ValidatedEndpoint) -> None:
         if not isinstance(endpoint.connect_host, str) or not endpoint.connect_host:
             raise ValueError
         address = ipaddress.ip_address(endpoint.connect_host)
-        if not address.is_loopback or address.is_unspecified or address.is_link_local or address.is_multicast or address.is_reserved:
+        if (
+            not address.is_loopback
+            or address.is_unspecified
+            or address.is_link_local
+            or address.is_multicast
+            or address.is_reserved
+        ):
             raise ValueError
-        if isinstance(endpoint.port, bool) or not isinstance(endpoint.port, int) or not 1 <= endpoint.port <= 65535:
+        if (
+            isinstance(endpoint.port, bool)
+            or not isinstance(endpoint.port, int)
+            or not 1 <= endpoint.port <= 65535
+        ):
             raise ValueError
-        if not isinstance(endpoint.path, str) or not endpoint.path or not endpoint.path.startswith("/"):
+        if (
+            not isinstance(endpoint.path, str)
+            or not endpoint.path
+            or not endpoint.path.startswith("/")
+        ):
             raise ValueError
-        if any(ord(char) < 0x20 or ord(char) == 0x7f for char in endpoint.path) or len(endpoint.path.encode("utf-8")) > 2_048:
+        if (
+            any(ord(char) < 0x20 or ord(char) == 0x7F for char in endpoint.path)
+            or len(endpoint.path.encode("utf-8")) > 2_048
+        ):
             raise ValueError
         parsed, public_host, public_port, public_path = _split(endpoint.url)
         if parsed.scheme != "http" or parsed.username is not None or parsed.password is not None:
             raise ValueError
-        if public_host != endpoint.host or public_port != endpoint.port or public_path != endpoint.path:
+        if (
+            public_host != endpoint.host
+            or public_port != endpoint.port
+            or public_path != endpoint.path
+        ):
             raise ValueError
         # Numeric public authorities must agree with the numeric connection
         # destination.  A validated ``localhost`` URL is allowed, but no other
@@ -210,12 +312,16 @@ def validate_loopback_transport_endpoint(endpoint: ValidatedEndpoint) -> None:
             public_address = ipaddress.ip_address(public_host)
         except ValueError:
             if public_host.lower() != "localhost":
-                raise ValueError
+                raise ValueError from None
         else:
             if public_address != address:
                 raise ValueError
     except (AttributeError, TypeError, UnicodeError, ValueError, OverflowError):
-        raise ProviderError(failure(FailureClass.ENDPOINT_POLICY_REJECTION, "transport endpoint authority is invalid")) from None
+        raise ProviderError(
+            failure(
+                FailureClass.ENDPOINT_POLICY_REJECTION, "transport endpoint authority is invalid"
+            )
+        ) from None
 
 
 def redirect_rejection(location: str | None = None):

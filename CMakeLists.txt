@@ -336,35 +336,35 @@ if(BUILD_TESTING)
   )
   set_tests_properties(agent.investigation_demo PROPERTIES TIMEOUT 90)
   add_test(
-    NAME agent.phase_10_1
+    NAME agent.provider_contracts
     COMMAND ${Python3_EXECUTABLE}
-            ${CMAKE_CURRENT_SOURCE_DIR}/tests/phase_10_1_tests.py
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/provider_contract_tests.py
   )
-  set_tests_properties(agent.phase_10_1 PROPERTIES TIMEOUT 90)
+  set_tests_properties(agent.provider_contracts PROPERTIES TIMEOUT 90)
   add_test(
-    NAME agent.phase_10_1_security_regressions
+    NAME agent.provider_security_regressions
     COMMAND ${Python3_EXECUTABLE}
-            ${CMAKE_CURRENT_SOURCE_DIR}/tests/phase_10_1_security_regressions.py
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/provider_security_regression_tests.py
   )
-  set_tests_properties(agent.phase_10_1_security_regressions PROPERTIES TIMEOUT 90)
+  set_tests_properties(agent.provider_security_regressions PROPERTIES TIMEOUT 90)
   add_test(
-    NAME agent.phase_10_2
+    NAME agent.mcp_orchestration
     COMMAND ${Python3_EXECUTABLE}
-            ${CMAKE_CURRENT_SOURCE_DIR}/tests/phase_10_2_tests.py
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/mcp_orchestration_tests.py
   )
-  set_tests_properties(agent.phase_10_2 PROPERTIES TIMEOUT 90)
+  set_tests_properties(agent.mcp_orchestration PROPERTIES TIMEOUT 90)
   add_test(
-    NAME agent.phase_10_3
+    NAME agent.adversarial_assurance
     COMMAND ${Python3_EXECUTABLE}
-            ${CMAKE_CURRENT_SOURCE_DIR}/tests/phase_10_3_tests.py
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/adversarial_agent_tests.py
   )
-  set_tests_properties(agent.phase_10_3 PROPERTIES TIMEOUT 90)
+  set_tests_properties(agent.adversarial_assurance PROPERTIES TIMEOUT 90)
   add_test(
-    NAME agent.phase_10_4
+    NAME agent.openai_adapter
     COMMAND ${Python3_EXECUTABLE}
-            ${CMAKE_CURRENT_SOURCE_DIR}/tests/phase_10_4_tests.py
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/openai_adapter_tests.py
   )
-  set_tests_properties(agent.phase_10_4 PROPERTIES TIMEOUT 90)
+  set_tests_properties(agent.openai_adapter PROPERTIES TIMEOUT 90)
   if(NMS_BUILD_BENCHMARKS)
     add_test(
       NAME benchmarks.component_smoke

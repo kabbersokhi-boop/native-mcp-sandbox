@@ -69,16 +69,16 @@ cmake --build --preset sanitizers
 ASAN_OPTIONS=detect_leaks=1 ctest --preset sanitizers --output-on-failure
 ```
 
-## Run the Phase 10 suites
+## Run the external-agent suites
 
 Changes to the external agent, provider contracts, orchestration, endpoint policy, redaction or transcript logic must run:
 
 ```bash
-python3 tests/phase_10_4_tests.py
-python3 tests/phase_10_3_tests.py
-python3 tests/phase_10_2_tests.py
-python3 tests/phase_10_1_security_regressions.py
-python3 tests/phase_10_1_tests.py
+python3 tests/openai_adapter_tests.py
+python3 tests/adversarial_agent_tests.py
+python3 tests/mcp_orchestration_tests.py
+python3 tests/provider_security_regression_tests.py
+python3 tests/provider_contract_tests.py
 ```
 
 Normal CI must remain offline and credential-free. Do not make a live provider result part of a merge gate.

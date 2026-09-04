@@ -16,7 +16,7 @@ It is not proof that the implementation is secure.
 
 ## Decision
 
-Phase 7 adds three assurance layers.
+fuzzing adds three assurance layers.
 
 ### JSON preflight
 

@@ -1,6 +1,6 @@
 # ADR 0009: Bounded proc memory observation
 
-- Status: Accepted for Phase 5
+- Status: Accepted for bounded tool set
 - Date: 2026-07-18
 
 ## Context
