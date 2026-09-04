@@ -30,11 +30,12 @@
 ```text
 Head SHA:
 
-Phase 10.4:
-Phase 10.3:
-Phase 10.2:
-Phase 10.1 security:
-Phase 10.1:
+Provider contracts:
+Security regressions:
+MCP orchestration:
+Adversarial agent:
+OpenAI-compatible adapter:
+Python package quality:
 
 CTest dev:
 CTest sanitizers:
