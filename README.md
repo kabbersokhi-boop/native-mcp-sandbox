@@ -1,7 +1,8 @@
 # Native MCP Sandbox
 
-**A mixed-language security system with a C++20 authority boundary and a separate, bounded Python
-investigation client. It exposes narrow, read-only Linux evidence through explicit operator policy.**
+**Security-first AI infrastructure with a C++20 authority boundary. It exposes narrow, read-only
+Linux evidence through explicit operator policy while a separate Python client handles bounded
+investigation orchestration.**
 
 [![CI](https://github.com/kabbersokhi-boop/native-mcp-sandbox/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/kabbersokhi-boop/native-mcp-sandbox/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/kabbersokhi-boop/native-mcp-sandbox)](https://github.com/kabbersokhi-boop/native-mcp-sandbox/releases/latest)
@@ -11,6 +12,15 @@ investigation client. It exposes narrow, read-only Linux evidence through explic
 
 > **Boundary:** this is a capability-bounded evidence server. It is not a process, container, or
 > kernel sandbox.
+
+## Engineering evidence
+
+| Property | Implementation | Public evidence |
+| --- | --- | --- |
+| Narrow native authority | C++20, stdio-only MCP, symbolic resources, no shell or native networking | [`src/`](src/), [`THREAT_MODEL.md`](THREAT_MODEL.md) |
+| Bounded orchestration | Closed schemas, response limits, serial execution, replay protection | [`agent/`](agent/), [`tests/`](tests/) |
+| Systems assurance | GCC and Clang, ASan, UBSan, ThreadSanitizer, deterministic and coverage-guided fuzzing | [CI](https://github.com/kabbersokhi-boop/native-mcp-sandbox/actions/workflows/ci.yml), [`docs/ASSURANCE.md`](docs/ASSURANCE.md) |
+| Verifiable delivery | Native and Python packages, SPDX SBOMs, checksums, build provenance | [Latest release](https://github.com/kabbersokhi-boop/native-mcp-sandbox/releases/latest) |
 
 ## Security question
 

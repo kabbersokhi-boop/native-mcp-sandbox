@@ -1,4 +1,7 @@
 /build/
+/dist/
+/stage/
+/.artifacts/
 /.cache/
 __pycache__/
 *.py[cod]
