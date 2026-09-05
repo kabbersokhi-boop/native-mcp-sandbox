@@ -8,9 +8,9 @@ The project follows semantic versioning before 1.0 with the usual caveat that in
 
 No changes yet.
 
-## 0.12.0
+## 0.12.1
 
-Release tag: `v0.12.0`.
+Release tag: `v0.12.1`.
 
 ### Added
 
@@ -21,6 +21,7 @@ Release tag: `v0.12.0`.
 
 ### Fixed
 
+- Check the child-fixture readiness write so fortified GCC Release builds remain warning-clean.
 - Aligned the external Python MCP client with revision `2025-11-25` used by the native server.
 - Accepted the native server's complete bounded tool metadata and successful `structuredContent` results while preserving closed validation.
 - Captured and validated advertised output schemas before admitting native tool evidence.
@@ -36,6 +37,12 @@ Release tag: `v0.12.0`.
 
 - Describe the project as a mixed-language security system: C++ implements the authority boundary;
   Python implements external orchestration and adversarial assurance.
+
+## 0.12.0
+
+The immutable tag records the first release candidate. Publication stopped when its dedicated
+GCC Release packaging gate found an unchecked test-fixture write. Version `0.12.1` contains the
+fix and the published artifacts.
 
 ## 0.11.0
 

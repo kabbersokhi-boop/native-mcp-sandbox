@@ -139,7 +139,9 @@ void test_exited_process_is_not_rebound() {
   if (child == 0) {
     (void)::close(ready_pipe[0]);
     const char ready = 'x';
-    (void)::write(ready_pipe[1], &ready, 1U);
+    if (::write(ready_pipe[1], &ready, 1U) != 1) {
+      _exit(1);
+    }
     (void)::close(ready_pipe[1]);
     for (;;) {
       ::pause();

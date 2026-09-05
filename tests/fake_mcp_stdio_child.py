@@ -169,7 +169,7 @@ for line in sys.stdin:
                 if scenario == "unsupported_version"
                 else PROTOCOL_VERSION,
                 "capabilities": {},
-                "serverInfo": {"name": "fake-mcp", "version": "0.12.0"},
+                "serverInfo": {"name": "fake-mcp", "version": "0.12.1"},
             },
         )
     elif method == "tools/list":
