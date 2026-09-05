@@ -7,11 +7,11 @@
 
 A local investigation can need basic information about an approved Linux binary.
 Execution, dynamic loading, and arbitrary mapping would increase the attack surface.
-A complete linker-quality parser would exceed the phase boundary.
+A complete linker-quality parser would exceed this component's scope.
 
 ## Decision
 
-Add `elf.inspect` in Phase 4.
+Add `elf.inspect` in ELF inspection.
 The tool accepts a root name and a relative path.
 It obtains one pinned regular-file descriptor through `FilesystemPolicy`.
 

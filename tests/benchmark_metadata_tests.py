@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Deterministic tests for benchmark host metadata decoding."""
+
 from __future__ import annotations
 
 import sys

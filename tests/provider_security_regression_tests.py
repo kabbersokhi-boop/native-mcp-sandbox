@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Focused Phase 10.1 security-contract regressions."""
+"""Focused provider contracts security-contract regressions."""
 
 from __future__ import annotations
 
@@ -16,8 +16,15 @@ sys.path.insert(0, str(ROOT))
 
 from agent.native_mcp_agent import ModelIdentifier  # noqa: E402
 from agent.native_mcp_agent.contracts import (  # noqa: E402
-    AdvertisedTool, EvidenceProvenance, MessageRole, ProviderConfig, ProviderMessage,
-    ProviderRequest, ProviderToolCallProposal, RequestCorrelationId, ToolCallId,
+    AdvertisedTool,
+    EvidenceProvenance,
+    MessageRole,
+    ProviderConfig,
+    ProviderMessage,
+    ProviderRequest,
+    ProviderToolCallProposal,
+    RequestCorrelationId,
+    ToolCallId,
     parse_provider_response,
 )
 from agent.native_mcp_agent.environment import build_child_environment  # noqa: E402
@@ -30,13 +37,21 @@ from tests.fake_provider import FakeCase, FakeProviderServer  # noqa: E402
 
 TOOL = AdvertisedTool(
     "logs.search",
-    {"type": "object", "properties": {"query": {"type": "string"}}, "required": [], "additionalProperties": False},
+    {
+        "type": "object",
+        "properties": {"query": {"type": "string"}},
+        "required": [],
+        "additionalProperties": False,
+    },
 )
 
 
 def request(model: str = "synthetic-model") -> ProviderRequest:
     return ProviderRequest(
-        model, (ProviderMessage(MessageRole.USER, "synthetic"),), (TOOL,), 128,
+        model,
+        (ProviderMessage(MessageRole.USER, "synthetic"),),
+        (TOOL,),
+        128,
         RequestCorrelationId("req-10-1"),
     )
 
@@ -53,30 +68,58 @@ class IdentifierTests(unittest.TestCase):
             with self.subTest(value=value), self.assertRaises(ProviderError):
                 RequestCorrelationId(value)
         rejected = (
-            "sk-api-sentinel", "pk-api-sentinel", "rk-api-sentinel", "sk-secret",
-            "authorization-token", "api-key-abc", "bearer-secret", "token-secret",
-            "password-secret", "secret-value", "credential-value", "user@host",
-            "user:pass@host", "user:pass", "https://provider.invalid/call", "/tmp/call",
+            "sk-api-sentinel",
+            "pk-api-sentinel",
+            "rk-api-sentinel",
+            "sk-secret",
+            "authorization-token",
+            "api-key-abc",
+            "bearer-secret",
+            "token-secret",
+            "password-secret",
+            "secret-value",
+            "credential-value",
+            "user@host",
+            "user:pass@host",
+            "user:pass",
+            "https://provider.invalid/call",
+            "/tmp/call",
             "header:path",
         )
         for value in rejected:
             with self.subTest(value=value), self.assertRaises(ProviderError) as raised:
                 ToolCallId(value)
-            output = " ".join((str(raised.exception), repr(raised.exception), repr(raised.exception.failure.__dict__)))
+            output = " ".join(
+                (
+                    str(raised.exception),
+                    repr(raised.exception),
+                    repr(raised.exception.failure.__dict__),
+                )
+            )
             self.assertNotIn(value, output)
 
     def test_duplicate_detection_uses_canonical_provider_id(self) -> None:
         raw = b'{"toolCalls":[{"id":"legacy-id","name":"logs.search","arguments":"{}"},{"id":"legacy-id","name":"logs.search","arguments":"{}"}]}'
         with self.assertRaises(ProviderError) as raised:
             parse_provider_response(raw, advertised_tools=(TOOL,))
-        self.assertEqual(raised.exception.failure.classification, FailureClass.REPLAY_OR_DUPLICATE_PROPOSAL)
+        self.assertEqual(
+            raised.exception.failure.classification,
+            FailureClass.REPLAY_OR_DUPLICATE_PROPOSAL,
+        )
 
     def test_transcripts_accept_only_canonical_proposal_ids(self) -> None:
         event = TranscriptEvent(
-            "event", "adapter", ModelIdentifier("provider:model"), RequestCorrelationId("req-10-1"),
-            EvidenceProvenance.LOCAL_CONTROL_EVENT, proposal_ids=(ToolCallId("call-1"),),
+            "event",
+            "adapter",
+            ModelIdentifier("provider:model"),
+            RequestCorrelationId("req-10-1"),
+            EvidenceProvenance.LOCAL_CONTROL_EVENT,
+            proposal_ids=(ToolCallId("call-1"),),
         )
-        self.assertEqual(parse_transcript(event.to_json_bytes()).proposal_ids, (ToolCallId("call-1"),))
+        self.assertEqual(
+            parse_transcript(event.to_json_bytes()).proposal_ids,
+            (ToolCallId("call-1"),),
+        )
         raw = json.loads(event.to_json_bytes())
         raw["proposalIds"] = ["legacy-id"]
         with self.assertRaises(ProviderError):
@@ -85,17 +128,38 @@ class IdentifierTests(unittest.TestCase):
 
 class ModelAndProxyTests(unittest.TestCase):
     def test_shared_model_identifier_contract(self) -> None:
-        for value in ("synthetic-model", "organization/model-name", "provider:model", "m"):
+        for value in (
+            "synthetic-model",
+            "organization/model-name",
+            "provider:model",
+            "m",
+        ):
             with self.subTest(value=value):
                 config = ProviderConfig("https://provider.example/v1", value)
                 req = request(value)
-                event = TranscriptEvent("event", "adapter", value, RequestCorrelationId("req-10-1"), EvidenceProvenance.LOCAL_CONTROL_EVENT)
+                event = TranscriptEvent(
+                    "event",
+                    "adapter",
+                    value,
+                    RequestCorrelationId("req-10-1"),
+                    EvidenceProvenance.LOCAL_CONTROL_EVENT,
+                )
                 self.assertIsInstance(config.model, ModelIdentifier)
                 self.assertIsInstance(req.model, ModelIdentifier)
                 self.assertIsInstance(event.model, ModelIdentifier)
                 self.assertEqual(json.loads(req.to_json_bytes())["model"], value)
                 self.assertEqual(json.loads(event.to_json_bytes())["model"], value)
-        for value in ("", "organization//model", "organization/ model", "/absolute", "https://host/model", "user:pass@model", "api-key-secret", "model\nname", "x" * 257):
+        for value in (
+            "",
+            "organization//model",
+            "organization/ model",
+            "/absolute",
+            "https://host/model",
+            "user:pass@model",
+            "api-key-secret",
+            "model\nname",
+            "x" * 257,
+        ):
             with self.subTest(value=value), self.assertRaises(ProviderError):
                 ModelIdentifier(value)
 
@@ -106,22 +170,53 @@ class ModelAndProxyTests(unittest.TestCase):
             "ALL_PROXY": "http://[2001:db8::10]:3128",
             "NO_PROXY": "*,.example.com,example.org:8443,192.0.2.1,[2001:db8::1]:443",
         }
-        result = build_child_environment(parent, tuple(parent), allow_proxy=True, provider_child=False)
+        result = build_child_environment(
+            parent, tuple(parent), allow_proxy=True, provider_child=False
+        )
         self.assertEqual(result, parent)
         invalid = (
-            "http://user:pass@proxy.example:8080", "http://proxy.example", "ftp://proxy.example:8080",
-            "http://proxy.example:notaport", "http://proxy.example:8080/path", "http://proxy.example:8080?q=x",
-            "http://proxy.example:8080#x", "http://proxy.example:8080\\x",
+            "http://user:pass@proxy.example:8080",
+            "http://proxy.example",
+            "ftp://proxy.example:8080",
+            "http://proxy.example:notaport",
+            "http://proxy.example:8080/path",
+            "http://proxy.example:8080?q=x",
+            "http://proxy.example:8080#x",
+            "http://proxy.example:8080\\x",
         )
         for value in invalid:
             with self.subTest(value=value), self.assertRaises(ProviderError):
-                build_child_environment({"HTTP_PROXY": value}, ("HTTP_PROXY",), allow_proxy=True, provider_child=False)
-        invalid_no_proxy = ("", "example.com,,example.org", "example.com example.org", "https://example.org", "user:pass@example.org", "2001:db8::1", "example.org:bad", "[bad]", "example.org/")
+                build_child_environment(
+                    {"HTTP_PROXY": value},
+                    ("HTTP_PROXY",),
+                    allow_proxy=True,
+                    provider_child=False,
+                )
+        invalid_no_proxy = (
+            "",
+            "example.com,,example.org",
+            "example.com example.org",
+            "https://example.org",
+            "user:pass@example.org",
+            "2001:db8::1",
+            "example.org:bad",
+            "[bad]",
+            "example.org/",
+        )
         for value in invalid_no_proxy:
             with self.subTest(value=value), self.assertRaises(ProviderError):
-                build_child_environment({"NO_PROXY": value}, ("NO_PROXY",), allow_proxy=True, provider_child=False)
+                build_child_environment(
+                    {"NO_PROXY": value},
+                    ("NO_PROXY",),
+                    allow_proxy=True,
+                    provider_child=False,
+                )
         with self.assertRaises(ProviderError):
-            build_child_environment({"HTTP_PROXY": "http://proxy.example:8080"}, ("HTTP_PROXY",), allow_proxy=True)
+            build_child_environment(
+                {"HTTP_PROXY": "http://proxy.example:8080"},
+                ("HTTP_PROXY",),
+                allow_proxy=True,
+            )
 
 
 class FailureAndImmutabilityTests(unittest.TestCase):
@@ -139,33 +234,74 @@ class FailureAndImmutabilityTests(unittest.TestCase):
         }
         observations: list[str] = []
         for field_name in ("event", "adapter", "model", "correlation"):
-            values = {"event": "event", "adapter": "adapter", "model": "synthetic-model", "correlation": RequestCorrelationId("req-10-1")}
+            values = {
+                "event": "event",
+                "adapter": "adapter",
+                "model": "synthetic-model",
+                "correlation": RequestCorrelationId("req-10-1"),
+            }
             values[field_name] = sentinels[field_name]
             try:
-                TranscriptEvent(values["event"], values["adapter"], values["model"], values["correlation"], EvidenceProvenance.LOCAL_CONTROL_EVENT)  # type: ignore[arg-type]
+                TranscriptEvent(
+                    values["event"],
+                    values["adapter"],
+                    values["model"],
+                    values["correlation"],
+                    EvidenceProvenance.LOCAL_CONTROL_EVENT,
+                )  # type: ignore[arg-type]
             except ProviderError as error:
-                observations.extend((str(error), repr(error), repr(error.failure.__dict__)))
+                observations.extend(
+                    (str(error), repr(error), repr(error.failure.__dict__))
+                )
         for value in (sentinels["proposal"],):
             try:
                 ToolCallId(value)
             except ProviderError as error:
-                observations.extend((str(error), repr(error), repr(error.failure.__dict__)))
+                observations.extend(
+                    (str(error), repr(error), repr(error.failure.__dict__))
+                )
         try:
-            TranscriptEvent("event", "adapter", "synthetic-model", RequestCorrelationId("req-10-1"), EvidenceProvenance.LOCAL_CONTROL_EVENT, metadata={sentinels["metadata_key"]: "safe"})
+            TranscriptEvent(
+                "event",
+                "adapter",
+                "synthetic-model",
+                RequestCorrelationId("req-10-1"),
+                EvidenceProvenance.LOCAL_CONTROL_EVENT,
+                metadata={sentinels["metadata_key"]: "safe"},
+            )
         except ProviderError as error:
             observations.extend((str(error), repr(error), repr(error.failure.__dict__)))
         try:
-            TranscriptEvent("event", "adapter", "synthetic-model", RequestCorrelationId("req-10-1"), EvidenceProvenance.LOCAL_CONTROL_EVENT, metadata={"mode": sentinels["metadata_value"]})
+            TranscriptEvent(
+                "event",
+                "adapter",
+                "synthetic-model",
+                RequestCorrelationId("req-10-1"),
+                EvidenceProvenance.LOCAL_CONTROL_EVENT,
+                metadata={"mode": sentinels["metadata_value"]},
+            )
         except ProviderError as error:
             observations.extend((str(error), repr(error), repr(error.failure.__dict__)))
         classified = failure(sentinels["failure_class"], sentinels["failure_detail"])  # type: ignore[arg-type]
-        observations.extend((str(ProviderError(classified)), repr(ProviderError(classified)), repr(classified.__dict__)))
+        observations.extend(
+            (
+                str(ProviderError(classified)),
+                repr(ProviderError(classified)),
+                repr(classified.__dict__),
+            )
+        )
         for sentinel in sentinels.values():
             self.assertNotIn(sentinel, " ".join(observations))
 
     def test_failure_output_is_closed(self) -> None:
         sentinel = "FAILURE_DETAIL_SENTINEL"
-        classified = failure(FailureClass.HTTP_429_RATE_LIMITED, sentinel, status_code=429, retry_after_ms=50, attempt=1)
+        classified = failure(
+            FailureClass.HTTP_429_RATE_LIMITED,
+            sentinel,
+            status_code=429,
+            retry_after_ms=50,
+            attempt=1,
+        )
         error = ProviderError(classified)
         out, err = io.StringIO(), io.StringIO()
         with redirect_stdout(out), redirect_stderr(err):
@@ -173,15 +309,34 @@ class FailureAndImmutabilityTests(unittest.TestCase):
                 raise error
             except ProviderError:
                 pass
-        event = TranscriptEvent("failure", "adapter", "synthetic-model", RequestCorrelationId("req-10-1"), EvidenceProvenance.LOCAL_CONTROL_EVENT, failure_class=classified.classification)
-        output = " ".join((str(error), repr(error), repr(classified), repr(classified.__dict__), out.getvalue(), err.getvalue(), event.to_json_bytes().decode()))
+        event = TranscriptEvent(
+            "failure",
+            "adapter",
+            "synthetic-model",
+            RequestCorrelationId("req-10-1"),
+            EvidenceProvenance.LOCAL_CONTROL_EVENT,
+            failure_class=classified.classification,
+        )
+        output = " ".join(
+            (
+                str(error),
+                repr(error),
+                repr(classified),
+                repr(classified.__dict__),
+                out.getvalue(),
+                err.getvalue(),
+                event.to_json_bytes().decode(),
+            )
+        )
         self.assertNotIn(sentinel, output)
         self.assertEqual(classified.detail, "")
         self.assertNotIn(sentinel, str(classified.__dict__))
 
     def test_recursive_freezing_and_stable_action_identity(self) -> None:
         arguments = {"nested": {"values": ["secret-value"]}}
-        proposal = ProviderToolCallProposal(ToolCallId("call-1"), "logs.search", arguments)
+        proposal = ProviderToolCallProposal(
+            ToolCallId("call-1"), "logs.search", arguments
+        )
         before_bytes = proposal.canonical_argument_bytes
         before_identity = proposal.action_identity
         arguments["nested"]["values"].append("mutated")
@@ -191,12 +346,24 @@ class FailureAndImmutabilityTests(unittest.TestCase):
         self.assertEqual(proposal.arguments["nested"]["values"], ("secret-value",))
         with self.assertRaises(TypeError):
             proposal.arguments["nested"] = {}  # type: ignore[index]
-        schema = {"type": "object", "properties": {}, "required": [], "additionalProperties": False}
+        schema = {
+            "type": "object",
+            "properties": {},
+            "required": [],
+            "additionalProperties": False,
+        }
         advertised = AdvertisedTool("immutable", schema)
         schema["properties"]["late"] = {"type": "string"}
         self.assertNotIn("late", advertised.parameters["properties"])
         metadata = {"mode": "synthetic"}
-        event = TranscriptEvent("event", "adapter", "synthetic-model", RequestCorrelationId("req-10-1"), EvidenceProvenance.LOCAL_CONTROL_EVENT, metadata=metadata)
+        event = TranscriptEvent(
+            "event",
+            "adapter",
+            "synthetic-model",
+            RequestCorrelationId("req-10-1"),
+            EvidenceProvenance.LOCAL_CONTROL_EVENT,
+            metadata=metadata,
+        )
         metadata["mode"] = "mutated"
         self.assertEqual(event.metadata["mode"], "synthetic")
         with self.assertRaises(TypeError):
@@ -207,7 +374,13 @@ class FailureAndImmutabilityTests(unittest.TestCase):
         object.__setattr__(req, "model", "https://secret.invalid/model")
         with self.assertRaises(ProviderError):
             req.to_json_bytes()
-        event = TranscriptEvent("event", "adapter", "synthetic-model", RequestCorrelationId("req-10-1"), EvidenceProvenance.LOCAL_CONTROL_EVENT)
+        event = TranscriptEvent(
+            "event",
+            "adapter",
+            "synthetic-model",
+            RequestCorrelationId("req-10-1"),
+            EvidenceProvenance.LOCAL_CONTROL_EVENT,
+        )
         object.__setattr__(event, "correlation_id", "secret-correlation")
         with self.assertRaises(ProviderError):
             event.to_json_bytes()
@@ -215,12 +388,36 @@ class FailureAndImmutabilityTests(unittest.TestCase):
 
 class RetryAfterTests(unittest.TestCase):
     def test_retry_after_valid_missing_malformed_and_excessive(self) -> None:
-        limits = replace(DEFAULT_LIMITS, provider_attempt_count=2, retry_backoff_ms=7, retry_after_ms=1_000)
+        limits = replace(
+            DEFAULT_LIMITS,
+            provider_attempt_count=2,
+            retry_backoff_ms=7,
+            retry_after_ms=1_000,
+        )
         parser_limits = replace(DEFAULT_LIMITS, retry_after_ms=5_000)
-        for value, expected in (("0", 0), ("1", 1_000), ("0.5", 500), ("0.05", 50), ("0.005", 5), ("5.000", 5_000)):
+        for value, expected in (
+            ("0", 0),
+            ("1", 1_000),
+            ("0.5", 500),
+            ("0.05", 50),
+            ("0.005", 5),
+            ("5.000", 5_000),
+        ):
             with self.subTest(parser_value=value):
                 self.assertEqual(_retry_after(value, parser_limits), expected)
-        for value in (None, "", " ", "+1", "-1", "1e0", "0.0001", "1.2.3", "５", "1" * 17, "5.001"):
+        for value in (
+            None,
+            "",
+            " ",
+            "+1",
+            "-1",
+            "1e0",
+            "0.0001",
+            "1.2.3",
+            "５",
+            "1" * 17,
+            "5.001",
+        ):
             with self.subTest(rejected_parser_value=value):
                 self.assertIsNone(_retry_after(value, parser_limits))
         for case, expected_sleep, succeeds in (
@@ -235,11 +432,21 @@ class RetryAfterTests(unittest.TestCase):
             with self.subTest(case=case), FakeProviderServer(case) as provider:
                 transport = LoopbackFakeTransport(sleep=sleeps.append)
                 if succeeds:
-                    result = transport.send(provider.validated_endpoint(), request(), limits=limits, correlation_id="req-10-1")
+                    result = transport.send(
+                        provider.validated_endpoint(),
+                        request(),
+                        limits=limits,
+                        correlation_id="req-10-1",
+                    )
                     self.assertEqual(result.message.content, "synthetic guidance")
                 else:
                     with self.assertRaises(ProviderError) as raised:
-                        transport.send(provider.validated_endpoint(), request(), limits=limits, correlation_id="req-10-1")
+                        transport.send(
+                            provider.validated_endpoint(),
+                            request(),
+                            limits=limits,
+                            correlation_id="req-10-1",
+                        )
             self.assertEqual(tuple(sleeps), expected_sleep)
             if not succeeds:
                 self.assertNotIn("not-a-delay", str(raised.exception))

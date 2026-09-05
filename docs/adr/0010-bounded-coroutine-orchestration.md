@@ -28,7 +28,7 @@ The work path is:
 Reject duplicate in-flight IDs.
 Reject work above the unfinished-work limit.
 Keep MCP task support forbidden.
-Do not add a host capability in Phase 6.
+Do not add a host capability in coroutine orchestration.
 
 ## Consequences
 

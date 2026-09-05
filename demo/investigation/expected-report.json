@@ -92,7 +92,7 @@
       "arguments": {
         "capabilities": {},
         "clientInfo": {
-          "name": "phase-8-demo",
+          "name": "deterministic-demo",
           "version": "0.11.0"
         },
         "protocolVersion": "2025-11-25"

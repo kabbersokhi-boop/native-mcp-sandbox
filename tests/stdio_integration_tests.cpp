@@ -301,7 +301,7 @@ void test_configured_tools(const std::string& executable) {
              tools[1]["name"] == "logs.tail" &&
              tools[2]["name"] == "elf.inspect" &&
              tools[3]["name"] == "proc.memory",
-         "configured server must advertise the four bounded Phase 5 tools");
+         "configured server must advertise the four bounded bounded tool set tools");
   expect(searched["result"]["isError"] == false &&
              searched["result"]["structuredContent"]["matches"].size() == 2U,
          "logs.search must run through the real configured process");

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Run bounded Phase 9 benchmark smoke campaigns and write canonical JSON."""
+"""Run bounded benchmarking benchmark smoke campaigns and write canonical JSON."""
+
 from __future__ import annotations
 
 import argparse
@@ -42,8 +43,7 @@ def decode_turbo_probe(source: str, raw_value: str) -> dict[str, object]:
         return {
             "available": False,
             "reason": (
-                f"{source} returned unexpected value {normalized!r}; "
-                "expected 0 or 1"
+                f"{source} returned unexpected value {normalized!r}; expected 0 or 1"
             ),
         }
     return {"available": True, "value": state}
@@ -60,8 +60,7 @@ def select_turbo_probe(
     return {
         "available": False,
         "reason": (
-            "Intel pstate no_turbo and generic cpufreq boost probes were "
-            "not available"
+            "Intel pstate no_turbo and generic cpufreq boost probes were not available"
         ),
     }
 
@@ -71,7 +70,10 @@ def fail(message: str) -> None:
 
 
 def canonical(value: object) -> str:
-    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True) + "\n"
+    return (
+        json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+        + "\n"
+    )
 
 
 def bounded_run(command: list[str], data: bytes, strict_stderr: bool = True) -> bytes:
@@ -163,7 +165,9 @@ def summary(
     }
 
 
-def requests(configured: bool, root: Path, policy_directory: Path) -> tuple[list[str], bytes]:
+def requests(
+    configured: bool, root: Path, policy_directory: Path
+) -> tuple[list[str], bytes]:
     messages = [
         {
             "jsonrpc": "2.0",
@@ -172,7 +176,7 @@ def requests(configured: bool, root: Path, policy_directory: Path) -> tuple[list
             "params": {
                 "protocolVersion": "2025-11-25",
                 "capabilities": {},
-                "clientInfo": {"name": "phase-9", "version": "1"},
+                "clientInfo": {"name": "benchmark-client", "version": "1"},
             },
         },
         {"jsonrpc": "2.0", "method": "notifications/initialized"},
@@ -235,7 +239,11 @@ def validate_responses(output: bytes, configured: bool) -> None:
     expected = ({1, 2} | set(range(10, 14))) if configured else {1, 2}
     found: list[int] = []
     for response in responses:
-        if not isinstance(response, dict) or "id" not in response or response["id"] in found:
+        if (
+            not isinstance(response, dict)
+            or "id" not in response
+            or response["id"] in found
+        ):
             fail("missing or duplicate response ID")
         if (
             response["id"] not in expected
@@ -392,7 +400,9 @@ def metadata(benchmark: Path, server: Path, argv: list[str]) -> dict[str, object
                 "cmakeCacheOptions": unavailable("CMakeCache.txt was not available"),
                 "compileFlags": unavailable("compile_commands.json was not available"),
                 "linkFlags": unavailable("generated link commands were not available"),
-                "linkCommands": unavailable("generated link commands were not available"),
+                "linkCommands": unavailable(
+                    "generated link commands were not available"
+                ),
             }
 
         compiler = cache.get("CMAKE_CXX_COMPILER")
@@ -442,7 +452,15 @@ def metadata(benchmark: Path, server: Path, argv: list[str]) -> dict[str, object
         link_commands: list[str] = []
         try:
             result = subprocess.run(
-                ["ninja", "-C", str(build_directory), "-t", "commands", "native_mcp_bench", "native-mcp-sandbox"],
+                [
+                    "ninja",
+                    "-C",
+                    str(build_directory),
+                    "-t",
+                    "commands",
+                    "native_mcp_bench",
+                    "native-mcp-sandbox",
+                ],
                 check=True,
                 capture_output=True,
                 text=True,
@@ -539,9 +557,7 @@ def metadata(benchmark: Path, server: Path, argv: list[str]) -> dict[str, object
         ),
         **evidence,
         "cmakeVersion": probe(["cmake", "--version"]),
-        "benchmarkFramework": value(
-            {"name": "project-owned-cpp", "version": "1.0.0"}
-        ),
+        "benchmarkFramework": value({"name": "project-owned-cpp", "version": "1.0.0"}),
         "dependencyVersions": dependencies,
         "operatingSystem": value(platform.platform()),
         "kernel": value(platform.release()),
@@ -599,9 +615,7 @@ def main() -> int:
     if not isinstance(component_cases, list):
         fail("component benchmark did not return a case array")
     case_ids = {
-        case.get("caseId")
-        for case in component_cases
-        if isinstance(case, dict)
+        case.get("caseId") for case in component_cases if isinstance(case, dict)
     }
     required_case_ids = {
         "component.json_sax.valid",

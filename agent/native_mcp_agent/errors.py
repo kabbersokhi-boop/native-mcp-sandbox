@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Mapping
+
 
 class FailureClass(str, Enum):
     INVALID_PROVIDER_CONFIGURATION = "invalid_provider_configuration"
@@ -106,7 +106,9 @@ class ProviderError(Exception):
 
     def __init__(self, classified: ClassifiedFailure):
         if not isinstance(classified, ClassifiedFailure):
-            classified = ClassifiedFailure(FailureClass.LOCAL_VALIDATION_FAILURE, "invalid project failure")
+            classified = ClassifiedFailure(
+                FailureClass.LOCAL_VALIDATION_FAILURE, "invalid project failure"
+            )
         self.failure = classified
         super().__init__(classified.safe_text())
 
@@ -137,5 +139,9 @@ def http_failure(status: int, *, retry_after_ms: int | None = None) -> Classifie
     }
     classification = mapping.get(status)
     if classification is None:
-        classification = FailureClass.TRANSIENT_5XX if 500 <= status <= 599 else FailureClass.OTHER_PERMANENT_4XX
-    return failure(classification, "HTTP status classified", status_code=status, retry_after_ms=retry_after_ms)
+        classification = (
+            FailureClass.TRANSIENT_5XX if 500 <= status <= 599 else FailureClass.OTHER_PERMANENT_4XX
+        )
+    return failure(
+        classification, "HTTP status classified", status_code=status, retry_after_ms=retry_after_ms
+    )

@@ -2,7 +2,7 @@
 
 ## Decision
 
-Phase 9 uses a small project-owned C++20 harness and a Python stdio orchestrator.
+benchmarking uses a small project-owned C++20 harness and a Python stdio orchestrator.
 
 ## Context
 

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Render a bounded, non-canonical Markdown view from a benchmark JSON report."""
+
 from __future__ import annotations
 
 import argparse

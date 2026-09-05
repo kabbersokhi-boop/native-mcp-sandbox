@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the Phase 8 demonstration twice and compare canonical reports."""
+"""Run the deterministic demonstration demonstration twice and compare canonical reports."""
 
 from __future__ import annotations
 
@@ -66,7 +66,16 @@ def fail(message: str) -> None:
 def run_demo(demo: Path, server: Path, fixture: Path, output_dir: Path) -> None:
     try:
         result = subprocess.run(
-            [sys.executable, str(demo), "--server", str(server), "--fixture", str(fixture), "--output-dir", str(output_dir)],
+            [
+                sys.executable,
+                str(demo),
+                "--server",
+                str(server),
+                "--fixture",
+                str(fixture),
+                "--output-dir",
+                str(output_dir),
+            ],
             check=False,
             capture_output=True,
             timeout=30.0,
@@ -122,7 +131,9 @@ def check_text_safety(text: str, label: str) -> None:
             fail(f"{label} contains {description}")
 
 
-def expect_forbidden_field_rejected(report: dict[str, object], field: str, value: object) -> None:
+def expect_forbidden_field_rejected(
+    report: dict[str, object], field: str, value: object
+) -> None:
     mutated = json.loads(json.dumps(report))
     mutated["evidence"][0]["finding"][field] = value  # type: ignore[index]
     try:
@@ -150,7 +161,16 @@ def run_output_flood_negative_test(demo: Path, server: Path, fixture: Path) -> N
         started = time.monotonic()
         try:
             result = subprocess.run(
-                [sys.executable, str(demo), "--server", str(fake), "--fixture", str(fixture), "--output-dir", str(output_dir)],
+                [
+                    sys.executable,
+                    str(demo),
+                    "--server",
+                    str(fake),
+                    "--fixture",
+                    str(fixture),
+                    "--output-dir",
+                    str(output_dir),
+                ],
                 check=False,
                 capture_output=True,
                 timeout=10.0,
@@ -163,7 +183,9 @@ def run_output_flood_negative_test(demo: Path, server: Path, fixture: Path) -> N
         if result.returncode == 0:
             fail("the output-flood executable was accepted")
         if elapsed >= 5.0:
-            fail(f"the output-flood executable failed too slowly: {elapsed:.2f} seconds")
+            fail(
+                f"the output-flood executable failed too slowly: {elapsed:.2f} seconds"
+            )
         if (output_dir / "report.json").exists() or (output_dir / "report.md").exists():
             fail("a failed output-flood run left a stale report")
 
@@ -181,7 +203,10 @@ def main() -> int:
     fixture = source_dir / "demo" / "investigation" / "application.log"
     expected_json = source_dir / "demo" / "investigation" / "expected-report.json"
     expected_markdown = source_dir / "demo" / "investigation" / "expected-report.md"
-    with tempfile.TemporaryDirectory(prefix="native-mcp-demo-test-") as first, tempfile.TemporaryDirectory(prefix="native-mcp-demo-test-") as second:
+    with (
+        tempfile.TemporaryDirectory(prefix="native-mcp-demo-test-") as first,
+        tempfile.TemporaryDirectory(prefix="native-mcp-demo-test-") as second,
+    ):
         first_dir = Path(first)
         second_dir = Path(second)
         run_demo(demo, arguments.server.resolve(), fixture, first_dir)
@@ -209,7 +234,10 @@ def main() -> int:
     with tempfile.TemporaryDirectory(prefix="native-mcp-demo-parent-") as parent:
         missing = Path(parent) / "created-by-demo"
         run_demo(demo, arguments.server.resolve(), fixture, missing)
-        if not (missing / "report.json").is_file() or not (missing / "report.md").is_file():
+        if (
+            not (missing / "report.json").is_file()
+            or not (missing / "report.md").is_file()
+        ):
             fail("the demonstration did not create a missing output directory")
     run_output_flood_negative_test(demo, arguments.server.resolve(), fixture)
     print("Agent investigation demo is deterministic and matches its golden reports")

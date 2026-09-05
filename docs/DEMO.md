@@ -64,12 +64,14 @@ The demonstration is synthetic. It is not autonomous incident response, a produc
 
 ## 2. Optional OpenAI-compatible synthetic smoke
 
-Phase 10.4 adds a manual, non-gating smoke command for an operator-selected OpenAI-compatible endpoint. It may be used with NVIDIA NIM or another compatible service, but the project does not hard-code a provider, endpoint or model.
+The optional adapter includes a manual, non-gating smoke command for an operator-selected
+OpenAI-compatible endpoint. It can use NVIDIA NIM or another compatible service, but the project
+does not hard-code a provider, endpoint, or model.
 
 The smoke is disabled by default and is never part of normal CI.
 
 ```bash
-python3 scripts/phase_10_4_openai_smoke.py \
+python3 scripts/openai_adapter_smoke.py \
   --enable-synthetic-live \
   --endpoint https://provider.example/v1/chat/completions \
   --model operator-selected-model \
@@ -93,6 +95,6 @@ Do not place a real token in documentation, a command line or a committed file. 
 ## Related documents
 
 - [`README.md`](../README.md) — project overview and quick start
-- [`docs/PHASE_10_4.md`](PHASE_10_4.md) — adapter design and boundaries
+- [`docs/OPENAI_COMPATIBLE_ADAPTER.md`](OPENAI_COMPATIBLE_ADAPTER.md) — adapter design and boundaries
 - [`docs/ASSURANCE.md`](ASSURANCE.md) — verification evidence and reproducible test commands
 - [`SECURITY.md`](../SECURITY.md) — security policy and vulnerability reporting

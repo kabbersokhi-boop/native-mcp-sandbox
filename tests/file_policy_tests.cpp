@@ -45,7 +45,8 @@ class TempDirectory final {
       base_path = "/tmp";
     }
     std::string pattern = (base_path / "nms-test-XXXXXX").string();
-    if (pattern.size() >= sizeof(sockaddr_un{}.sun_path)) {
+    // Reserve space for the longest Unix-socket fixture name created below.
+    if (pattern.size() + sizeof("/socket") >= sizeof(sockaddr_un{}.sun_path)) {
       pattern = "/tmp/nms-test-XXXXXX";
     }
     pattern.push_back('\0');

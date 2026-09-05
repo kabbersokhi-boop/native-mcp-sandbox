@@ -1,6 +1,6 @@
-# Phase 10.4: optional OpenAI-compatible adapter
+# Optional OpenAI-Compatible Adapter
 
-Phase 10.4 adds a bounded non-streaming provider adapter to the external
+This component adds a bounded, non-streaming provider adapter to the external
 Python agent.  The C++ `native-mcp-sandbox` remains stdio-only, network-free,
 credential-free, and exposes no new tools.
 
@@ -57,7 +57,7 @@ An operator may run the non-gating manual smoke with explicit endpoint, model,
 credential variable name, and `--enable-synthetic-live`:
 
 ```sh
-python3 scripts/phase_10_4_openai_smoke.py --enable-synthetic-live \
+python3 scripts/openai_adapter_smoke.py --enable-synthetic-live \
   --endpoint https://provider.example/v1/chat/completions \
   --model operator-selected-model --credential-env NATIVE_MCP_PROVIDER_TOKEN
 ```

@@ -6,9 +6,13 @@ This document explains how that claim is tested, what evidence is available, and
 
 ## Current release evidence
 
-Project version `v0.11.0` includes the completed Phase 10 implementation: provider-neutral contracts, bounded serial MCP orchestration, deterministic adversarial assurance and the optional OpenAI-compatible adapter. When published, its immutable release tag and GitHub Release identify the exact source commit and validation context.
+Project version `v0.11.0` includes the first public preview of the external agent:
+provider-neutral contracts, bounded serial MCP orchestration, deterministic adversarial assurance,
+and the optional OpenAI-compatible adapter. The immutable release tag and GitHub Release identify
+the exact source commit and validation context. Native-server validation is not, by itself, proof
+of cross-language agent/server interoperability.
 
-The earlier Phase 10.4 exact-head run, `31915393822`, completed successfully across all five required CI jobs before this release pass. It is useful historical evidence for that exact head, not a substitute for release-head validation.
+The earlier OpenAI-compatible adapter exact-head run, `31915393822`, completed successfully across all five required CI jobs before this release pass. It is useful historical evidence for that exact head, not a substitute for release-head validation.
 
 ## Claim → mechanism → evidence
 
@@ -20,20 +24,20 @@ The earlier Phase 10.4 exact-head run, `31915393822`, completed successfully acr
 | Strict process identity is pinned | Same-UID checks, retained proc directory, start-time validation and pidfd | [`src/process_memory.cpp`](../src/process_memory.cpp), [`tests/process_memory_tests.cpp`](../tests/process_memory_tests.cpp) |
 | Protocol parsing and work admission are bounded | Byte/token/depth limits, duplicate-key rejection and closed schemas | [`src/json_safety.cpp`](../src/json_safety.cpp), [`tests/protocol_tests.cpp`](../tests/protocol_tests.cpp), [`fuzz/`](../fuzz/) |
 | Native scheduling is bounded | Fixed workers, unfinished-call cap, cancellation, deadlines and serialized output | [`src/orchestration.cpp`](../src/orchestration.cpp), [`tests/orchestration_stress_tests.cpp`](../tests/orchestration_stress_tests.cpp) |
-| Provider cannot execute a tool directly | Captured surface and local schema/authorization validation construct MCP calls | [`tests/phase_10_2_tests.py`](../tests/phase_10_2_tests.py), [`docs/PHASE_10_2.md`](PHASE_10_2.md) |
-| Duplicate proposals cannot repeat execution | Stable action identity and bounded replay state with serial execution | [`tests/phase_10_3_tests.py`](../tests/phase_10_3_tests.py), [`agent/native_mcp_agent/mcp_orchestrator.py`](../agent/native_mcp_agent/mcp_orchestrator.py) |
-| Loopback fake transport is credential-free | Separate loopback-only test transport and child environment scrubbing | [`tests/phase_10_4_tests.py`](../tests/phase_10_4_tests.py), [`SECURITY.md`](../SECURITY.md) |
-| Hosted egress is synthetic-only | Project-issued, non-transferable authorization bound to exact content | [`tests/phase_10_4_tests.py`](../tests/phase_10_4_tests.py), [`docs/PHASE_10_4.md`](PHASE_10_4.md) |
+| Provider cannot execute a tool directly | Captured surface and local schema/authorization validation construct MCP calls | [`tests/mcp_orchestration_tests.py`](../tests/mcp_orchestration_tests.py), [`docs/MCP_ORCHESTRATION.md`](MCP_ORCHESTRATION.md) |
+| Duplicate proposals cannot repeat execution | Stable action identity and bounded replay state with serial execution | [`tests/adversarial_agent_tests.py`](../tests/adversarial_agent_tests.py), [`agent/native_mcp_agent/mcp_orchestrator.py`](../agent/native_mcp_agent/mcp_orchestrator.py) |
+| Loopback fake transport is credential-free | Separate loopback-only test transport and child environment scrubbing | [`tests/openai_adapter_tests.py`](../tests/openai_adapter_tests.py), [`SECURITY.md`](../SECURITY.md) |
+| Hosted egress is synthetic-only | Project-issued, non-transferable authorization bound to exact content | [`tests/openai_adapter_tests.py`](../tests/openai_adapter_tests.py), [`docs/OPENAI_COMPATIBLE_ADAPTER.md`](OPENAI_COMPATIBLE_ADAPTER.md) |
 
 ## Release validation snapshot
 
-The final Phase 10.4 candidate completed:
+The recorded external-agent candidate completed:
 
-- Phase 10.4 focused tests: **16**
-- Phase 10.3 adversarial tests: **34**
-- Phase 10.2 orchestration tests: **32**
-- Phase 10.1 provider-contract tests: **25**
-- Phase 10.1 security regressions: **10**
+- OpenAI-compatible adapter tests: **16**
+- adversarial agent tests: **34**
+- bounded orchestration tests: **32**
+- provider-contract tests: **25**
+- provider security regressions: **10**
 - CTest `dev`: **21/21**
 - CTest `sanitizers`: **21/21**
 - CTest `thread-sanitizer`: **21/21**
@@ -69,14 +73,14 @@ cmake --build --preset thread-sanitizer
 TSAN_OPTIONS=halt_on_error=1 ctest --preset thread-sanitizer --output-on-failure
 ```
 
-### Phase 10 focused suites
+### external agent focused suites
 
 ```bash
-python3 tests/phase_10_4_tests.py
-python3 tests/phase_10_3_tests.py
-python3 tests/phase_10_2_tests.py
-python3 tests/phase_10_1_security_regressions.py
-python3 tests/phase_10_1_tests.py
+python3 tests/openai_adapter_tests.py
+python3 tests/adversarial_agent_tests.py
+python3 tests/mcp_orchestration_tests.py
+python3 tests/provider_security_regression_tests.py
+python3 tests/provider_contract_tests.py
 ```
 
 ## Reproduce the deterministic fuzz gate
@@ -103,7 +107,7 @@ See [`docs/FUZZING.md`](FUZZING.md) for target-specific commands, corpus handlin
 
 The manual `Extended Assurance` workflow performs longer campaigns on Ubuntu 24.04. It includes repeated deterministic fuzzing, ThreadSanitizer repetitions, strict `openat2` and pidfd integration, AF_UNIX/FIFO policy checks and five long-running libFuzzer campaigns.
 
-The recorded Phase 7 campaign executed **61,925,751** libFuzzer inputs without an observed crash, sanitizer report, timeout or crash artifact. That historical number applies only to its recorded source head, platform and inputs; it is not carried forward as a result for `v0.11.0`.
+The recorded fuzzing campaign executed **61,925,751** libFuzzer inputs without an observed crash, sanitizer report, timeout or crash artifact. That historical number applies only to its recorded source head, platform and inputs; it is not carried forward as a result for `v0.11.0`.
 
 ## Evidence interpretation
 
@@ -125,8 +129,8 @@ A green test run does **not** mean:
 
 - [v0.11.0 release pull request](https://github.com/kabbersokhi-boop/native-mcp-sandbox/pull/22) — the PR records its reviewed head and exact-head checks before publication.
 - [CI workflow](https://github.com/kabbersokhi-boop/native-mcp-sandbox/actions/workflows/ci.yml)
-- [Phase 10.4 historical exact-head run](https://github.com/kabbersokhi-boop/native-mcp-sandbox/actions/runs/31915393822)
-- [Phase 10.4 pull request](https://github.com/kabbersokhi-boop/native-mcp-sandbox/pull/20)
+- [OpenAI-compatible adapter historical exact-head run](https://github.com/kabbersokhi-boop/native-mcp-sandbox/actions/runs/31915393822)
+- [OpenAI-compatible adapter pull request](https://github.com/kabbersokhi-boop/native-mcp-sandbox/pull/20)
 - [Architecture](../ARCHITECTURE.md)
 - [Threat model](../THREAT_MODEL.md)
 - [Security policy](../SECURITY.md)

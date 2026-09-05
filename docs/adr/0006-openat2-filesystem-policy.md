@@ -8,7 +8,7 @@
 Text path normalization is not sufficient for an untrusted path.
 A path component can be a symbolic link or a mount point.
 A filesystem entry can also change between a check and an open operation.
-Phase 2 needs one boundary that later tools cannot bypass.
+filesystem policy needs one boundary that later tools cannot bypass.
 
 ## Decision
 

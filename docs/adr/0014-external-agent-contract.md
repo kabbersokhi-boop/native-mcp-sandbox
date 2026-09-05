@@ -2,12 +2,12 @@
 
 ## Status
 
-Proposed for Phase 10 planning through PR #13.
+Accepted.
 
 ## Context
 
-ADR 0013 keeps hosted model access outside the native MCP server. Phase 10
-needs a specific contract for the external agent so implementation does not
+ADR 0013 keeps hosted model access outside the native MCP server. The external agent
+needs a specific contract so implementation does not
 widen authority, make hosted services part of deterministic assurance, or allow
 model output to bypass local validation.
 
@@ -20,7 +20,7 @@ and nondeterministic availability.
 
 ## Decision
 
-Phase 10 will implement a separate provider-neutral agent process. The native
+Implement a separate provider-neutral agent process. The native
 C++ server will not gain HTTP, TLS, credentials, provider SDKs, model
 configuration, prompt construction, or model-response parsing. The native
 server remains credential-free.
@@ -174,5 +174,5 @@ redaction, cancellation, and byte-identical reports.
 The provider and model can change without changing the native server boundary.
 The external agent is a new security boundary and needs its own threat-model,
 deterministic tests, redaction tests, and release evidence. Complexity remains
-separated and reviewable. No Phase 10 release version is selected in this
+separated and reviewable. No external agent release version is selected in this
 planning PR.

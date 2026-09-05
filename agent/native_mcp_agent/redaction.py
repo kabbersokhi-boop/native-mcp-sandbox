@@ -7,16 +7,26 @@ behind.
 
 from __future__ import annotations
 
-import json
 import re
-from typing import Any, Mapping, Sequence
+from collections.abc import Mapping, Sequence
+from typing import Any
 from urllib.parse import urlsplit
-
 
 REDACTED = "<redacted>"
 _SECRET_KEYS = {
-    "authorization", "proxy-authorization", "cookie", "set-cookie", "api_key", "apikey", "api-key",
-    "access_token", "refresh_token", "token", "password", "secret", "credential",
+    "authorization",
+    "proxy-authorization",
+    "cookie",
+    "set-cookie",
+    "api_key",
+    "apikey",
+    "api-key",
+    "access_token",
+    "refresh_token",
+    "token",
+    "password",
+    "secret",
+    "credential",
 }
 _PATH_KEYS = {"path", "file_path", "absolute_path", "cwd", "working_directory", "executable"}
 _PID_KEYS = {"pid", "process_id", "raw_pid", "process-id"}
@@ -26,7 +36,17 @@ _ABSOLUTE_PATH_RE = re.compile(r"(?<![A-Za-z0-9_.-])/(?:[^\s\x00-\x1f\\]|\\)+")
 _PID_ASSIGNMENT_RE = re.compile(r"(?i)\b(?:pid|raw_pid|process[_-]?id)\s*[=:]\s*\d+\b")
 _SECRET_VALUE_RE = re.compile(r"(?i)\b(?:api[_-]?key|secret(?:[_-]?store)?|token)[A-Za-z0-9_.=-]*")
 _USERINFO_URL_RE = re.compile(r"(?i)\b[a-z][a-z0-9+.-]*://[^\s/@]+:[^\s/@]+@[^\s]+")
-_DIAGNOSTIC_KEYS = {"diagnostic", "detail", "error", "message", "command", "argv", "output", "stdout", "stderr"}
+_DIAGNOSTIC_KEYS = {
+    "diagnostic",
+    "detail",
+    "error",
+    "message",
+    "command",
+    "argv",
+    "output",
+    "stdout",
+    "stderr",
+}
 
 
 def _bounded(value: str, maximum: int) -> str:
@@ -136,9 +156,12 @@ def redact_json(value: Any, secrets: Sequence[str] = (), *, maximum: int = 4_096
         output: dict[str, Any] = {}
         for key in sorted(value, key=lambda item: str(item)):
             normalized = str(key).lower()
-            if normalized in _SECRET_KEYS or normalized.endswith("_token"):
-                output[str(key)] = REDACTED
-            elif normalized in _PID_KEYS or normalized in _PATH_KEYS:
+            if (
+                normalized in _SECRET_KEYS
+                or normalized.endswith("_token")
+                or normalized in _PID_KEYS
+                or normalized in _PATH_KEYS
+            ):
                 output[str(key)] = REDACTED
             elif isinstance(value[key], str):
                 if normalized in _DIAGNOSTIC_KEYS:

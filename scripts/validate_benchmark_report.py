@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Small, strict offline validator for the repository benchmark schema."""
+
 from __future__ import annotations
 
 import argparse
@@ -154,7 +155,10 @@ def validate(value: object, schema_path: Path) -> None:
         for key, record in value["metadata"].items():
             if key == "noiseControls":
                 continue
-            if not isinstance(record, dict) or type(record.get("available")) is not bool:
+            if (
+                not isinstance(record, dict)
+                or type(record.get("available")) is not bool
+            ):
                 fail(f"metadata availability record invalid: {key}")
             if record["available"] and "value" not in record:
                 fail(f"metadata value missing: {key}")
@@ -164,12 +168,29 @@ def validate(value: object, schema_path: Path) -> None:
     if isinstance(value, dict) and isinstance(value.get("cases"), list):
         case_ids: set[str] = set()
         allowed = {
-            "caseId", "unit", "inputBytes", "operationCount", "concurrency",
-            "timeoutMilliseconds", "warmupIterations", "measuredIterations",
-            "sampleCount", "originalSampleCount", "retainedSampleCount",
-            "excludedSampleCount", "exclusionClasses", "rawSamples", "minimum",
-            "maximum", "median", "p95", "mean", "standardDeviation",
-            "validationInTimedRegion", "noSamplesExcluded", "optimizationSink",
+            "caseId",
+            "unit",
+            "inputBytes",
+            "operationCount",
+            "concurrency",
+            "timeoutMilliseconds",
+            "warmupIterations",
+            "measuredIterations",
+            "sampleCount",
+            "originalSampleCount",
+            "retainedSampleCount",
+            "excludedSampleCount",
+            "exclusionClasses",
+            "rawSamples",
+            "minimum",
+            "maximum",
+            "median",
+            "p95",
+            "mean",
+            "standardDeviation",
+            "validationInTimedRegion",
+            "noSamplesExcluded",
+            "optimizationSink",
         }
         for case in value["cases"]:
             if not isinstance(case, dict):
@@ -182,7 +203,9 @@ def validate(value: object, schema_path: Path) -> None:
             samples = case.get("rawSamples", [])
             if case.get("sampleCount") != len(samples):
                 fail("sampleCount does not match rawSamples")
-            if case.get("originalSampleCount") != case.get("retainedSampleCount", -1) + case.get("excludedSampleCount", -1):
+            if case.get("originalSampleCount") != case.get(
+                "retainedSampleCount", -1
+            ) + case.get("excludedSampleCount", -1):
                 fail("sample accounting mismatch")
 
         groups = value.get("comparisonGroups", [])

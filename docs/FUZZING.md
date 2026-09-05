@@ -152,7 +152,7 @@ The workflow runs these jobs:
 The workflow uploads logs and crash directories.
 The workflow is manual because it uses substantial runner time.
 
-## Phase 7 evidence
+## fuzzing evidence
 
 Extended Assurance run `29724493408` completed on Ubuntu 24.04.
 It tested source head `df576168fd44561254736a60c45188333bd1bc50`.
