@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the deterministic deterministic demonstration investigation demonstration."""
+"""Run the deterministic reference investigation."""
 
 from __future__ import annotations
 

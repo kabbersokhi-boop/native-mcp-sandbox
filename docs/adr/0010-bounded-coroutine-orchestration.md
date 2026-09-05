@@ -5,7 +5,7 @@
 
 ## Context
 
-Phases 3 through 5 ran tool calls on the standard-input reader thread.
+The earlier synchronous implementation ran tool calls on the standard-input reader thread.
 This design prevented concurrent independent work, cancellation, and backpressure.
 Concurrency can add unbounded memory, thread creation, output interleaving, lifetime defects, and data races.
 
