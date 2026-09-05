@@ -150,11 +150,7 @@ for line in sys.stdin:
         sys.stdout.flush()
         sys.exit(0)
     if scenario == "oversized" and method == "initialize":
-        sys.stdout.write(
-            '{"jsonrpc":"2.0","id":1,"result":"'
-            + ("x" * 70000)
-            + '"}\n'
-        )
+        sys.stdout.write('{"jsonrpc":"2.0","id":1,"result":"' + ("x" * 70000) + '"}\n')
         sys.stdout.flush()
         continue
     if scenario == "flood" and method == "initialize":
@@ -169,9 +165,11 @@ for line in sys.stdin:
         result(
             request,
             {
-                "protocolVersion": "2024-11-05" if scenario == "unsupported_version" else PROTOCOL_VERSION,
+                "protocolVersion": "2024-11-05"
+                if scenario == "unsupported_version"
+                else PROTOCOL_VERSION,
                 "capabilities": {},
-                "serverInfo": {"name": "fake-mcp", "version": "0.11.0"},
+                "serverInfo": {"name": "fake-mcp", "version": "0.12.0"},
             },
         )
     elif method == "tools/list":
@@ -266,21 +264,54 @@ for line in sys.stdin:
                 },
             )
         elif scenario == "result_large_structured":
-            result(request, {"content": [{"type": "text", "text": "{}"}], "isError": False, "structuredContent": {"items": list(range(50))}})
+            result(
+                request,
+                {
+                    "content": [{"type": "text", "text": "{}"}],
+                    "isError": False,
+                    "structuredContent": {"items": list(range(50))},
+                },
+            )
         elif scenario == "result_large_structured_overflow":
-            result(request, {"content": [{"type": "text", "text": "{}"}], "isError": False, "structuredContent": {"items": list(range(51))}})
+            result(
+                request,
+                {
+                    "content": [{"type": "text", "text": "{}"}],
+                    "isError": False,
+                    "structuredContent": {"items": list(range(51))},
+                },
+            )
         elif scenario == "result_elf_sized":
-            result(request, {"content": [{"type": "text", "text": "{}"}], "isError": False, "structuredContent": {"segments": list(range(64))}})
+            result(
+                request,
+                {
+                    "content": [{"type": "text", "text": "{}"}],
+                    "isError": False,
+                    "structuredContent": {"segments": list(range(64))},
+                },
+            )
         elif scenario == "result_elf_sized_overflow":
-            result(request, {"content": [{"type": "text", "text": "{}"}], "isError": False, "structuredContent": {"segments": list(range(65))}})
+            result(
+                request,
+                {
+                    "content": [{"type": "text", "text": "{}"}],
+                    "isError": False,
+                    "structuredContent": {"segments": list(range(65))},
+                },
+            )
         elif scenario == "result_huge_integer":
-            result(request, {"content": [{"type": "text", "text": "{}"}], "isError": False, "structuredContent": {"value": 10**400}})
+            result(
+                request,
+                {
+                    "content": [{"type": "text", "text": "{}"}],
+                    "isError": False,
+                    "structuredContent": {"value": 10**400},
+                },
+            )
         elif scenario == "secret_result":
             result(
                 request,
-                successful_tool_result(
-                    "Authorization: Bearer SECRET_SENTINEL /tmp/host pid=123"
-                ),
+                successful_tool_result("Authorization: Bearer SECRET_SENTINEL /tmp/host pid=123"),
             )
         elif scenario == "unique_secret_output":
             sys.stderr.write(" ".join(UNIQUE_SENTINELS) + "\n")
@@ -288,9 +319,7 @@ for line in sys.stdin:
             result(
                 request,
                 {
-                    "content": [
-                        {"type": "text", "text": " ".join(UNIQUE_SENTINELS)}
-                    ],
+                    "content": [{"type": "text", "text": " ".join(UNIQUE_SENTINELS)}],
                     "isError": True,
                 },
             )

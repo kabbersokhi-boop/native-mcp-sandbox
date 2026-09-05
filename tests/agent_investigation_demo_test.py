@@ -143,9 +143,7 @@ def check_text_safety(text: str, label: str) -> None:
             fail(f"{label} contains {description}")
 
 
-def expect_forbidden_field_rejected(
-    report: dict[str, object], field: str, value: object
-) -> None:
+def expect_forbidden_field_rejected(report: dict[str, object], field: str, value: object) -> None:
     mutated = json.loads(json.dumps(report))
     mutated["evidence"][0]["finding"][field] = value  # type: ignore[index]
     try:
@@ -195,9 +193,7 @@ def run_output_flood_negative_test(demo: Path, server: Path, fixture: Path) -> N
         if result.returncode == 0:
             fail("the output-flood executable was accepted")
         if elapsed >= 5.0:
-            fail(
-                f"the output-flood executable failed too slowly: {elapsed:.2f} seconds"
-            )
+            fail(f"the output-flood executable failed too slowly: {elapsed:.2f} seconds")
         if (output_dir / "report.json").exists() or (output_dir / "report.md").exists():
             fail("a failed output-flood run left a stale report")
 
@@ -301,9 +297,11 @@ def run_real_agent_server_contract(server: Path) -> None:
             )
             large_response = client.execute(large_action, deadline)
             large_structured = large_response.result.get("structuredContent")
-            if (not isinstance(large_structured, dict) or
-                    not isinstance(large_structured.get("matches"), tuple) or
-                    len(large_structured["matches"]) != 50):
+            if (
+                not isinstance(large_structured, dict)
+                or not isinstance(large_structured.get("matches"), tuple)
+                or len(large_structured["matches"]) != 50
+            ):
                 fail("the real agent rejected a native 50-match structured result")
             if large_response.byte_count <= 64 * 1024:
                 fail("the native large-result fixture did not exercise the MCP evidence byte bound")
@@ -355,10 +353,7 @@ def main() -> int:
     with tempfile.TemporaryDirectory(prefix="native-mcp-demo-parent-") as parent:
         missing = Path(parent) / "created-by-demo"
         run_demo(demo, arguments.server.resolve(), fixture, missing)
-        if (
-            not (missing / "report.json").is_file()
-            or not (missing / "report.md").is_file()
-        ):
+        if not (missing / "report.json").is_file() or not (missing / "report.md").is_file():
             fail("the demonstration did not create a missing output directory")
     run_real_agent_server_contract(arguments.server.resolve())
     run_output_flood_negative_test(demo, arguments.server.resolve(), fixture)

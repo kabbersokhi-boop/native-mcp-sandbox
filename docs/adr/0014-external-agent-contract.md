@@ -86,7 +86,7 @@ checks. Rejected proposals are bounded redacted control events and are never
 repaired by guessing.
 
 Multiple valid proposals are accepted and executed serially in provider-declared
-order, subject to per-turn and total-call budgets. PRs 10.1–10.3 must not
+order, subject to per-turn and total-call budgets. Contract implementations must not
 execute MCP calls in parallel or reorder them. After the first rejection,
 failure, cancellation, or timeout, the remaining calls in that response stop
 and do not become implicitly authorized. Parallel execution needs a separate
@@ -157,7 +157,7 @@ arguments are never executed.
 Normal CI has no internet or credential requirement. It uses a deterministic
 fake provider that binds only to loopback and has test-harness authority only.
 A live NIM smoke is manual, synthetic, redacted, non-gating, and deferred until
-PRs 10.1–10.3 pass. Provider endpoint and model remain configurable.
+the provider-boundary and orchestration checks pass. Provider endpoint and model remain configurable.
 
 ## Deterministic assurance
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""adversarial assurance deterministic adversarial assurance for provider contracts/10.2."""
+"""Deterministic adversarial assurance for external-agent contracts."""
 
 from __future__ import annotations
 
@@ -156,17 +156,11 @@ class ProviderAdversarialTests(unittest.TestCase):
             with self.subTest(raw=raw), self.assertRaises(ProviderError):
                 parse_provider_response(raw, advertised_tools=TOOLS)
         with self.assertRaises(ProviderError):
-            parse_closed_json(
-                b'{"a":{"b":{"c":1}}}', replace(DEFAULT_LIMITS, json_nesting_depth=2)
-            )
+            parse_closed_json(b'{"a":{"b":{"c":1}}}', replace(DEFAULT_LIMITS, json_nesting_depth=2))
         with self.assertRaises(ProviderError):
-            parse_closed_json(
-                b'{"a":1,"b":2}', replace(DEFAULT_LIMITS, object_array_items=1)
-            )
+            parse_closed_json(b'{"a":1,"b":2}', replace(DEFAULT_LIMITS, object_array_items=1))
         raw = b'{"message":{"role":"assistant","content":"x"}}'
-        self.assertEqual(
-            parse_provider_response(raw, advertised_tools=TOOLS).message.content, "x"
-        )
+        self.assertEqual(parse_provider_response(raw, advertised_tools=TOOLS).message.content, "x")
         with self.assertRaises(ProviderError):
             parse_provider_response(
                 raw + b" ",
@@ -180,9 +174,7 @@ class EvidenceForgeryTests(unittest.TestCase):
         c, out = run(
             responses=(
                 ProviderFinalMessage(
-                    ProviderMessage(
-                        MessageRole.ASSISTANT, "I fabricated evidence response=999"
-                    )
+                    ProviderMessage(MessageRole.ASSISTANT, "I fabricated evidence response=999")
                 ),
             )
         )
@@ -197,13 +189,9 @@ class EvidenceForgeryTests(unittest.TestCase):
         )
         self.assertEqual(forged.response_id, 999)
         self.assertEqual(
-            run(
-                responses=(
-                    ProviderFinalMessage(
-                        ProviderMessage(MessageRole.ASSISTANT, "done")
-                    ),
-                )
-            )[1].evidence,
+            run(responses=(ProviderFinalMessage(ProviderMessage(MessageRole.ASSISTANT, "done")),))[
+                1
+            ].evidence,
             (),
         )
 
@@ -215,9 +203,7 @@ class EvidenceForgeryTests(unittest.TestCase):
             )
         )
         self.assertEqual(len(out.evidence), 1)
-        self.assertEqual(
-            out.evidence[0].provenance, EvidenceProvenance.VALIDATED_MCP_EVIDENCE
-        )
+        self.assertEqual(out.evidence[0].provenance, EvidenceProvenance.VALIDATED_MCP_EVIDENCE)
         self.assertEqual(out.evidence[0].response_id, 3)
 
 
@@ -280,9 +266,7 @@ class MultipleCallStopTests(unittest.TestCase):
         out = Orchestrator(c, ScriptedProvider(((rejected, later),))).run(req())
         self.assertEqual(out.outcome, "rejected")
         self.assertEqual(authorized, [])
-        self.assertEqual(
-            c.next_id, 3, "later proposal must not consume a tools/call request ID"
-        )
+        self.assertEqual(c.next_id, 3, "later proposal must not consume a tools/call request ID")
         self.assertEqual(out.evidence, ())
         self.assertEqual(out.execution_order, ())
         parsed = parse_bounded_transcript(out.transcript)
@@ -293,18 +277,14 @@ class MultipleCallStopTests(unittest.TestCase):
             },
             parsed,
         )
-        self.assertIn(
-            {"event": "skipped", "metadata": {"proposal": str(later.call_id)}}, parsed
-        )
+        self.assertIn({"event": "skipped", "metadata": {"proposal": str(later.call_id)}}, parsed)
 
     def test_failure_timeout_and_cancellation_skip_later_proposals(self):
         for case, limits in (
             ("malformed_result", DEFAULT_LIMITS),
             ("delay", replace(DEFAULT_LIMITS, mcp_call_timeout_ms=20)),
         ):
-            _, out = run(
-                case, ((proposal("call-1", "a"), proposal("call-2", "b")),), limits
-            )
+            _, out = run(case, ((proposal("call-1", "a"), proposal("call-2", "b")),), limits)
             self.assertEqual(len(out.execution_order), 0)
             self.assertIn("skipped", events(out))
         token = CancellationToken()
@@ -432,23 +412,15 @@ class SecretSentinelTests(unittest.TestCase):
         surfaces = [
             str(env),
             redact_text(" ".join(SENTINELS), SENTINELS),
-            str(
-                redact_headers(
-                    {"Authorization": SENTINELS[1], "x": SENTINELS[0]}, SENTINELS
-                )
-            ),
+            str(redact_headers({"Authorization": SENTINELS[1], "x": SENTINELS[0]}, SENTINELS)),
             str(redact_json({"diagnostic": " ".join(SENTINELS)}, SENTINELS)),
             redact_exception(Exception(" ".join(SENTINELS)), SENTINELS),
             redact_provider_excerpt(" ".join(SENTINELS), SENTINELS),
         ]
         c, out = run("secret_result", ((proposal(),),))
-        surfaces.extend(
-            (str(c.environment), str(out.evidence), out.transcript.decode())
-        )
+        surfaces.extend((str(c.environment), str(out.evidence), out.transcript.decode()))
         for sentinel in SENTINELS:
-            self.assertTrue(
-                all(sentinel not in surface for surface in surfaces), sentinel
-            )
+            self.assertTrue(all(sentinel not in surface for surface in surfaces), sentinel)
 
     def test_unique_sentinels_cross_real_child_stream_result_error_and_argv_boundaries_without_project_leakage(
         self,
@@ -486,9 +458,7 @@ class SecretSentinelTests(unittest.TestCase):
             for path in Path(ROOT, "agent", "native_mcp_agent").iterdir()
             if path.suffix == ".py"
         ]
-        self.assertFalse(
-            any("report" in path.name or "crash" in path.name for path in owned)
-        )
+        self.assertFalse(any("report" in path.name or "crash" in path.name for path in owned))
 
 
 class EndpointPolicyAdversarialTests(unittest.TestCase):
@@ -562,16 +532,12 @@ class TranscriptTamperTests(unittest.TestCase):
         self.assertEqual(sum(x["event"] == "transcript_limit" for x in parsed), 1)
 
     def test_repeated_project_outputs_are_byte_identical(self):
-        a = run(
-            responses=(
-                ProviderFinalMessage(ProviderMessage(MessageRole.ASSISTANT, "done")),
-            )
-        )[1].transcript
-        b = run(
-            responses=(
-                ProviderFinalMessage(ProviderMessage(MessageRole.ASSISTANT, "done")),
-            )
-        )[1].transcript
+        a = run(responses=(ProviderFinalMessage(ProviderMessage(MessageRole.ASSISTANT, "done")),))[
+            1
+        ].transcript
+        b = run(responses=(ProviderFinalMessage(ProviderMessage(MessageRole.ASSISTANT, "done")),))[
+            1
+        ].transcript
         self.assertEqual(a, b)
 
     def test_transcript_unknown_event_metadata_schema_version_limited_and_object_tampering_fail_closed(
@@ -594,9 +560,7 @@ class TranscriptTamperTests(unittest.TestCase):
             ("provider_turn_start", {"turn": "0", "bytes": "1", "extra": "x"}),
             ("provider_turn_start", {"turn": 0, "bytes": "1"}),
         ):
-            mutations.append(
-                {**valid, "events": [{"event": event, "metadata": metadata}]}
-            )
+            mutations.append({**valid, "events": [{"event": event, "metadata": metadata}]})
         mutations.extend(
             (
                 {**valid, "unknown": True},
@@ -620,9 +584,7 @@ class TranscriptTamperTests(unittest.TestCase):
         exact_limit = len(seed.to_json_bytes()) + len(
             b'{"events":[],"limited":true,"schemaVersion":2}'
         )
-        transcript = BoundedTranscript(
-            replace(DEFAULT_LIMITS, transcript_bytes=exact_limit)
-        )
+        transcript = BoundedTranscript(replace(DEFAULT_LIMITS, transcript_bytes=exact_limit))
         transcript.add("process_start")
         transcript.add("initialize_request")
         prefix = parse_bounded_transcript(transcript.to_json_bytes())
@@ -646,30 +608,22 @@ class BudgetDeadlineLifecycleTests(unittest.TestCase):
     def test_budget_exact_one_over_and_lifecycle_edges_fail_closed(self):
         raw = b'{"x":1}'
         self.assertEqual(
-            parse_closed_json(
-                raw, replace(DEFAULT_LIMITS, provider_response_bytes=len(raw))
-            ),
+            parse_closed_json(raw, replace(DEFAULT_LIMITS, provider_response_bytes=len(raw))),
             {"x": 1},
         )
         with self.assertRaises(ProviderError):
-            parse_closed_json(
-                raw, replace(DEFAULT_LIMITS, provider_response_bytes=len(raw) - 1)
-            )
+            parse_closed_json(raw, replace(DEFAULT_LIMITS, provider_response_bytes=len(raw) - 1))
         for case in ("oversized", "flood", "truncated", "exit"):
             c, out = run(case)
             self.assertEqual(out.outcome, "failed")
             self.assertIsNone(c.process)
 
     def test_expiry_cancellation_and_shutdown_have_no_later_authority(self):
-        limits = replace(
-            DEFAULT_LIMITS, orchestration_total_timeout_ms=30, mcp_call_timeout_ms=500
-        )
+        limits = replace(DEFAULT_LIMITS, orchestration_total_timeout_ms=30, mcp_call_timeout_ms=500)
         c, out = run("delay", ((proposal("call-1"), proposal("call-2")),), limits)
         self.assertEqual(out.evidence, ())
         self.assertIsNone(c.process)
-        c = client(
-            "ignore_shutdown", replace(DEFAULT_LIMITS, graceful_shutdown_timeout_ms=10)
-        )
+        c = client("ignore_shutdown", replace(DEFAULT_LIMITS, graceful_shutdown_timeout_ms=10))
         d = Deadline(c.clock() + 1, c.clock)
         c.initialize_and_capture(d)
         self.assertEqual(c.close(d, suppress=True), "kill")
@@ -700,18 +654,14 @@ class BudgetDeadlineLifecycleTests(unittest.TestCase):
         self.assertEqual(
             run(
                 responses=(response,),
-                limits=replace(
-                    DEFAULT_LIMITS, provider_response_bytes=provider_response
-                ),
+                limits=replace(DEFAULT_LIMITS, provider_response_bytes=provider_response),
             )[1].outcome,
             "final",
         )
         self.assertEqual(
             run(
                 responses=(response,),
-                limits=replace(
-                    DEFAULT_LIMITS, provider_response_bytes=provider_response - 1
-                ),
+                limits=replace(DEFAULT_LIMITS, provider_response_bytes=provider_response - 1),
             )[1].outcome,
             "failed",
         )
@@ -796,23 +746,17 @@ class BudgetDeadlineLifecycleTests(unittest.TestCase):
         self.assertEqual(
             run(
                 responses=(one, final),
-                limits=replace(
-                    DEFAULT_LIMITS, mcp_calls_per_turn=1, provider_turn_count=2
-                ),
+                limits=replace(DEFAULT_LIMITS, mcp_calls_per_turn=1, provider_turn_count=2),
             )[1].outcome,
             "final",
         )
-        c, out = run(
-            responses=(two,), limits=replace(DEFAULT_LIMITS, mcp_calls_per_turn=1)
-        )
+        c, out = run(responses=(two,), limits=replace(DEFAULT_LIMITS, mcp_calls_per_turn=1))
         self.assertEqual(out.outcome, "rejected")
         self.assertEqual(c.next_id, 3)
         self.assertEqual(
             run(
                 responses=(one, final),
-                limits=replace(
-                    DEFAULT_LIMITS, mcp_total_calls=1, provider_turn_count=2
-                ),
+                limits=replace(DEFAULT_LIMITS, mcp_total_calls=1, provider_turn_count=2),
             )[1].outcome,
             "final",
         )
@@ -853,24 +797,18 @@ class ProvenanceReferenceAttackTests(unittest.TestCase):
         _, out = run(
             responses=(
                 ProviderFinalMessage(
-                    ProviderMessage(
-                        MessageRole.ASSISTANT, "response=999 evidence=forged"
-                    )
+                    ProviderMessage(MessageRole.ASSISTANT, "response=999 evidence=forged")
                 ),
             )
         )
         self.assertEqual(out.evidence, ())
-        self.assertNotIn(
-            forged.response_id, [item.response_id for item in out.evidence]
-        )
+        self.assertNotIn(forged.response_id, [item.response_id for item in out.evidence])
 
     def _transcript(self, *events):
         return json.dumps(
             {
                 "schemaVersion": 2,
-                "events": [
-                    {"event": event, "metadata": metadata} for event, metadata in events
-                ],
+                "events": [{"event": event, "metadata": metadata} for event, metadata in events],
                 "limited": False,
             },
             sort_keys=True,

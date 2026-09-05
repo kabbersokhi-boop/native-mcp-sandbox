@@ -271,8 +271,8 @@ void test_lifecycle() {
          "initialize must negotiate the targeted protocol version");
   expect(response["result"]["capabilities"].contains("tools"),
          "initialize must advertise tool discovery capability");
-  expect(response["result"]["serverInfo"]["version"] == "0.11.0",
-         "initialize must report the planned v0.11.0 version");
+  expect(response["result"]["serverInfo"]["version"] == "0.12.0",
+         "initialize must report the planned v0.12.0 version");
   expect(server.state() == LifecycleState::kAwaitingInitializedNotification,
          "initialize response must advance to awaiting notification");
 
