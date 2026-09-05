@@ -35,6 +35,19 @@ In the issue:
 
 Keep pull requests focused. Do not combine unrelated formatting, dependency and behavioral changes.
 
+## Minimum evidence by change
+
+| Change | Required evidence |
+| --- | --- |
+| Protocol, schema, or tool | Accepted-path, rejection-path, and process-level integration tests |
+| File or process authority | Strict-mode regression plus the relevant sanitizer run |
+| Scheduling or lifecycle | Cancellation, deadline, shutdown, stress, and ThreadSanitizer coverage |
+| Provider boundary | Offline adversarial tests for authorization, redaction, replay, and limits |
+| Release packaging | Clean package build, checksum verification, version check, and self-check |
+
+Record the exact command and tested commit. A test result from another commit is supporting history,
+not evidence for the proposed change.
+
 ## Engineering rules
 
 - Use C++20 for native code and Python 3 for the external agent and deterministic tests.

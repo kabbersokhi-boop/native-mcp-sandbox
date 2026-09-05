@@ -9,6 +9,20 @@ Native MCP Sandbox has two deliberately separate security boundaries:
 
 The hosted provider is never part of the native server's trusted computing base.
 
+## Security invariants
+
+The design must preserve these properties across every supported configuration:
+
+- no trusted runtime policy means no advertised host-evidence tools;
+- MCP clients select symbolic resources, never raw host paths or arbitrary PIDs;
+- the native server has no shell, provider credential, or network authority;
+- unvalidated provider output cannot become an executable MCP action or trusted evidence;
+- every admitted operation has explicit limits for input, output, work, state, and time;
+- cancellation, timeout, ambiguity, or replay cannot create additional execution authority.
+
+A change that weakens an invariant requires an explicit threat-model and architecture decision. It
+cannot be accepted as an undocumented compatibility tradeoff.
+
 ## Protected assets
 
 The project protects:
