@@ -50,7 +50,7 @@ client and much of the adversarial assurance harness; it does not expand the ser
 Treat native-server evidence and cross-language compatibility as separate claims, and validate
 both at the exact commit you deploy.
 
-The current release is `v0.12.0`. Its tag identifies the native server, external client, and their
+The current release is `v0.12.1`. Its tag identifies the native server, external client, and their
 tested protocol contract. [The assurance record](docs/ASSURANCE.md) states which checks apply to
 each boundary. The release includes a Linux x86-64 native package, Python wheel and source archive,
 SBOMs, checksums, and GitHub build-provenance attestations.

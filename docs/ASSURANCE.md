@@ -6,7 +6,7 @@ This document explains how that claim is tested, what evidence is available, and
 
 ## Current release evidence
 
-Project version `v0.12.0` binds the C++ authority boundary and Python orchestration client to MCP
+Project version `v0.12.1` binds the C++ authority boundary and Python orchestration client to MCP
 revision `2025-11-25`. It adds real-process interoperability coverage, bounded pagination, closed
 output-schema enforcement, structured-evidence limits, and release artifacts with SBOMs,
 checksums, and build-provenance attestations. The immutable release tag and GitHub Release identify
@@ -110,7 +110,7 @@ See [`docs/FUZZING.md`](FUZZING.md) for target-specific commands, corpus handlin
 
 The manual `Extended Assurance` workflow performs longer campaigns on Ubuntu 24.04. It includes repeated deterministic fuzzing, ThreadSanitizer repetitions, strict `openat2` and pidfd integration, AF_UNIX/FIFO policy checks and five long-running libFuzzer campaigns.
 
-The recorded fuzzing campaign executed **61,925,751** libFuzzer inputs without an observed crash, sanitizer report, timeout or crash artifact. That historical number applies only to its recorded source head, platform and inputs; it is not carried forward as a result for `v0.12.0`.
+The recorded fuzzing campaign executed **61,925,751** libFuzzer inputs without an observed crash, sanitizer report, timeout or crash artifact. That historical number applies only to its recorded source head, platform and inputs; it is not carried forward as a result for `v0.12.1`.
 
 ## Evidence interpretation
 
