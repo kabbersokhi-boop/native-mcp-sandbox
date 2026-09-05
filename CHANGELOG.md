@@ -8,7 +8,7 @@ The project follows semantic versioning before 1.0 with the usual caveat that in
 
 ### Added
 
-- Added the complete Phase 10 external investigation agent in Python.
+- Added the external investigation agent in Python.
 - Added provider-neutral closed request, response, failure, retry, transcript and redaction contracts.
 - Added bounded MCP child-process orchestration with exact tool-surface capture, serial execution, stable action identity, replay rejection and at-most-once behavior.
 - Added deterministic adversarial assurance for malformed input, fabricated evidence, correlation attacks, replay, secret leakage, endpoint policy, transcript tampering and budget boundaries.
@@ -20,7 +20,7 @@ The project follows semantic versioning before 1.0 with the usual caveat that in
 
 ### Changed
 
-- Updated `README.md`, `ARCHITECTURE.md`, `SECURITY.md` and `THREAT_MODEL.md` to describe the completed Phase 10 system rather than the earlier plan.
+- Updated `README.md`, `ARCHITECTURE.md`, `SECURITY.md` and `THREAT_MODEL.md` to describe the released external-agent system and its authority boundaries.
 - Clarified that the native C++ server remains stdio-only, network-free, credential-free and unchanged in tool authority.
 - Added an engineering highlights guide, release procedure, documentation-integrity check and focused issue forms.
 - Pinned GitHub Actions to immutable official commits and added Dependabot coverage for action updates.
@@ -29,10 +29,10 @@ The project follows semantic versioning before 1.0 with the usual caveat that in
 
 The `v0.11.0` release candidate passed:
 
-- 16 Phase 10.4 focused tests;
-- 34 Phase 10.3 adversarial tests;
-- 32 Phase 10.2 orchestration tests;
-- 25 Phase 10.1 contract tests and 10 security regressions;
+- 16 hosted-provider adapter tests;
+- 34 adversarial provider-boundary tests;
+- 32 orchestration tests;
+- 25 contract tests and 10 security regressions;
 - 21/21 CTest cases in dev, sanitizer and ThreadSanitizer presets;
 - 100,000 deterministic fuzz iterations;
 - five 2,000-run libFuzzer smoke campaigns.

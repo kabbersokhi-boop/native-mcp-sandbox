@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run bounded benchmarking benchmark smoke campaigns and write canonical JSON."""
+"""Run bounded benchmark smoke campaigns and write canonical JSON."""
 
 from __future__ import annotations
 

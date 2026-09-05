@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the deterministic demonstration demonstration twice and compare canonical reports."""
+"""Run the deterministic reference investigation twice and compare canonical reports."""
 
 from __future__ import annotations
 

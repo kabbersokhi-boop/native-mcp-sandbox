@@ -875,7 +875,7 @@ class Orchestrator:
 def _provider_response_value(
     response: ProviderFinalMessage | Sequence[ProviderToolCallProposal],
 ) -> Mapping[str, Any]:
-    """Canonical bounded bounded orchestration provider response representation."""
+    """Canonical bounded orchestration provider response representation."""
     if isinstance(response, ProviderFinalMessage):
         return {
             "kind": "final",
