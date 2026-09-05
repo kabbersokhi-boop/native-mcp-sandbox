@@ -1,7 +1,7 @@
 # Native MCP Sandbox
 
-**A C++20 MCP server that exposes narrow, read-only Linux evidence through an explicit operator
-policy, plus a separate bounded Python investigation agent.**
+**A mixed-language security system with a C++20 authority boundary and a separate, bounded Python
+investigation client. It exposes narrow, read-only Linux evidence through explicit operator policy.**
 
 [![CI](https://github.com/kabbersokhi-boop/native-mcp-sandbox/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/kabbersokhi-boop/native-mcp-sandbox/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/kabbersokhi-boop/native-mcp-sandbox)](https://github.com/kabbersokhi-boop/native-mcp-sandbox/releases/latest)
@@ -45,12 +45,15 @@ The native server has no provider SDK, credential, or network client. The extern
 the exact MCP tool surface, validates each proposal against closed schemas, derives a stable action
 identity, and executes calls serially with replay protection.
 
-The external agent remains a preview surface. Treat release evidence for the native server and
-cross-language agent/server compatibility as separate claims, and validate both at the exact
-commit you deploy.
+The native server is the sole authority boundary. Python implements the external orchestration
+client and much of the adversarial assurance harness; it does not expand the server's permissions.
+Treat native-server evidence and cross-language compatibility as separate claims, and validate
+both at the exact commit you deploy.
 
-The current release is `v0.11.0`. Its tag identifies the recorded native-server and preview-agent
-source; [the assurance record](docs/ASSURANCE.md) states which checks apply to each boundary.
+The current release is `v0.12.0`. Its tag identifies the native server, external client, and their
+tested protocol contract. [The assurance record](docs/ASSURANCE.md) states which checks apply to
+each boundary. The release includes a Linux x86-64 native package, Python wheel and source archive,
+SBOMs, checksums, and GitHub build-provenance attestations.
 
 ## Read-only tools
 
@@ -88,6 +91,10 @@ Check the binary:
 ./build/dev/native-mcp-sandbox --version
 ./build/dev/native-mcp-sandbox --self-check
 ```
+
+For an evaluated build, download the current GitHub Release and verify `SHA256SUMS`. GitHub also
+publishes build-provenance attestations for every release asset. Source builds remain the portable
+option for Linux architectures other than x86-64.
 
 ## Configure the server
 

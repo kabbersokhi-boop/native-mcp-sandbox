@@ -6,6 +6,7 @@
 #include "native_mcp/tool_service.hpp"
 #include "native_mcp/server.hpp"
 
+#include <algorithm>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -86,6 +87,33 @@ Json tool_text_json(const Json& response) {
   return Json::parse(response["result"]["content"][0]["text"].get<std::string>());
 }
 
+void expect_closed_output_schema(const Json& schema) {
+  expect(schema.is_object(), "output schema nodes must be objects");
+  const Json& type = schema.at("type");
+  const bool is_object =
+      (type.is_string() && type == "object") ||
+      (type.is_array() && std::any_of(type.begin(), type.end(),
+                                      [](const Json& value) {
+                                        return value == "object";
+                                      }));
+  if (is_object) {
+    expect(schema.contains("additionalProperties") &&
+               schema["additionalProperties"] == false,
+           "native output object schemas must explicitly be closed");
+  }
+  if (const auto properties = schema.find("properties");
+      properties != schema.end()) {
+    expect(properties->is_object(), "output properties must be an object");
+    for (const auto& [unused, property] : properties->items()) {
+      (void)unused;
+      expect_closed_output_schema(property);
+    }
+  }
+  if (const auto items = schema.find("items"); items != schema.end()) {
+    expect_closed_output_schema(*items);
+  }
+}
+
 void expect_no_response(const ProcessResult& result,
                         const std::string_view message) {
   expect(!result.response.has_value(), message);
@@ -161,8 +189,10 @@ void test_parse_and_envelope_errors() {
 
   response = response_json(server.process_line(
       R"({"jsonrpc":"2.0","id":null,"method":"ping"})"));
-  expect(response["id"].is_null(), "null ids must be preserved");
-  expect(response.contains("result"), "null-id request must still be handled");
+  expect(response["error"]["code"] ==
+             native_mcp::json_rpc::kInvalidRequest,
+         "null request ids must be rejected");
+  expect(response["id"].is_null(), "null-id errors must use null id");
 
   response = response_json(server.process_line(
       R"({"jsonrpc":"2.0","id":"abc","method":"ping"})"));
@@ -241,8 +271,8 @@ void test_lifecycle() {
          "initialize must negotiate the targeted protocol version");
   expect(response["result"]["capabilities"].contains("tools"),
          "initialize must advertise tool discovery capability");
-  expect(response["result"]["serverInfo"]["version"] == "0.11.0",
-         "initialize must report the planned v0.11.0 version");
+  expect(response["result"]["serverInfo"]["version"] == "0.12.0",
+         "initialize must report the planned v0.12.0 version");
   expect(server.state() == LifecycleState::kAwaitingInitializedNotification,
          "initialize response must advance to awaiting notification");
 
@@ -300,6 +330,18 @@ void test_log_tool_protocol() {
   expect(tools[0]["annotations"]["readOnlyHint"] == true &&
              tools[0]["execution"]["taskSupport"] == "forbidden",
          "tool metadata must declare read-only synchronous behavior");
+  for (const Json& tool : tools) {
+    expect_closed_output_schema(tool["outputSchema"]);
+  }
+  expect(tools[0]["outputSchema"]["properties"]["matches"]["maxItems"] ==
+             50U &&
+             tools[1]["outputSchema"]["properties"]["lines"]["maxItems"] ==
+                 50U &&
+             tools[2]["outputSchema"]["properties"]["neededLibraries"]
+                     ["maxItems"] == 64U &&
+             tools[2]["outputSchema"]["properties"]["segments"]["maxItems"] ==
+                 64U,
+         "native output schemas must advertise their bounded array limits");
 
   response = response_json(server.process_line(
       R"({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"logs.search","arguments":{"root":"logs","path":"app.log","query":"error","caseSensitive":false,"maxMatches":5}}})"));
@@ -426,23 +468,35 @@ void test_process_memory_tool_protocol() {
 }
 
 void test_initialize_validation() {
-  Server server;
-  Json response = response_json(server.process_line(
-      R"({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"client","version":"1"}}})"));
-  expect(response["error"]["code"] == native_mcp::json_rpc::kInvalidParams,
-         "unsupported protocol versions must be rejected");
-  expect(server.state() == LifecycleState::kUninitialized,
-         "failed initialize must not advance state");
+  {
+    Server server;
+    const Json response = response_json(server.process_line(
+        R"({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"client","version":"1"}}})"));
+    expect(response["result"]["protocolVersion"] == "2025-11-25",
+           "the server must negotiate by returning its supported revision");
+    expect(server.state() == LifecycleState::kAwaitingInitializedNotification,
+           "a negotiated initialize response must advance lifecycle state");
+  }
 
-  response = response_json(server.process_line(
-      R"({"jsonrpc":"2.0","id":2,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":[],"clientInfo":{"name":"client","version":"1"}}})"));
-  expect(response["error"]["code"] == native_mcp::json_rpc::kInvalidParams,
-         "client capabilities must be an object");
+  {
+    Server server;
+    const Json response = response_json(server.process_line(
+        R"({"jsonrpc":"2.0","id":2,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":[],"clientInfo":{"name":"client","version":"1"}}})"));
+    expect(response["error"]["code"] == native_mcp::json_rpc::kInvalidParams,
+           "client capabilities must be an object");
+    expect(server.state() == LifecycleState::kUninitialized,
+           "invalid capabilities must not advance lifecycle state");
+  }
 
-  response = response_json(server.process_line(
-      R"({"jsonrpc":"2.0","id":3,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"","version":"1"}}})"));
-  expect(response["error"]["code"] == native_mcp::json_rpc::kInvalidParams,
-         "client name must be non-empty");
+  {
+    Server server;
+    const Json response = response_json(server.process_line(
+        R"({"jsonrpc":"2.0","id":3,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"","version":"1"}}})"));
+    expect(response["error"]["code"] == native_mcp::json_rpc::kInvalidParams,
+           "client name must be non-empty");
+    expect(server.state() == LifecycleState::kUninitialized,
+           "invalid client information must not advance lifecycle state");
+  }
 }
 
 void test_response_limit_preserves_state() {

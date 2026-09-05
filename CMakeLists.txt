@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.20)
 
 project(
   native_mcp_sandbox
-  VERSION 0.11.0
+  VERSION 0.12.0
   DESCRIPTION "A security-first, resource-bounded C++20 server for local MCP evidence tools"
   LANGUAGES CXX
 )
@@ -405,3 +405,21 @@ if(NMS_BUILD_FUZZERS)
 endif()
 
 install(TARGETS native-mcp-sandbox RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+install(FILES packaging/README.md
+  DESTINATION ${CMAKE_INSTALL_DATADIR}/doc/native-mcp-sandbox
+  RENAME README.md
+)
+install(FILES LICENSE THIRD_PARTY_NOTICES.md
+  DESTINATION ${CMAKE_INSTALL_DATADIR}/doc/native-mcp-sandbox
+)
+
+set(CPACK_PACKAGE_NAME "native-mcp-sandbox")
+set(CPACK_PACKAGE_VENDOR "Kabir Sokhi")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Capability-bounded Linux evidence server for MCP")
+set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
+set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
+set(CPACK_PACKAGE_FILE_NAME "native-mcp-sandbox-${PROJECT_VERSION}-linux-x86_64")
+set(CPACK_PACKAGE_CHECKSUM SHA256)
+set(CPACK_GENERATOR TGZ)
+set(CPACK_INCLUDE_TOPLEVEL_DIRECTORY ON)
+include(CPack)

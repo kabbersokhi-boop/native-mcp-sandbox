@@ -71,6 +71,43 @@ constexpr std::string_view kProcessMemoryTool = "proc.memory";
               {"openWorldHint", false}};
 }
 
+// The native service intentionally exposes a small JSON Schema subset.  In
+// particular, every object result is closed: evidence consumed by the agent
+// must not acquire unadvertised fields merely because JSON Schema's default
+// is permissive.  Keep this normalization next to the authoritative native
+// tool definitions so the advertised contract and execution validator cannot
+// drift apart.
+void close_output_schema_objects(Json& schema) {
+  if (!schema.is_object()) {
+    return;
+  }
+
+  const auto type = schema.find("type");
+  bool permits_object = type != schema.end() && type->is_string() &&
+                        *type == "object";
+  if (type != schema.end() && type->is_array()) {
+    permits_object = std::any_of(
+        type->begin(), type->end(), [](const Json& item) {
+          return item.is_string() && item == "object";
+        });
+  }
+  if (permits_object) {
+    schema["additionalProperties"] = false;
+  }
+
+  const auto properties = schema.find("properties");
+  if (properties != schema.end() && properties->is_object()) {
+    for (auto& [unused, property] : properties->items()) {
+      (void)unused;
+      close_output_schema_objects(property);
+    }
+  }
+  const auto items = schema.find("items");
+  if (items != schema.end()) {
+    close_output_schema_objects(*items);
+  }
+}
+
 [[nodiscard]] Json search_definition(const LogAnalysisLimits& limits) {
   return Json{
       {"name", kSearchTool},
@@ -123,6 +160,7 @@ constexpr std::string_view kProcessMemoryTool = "proc.memory";
                   {"fileChangedDuringRead", Json{{"type", "boolean"}}},
                   {"matches",
                    Json{{"type", "array"},
+                        {"maxItems", limits.max_matches},
                         {"items",
                          Json{{"type", "object"},
                               {"properties",
@@ -183,6 +221,7 @@ constexpr std::string_view kProcessMemoryTool = "proc.memory";
                   {"fileChangedDuringRead", Json{{"type", "boolean"}}},
                   {"lines",
                    Json{{"type", "array"},
+                        {"maxItems", limits.max_tail_lines},
                         {"items",
                          Json{{"type", "object"},
                               {"properties",
@@ -243,6 +282,7 @@ constexpr std::string_view kProcessMemoryTool = "proc.memory";
                                                {"maximum", limits.max_program_headers}}},
                   {"interpreter", Json{{"type", {"string", "null"}}}},
                   {"neededLibraries", Json{{"type", "array"},
+                                            {"maxItems", limits.max_needed_libraries},
                                             {"items", Json{{"type", "string"}}}}},
                   {"neededLibrariesTruncated", Json{{"type", "boolean"}}},
                   {"buildId", Json{{"type", {"string", "null"}}}},
@@ -255,6 +295,7 @@ constexpr std::string_view kProcessMemoryTool = "proc.memory";
                   {"metadataBytesRead", Json{{"type", "integer"}, {"minimum", 0}}},
                   {"segments",
                    Json{{"type", "array"},
+                        {"maxItems", limits.max_segment_summaries},
                         {"items",
                          Json{{"type", "object"},
                               {"properties",
@@ -722,6 +763,9 @@ Json ToolService::tool_definitions() const {
   }
   if (process_policy_.has_value()) {
     definitions.push_back(process_definition());
+  }
+  for (Json& definition : definitions) {
+    close_output_schema_objects(definition["outputSchema"]);
   }
   return definitions;
 }

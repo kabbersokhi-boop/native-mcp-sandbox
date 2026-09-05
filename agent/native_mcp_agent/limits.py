@@ -30,9 +30,11 @@ class Limits:
     provider_turn_count: int = 4
     mcp_calls_per_turn: int = 4
     mcp_total_calls: int = 12
+    mcp_evidence_items: int = 64
+    mcp_evidence_response_bytes: int = 512 * 1024
     mcp_request_bytes: int = 16 * 1024
     mcp_response_bytes: int = 64 * 1024
-    child_stdout_bytes: int = 128 * 1024
+    child_stdout_bytes: int = 512 * 1024
     child_stderr_bytes: int = 64 * 1024
     process_startup_timeout_ms: int = 1_000
     mcp_initialize_timeout_ms: int = 1_000
@@ -62,6 +64,8 @@ class Limits:
         "provider_turn_count": 16,
         "mcp_calls_per_turn": 16,
         "mcp_total_calls": 64,
+        "mcp_evidence_items": 128,
+        "mcp_evidence_response_bytes": 512 * 1024,
         "mcp_request_bytes": 128 * 1024,
         "mcp_response_bytes": 512 * 1024,
         "child_stdout_bytes": 1024 * 1024,
@@ -90,6 +94,13 @@ class Limits:
                         f"limit {name} is outside its bounded range",
                     )
                 )
+        if self.child_stdout_bytes < self.mcp_evidence_response_bytes:
+            raise ProviderError(
+                failure(
+                    FailureClass.INVALID_PROVIDER_CONFIGURATION,
+                    "child stdout limit cannot be below the MCP evidence response limit",
+                )
+            )
 
     def as_dict(self) -> dict[str, int]:
         return {item.name: getattr(self, item.name) for item in fields(self)}

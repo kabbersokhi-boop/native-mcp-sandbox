@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the deterministic reference investigation twice and compare canonical reports."""
+"""Run the real server demos and verify the native-agent MCP contract."""
 
 from __future__ import annotations
 
@@ -12,6 +12,18 @@ import subprocess
 import sys
 import tempfile
 import time
+
+
+SOURCE_DIR = Path(__file__).resolve().parents[1]
+if str(SOURCE_DIR) not in sys.path:
+    sys.path.insert(0, str(SOURCE_DIR))
+
+from agent.native_mcp_agent.contracts import LocalActionIdentity  # noqa: E402
+from agent.native_mcp_agent.mcp_orchestrator import (  # noqa: E402
+    Deadline,
+    MCP_PROTOCOL_VERSION,
+    McpStdioClient,
+)
 
 
 EXPECTED_CONCLUSION = "healthy_final_state_confirmed"
@@ -131,9 +143,7 @@ def check_text_safety(text: str, label: str) -> None:
             fail(f"{label} contains {description}")
 
 
-def expect_forbidden_field_rejected(
-    report: dict[str, object], field: str, value: object
-) -> None:
+def expect_forbidden_field_rejected(report: dict[str, object], field: str, value: object) -> None:
     mutated = json.loads(json.dumps(report))
     mutated["evidence"][0]["finding"][field] = value  # type: ignore[index]
     try:
@@ -183,11 +193,120 @@ def run_output_flood_negative_test(demo: Path, server: Path, fixture: Path) -> N
         if result.returncode == 0:
             fail("the output-flood executable was accepted")
         if elapsed >= 5.0:
-            fail(
-                f"the output-flood executable failed too slowly: {elapsed:.2f} seconds"
-            )
+            fail(f"the output-flood executable failed too slowly: {elapsed:.2f} seconds")
         if (output_dir / "report.json").exists() or (output_dir / "report.md").exists():
             fail("a failed output-flood run left a stale report")
+
+
+def run_real_agent_server_contract(server: Path) -> None:
+    """Exercise the actual Python MCP client against the actual C++ server."""
+    with tempfile.TemporaryDirectory(prefix="native-mcp-agent-contract-") as directory:
+        root = Path(directory)
+        log = root / "application.log"
+        log.write_text(
+            "INFO boot\nERROR INC-042 synthetic failure\nINFO recovered\n",
+            encoding="utf-8",
+            newline="\n",
+        )
+        many = root / "many.log"
+        many.write_text(
+            "".join(f"ERROR INC-050 {chr(1) * 500}\n" for _ in range(50)),
+            encoding="utf-8",
+            newline="\n",
+        )
+        policy = root / "policy.json"
+        policy.write_text(
+            json.dumps(
+                {
+                    "version": 1,
+                    "roots": [
+                        {
+                            "name": "evidence",
+                            "path": str(root),
+                            "maxFileBytes": 64 * 1024,
+                        }
+                    ],
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+            + "\n",
+            encoding="utf-8",
+            newline="\n",
+        )
+        os.chmod(log, 0o600)
+        os.chmod(many, 0o600)
+        os.chmod(policy, 0o600)
+
+        client = McpStdioClient(
+            str(server),
+            ("--policy-config", str(policy)),
+            child_allowlist=("LANG", "LC_ALL"),
+            parent_environment={"LANG": "C", "LC_ALL": "C"},
+        )
+        deadline = Deadline(time.monotonic() + 5.0, time.monotonic)
+        try:
+            surface = client.initialize_and_capture(deadline)
+            if client.last_initialize is None:
+                fail("the real agent did not retain the initialize response")
+            negotiated = client.last_initialize.result.get("protocolVersion")
+            if negotiated != MCP_PROTOCOL_VERSION:
+                fail("the real server and real agent negotiated different MCP revisions")
+
+            names = tuple(tool.name for tool in surface.tools)
+            if names != ("logs.search", "logs.tail", "elf.inspect"):
+                fail(f"the real agent captured an unexpected tool surface: {names}")
+            if surface.output_schemas.get("logs.search") is None:
+                fail("the real agent did not capture logs.search outputSchema")
+
+            action = client.authorize(
+                LocalActionIdentity("0" * 32),
+                "call-1",
+                "logs.search",
+                {
+                    "root": "evidence",
+                    "path": "application.log",
+                    "query": "INC-042",
+                    "caseSensitive": True,
+                    "maxMatches": 4,
+                },
+            )
+            response = client.execute(action, deadline)
+            structured = response.result.get("structuredContent")
+            if not isinstance(structured, dict):
+                fail("the real agent rejected or lost structuredContent")
+            if structured.get("root") != "evidence":
+                fail("the validated structured result has an unexpected root")
+            matches = structured.get("matches")
+            if not isinstance(matches, tuple) or len(matches) != 1:
+                fail("the validated structured result has an unexpected match count")
+            if not isinstance(matches[0], dict) or matches[0].get("line") != 2:
+                fail("the validated structured result has an unexpected match")
+
+            large_action = client.authorize(
+                LocalActionIdentity("1" * 32),
+                "call-2",
+                "logs.search",
+                {
+                    "root": "evidence",
+                    "path": "many.log",
+                    "query": "INC-050",
+                    "caseSensitive": True,
+                    "maxMatches": 50,
+                },
+            )
+            large_response = client.execute(large_action, deadline)
+            large_structured = large_response.result.get("structuredContent")
+            if (
+                not isinstance(large_structured, dict)
+                or not isinstance(large_structured.get("matches"), tuple)
+                or len(large_structured["matches"]) != 50
+            ):
+                fail("the real agent rejected a native 50-match structured result")
+            if large_response.byte_count <= 64 * 1024:
+                fail("the native large-result fixture did not exercise the MCP evidence byte bound")
+        finally:
+            client.close(deadline, suppress=True)
 
 
 def parse_arguments() -> argparse.Namespace:
@@ -198,7 +317,7 @@ def parse_arguments() -> argparse.Namespace:
 
 def main() -> int:
     arguments = parse_arguments()
-    source_dir = Path(__file__).resolve().parents[1]
+    source_dir = SOURCE_DIR
     demo = source_dir / "scripts" / "run_agent_investigation_demo.py"
     fixture = source_dir / "demo" / "investigation" / "application.log"
     expected_json = source_dir / "demo" / "investigation" / "expected-report.json"
@@ -234,13 +353,11 @@ def main() -> int:
     with tempfile.TemporaryDirectory(prefix="native-mcp-demo-parent-") as parent:
         missing = Path(parent) / "created-by-demo"
         run_demo(demo, arguments.server.resolve(), fixture, missing)
-        if (
-            not (missing / "report.json").is_file()
-            or not (missing / "report.md").is_file()
-        ):
+        if not (missing / "report.json").is_file() or not (missing / "report.md").is_file():
             fail("the demonstration did not create a missing output directory")
+    run_real_agent_server_contract(arguments.server.resolve())
     run_output_flood_negative_test(demo, arguments.server.resolve(), fixture)
-    print("Agent investigation demo is deterministic and matches its golden reports")
+    print("Agent investigation demo and real agent/server contract passed")
     return 0
 
 

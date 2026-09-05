@@ -23,7 +23,7 @@ Native C++ MCP server
 
 The native server remains stdio-only, network-free and credential-free. The optional OpenAI-compatible adapter exists only in the external Python agent. Provider output is untrusted and cannot directly execute a tool or become evidence.
 
-Project version `v0.11.0` includes a preview external agent and optional provider adapter. The
+Project version `v0.12.0` includes the external agent and optional provider adapter. The
 native server authority remains unchanged.
 
 ## Trust boundaries

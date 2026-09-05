@@ -70,9 +70,7 @@ class Tests(unittest.TestCase):
         c = client()
         out = Orchestrator(
             c,
-            provider(
-                ProviderFinalMessage(ProviderMessage(MessageRole.ASSISTANT, "done"))
-            ),
+            provider(ProviderFinalMessage(ProviderMessage(MessageRole.ASSISTANT, "done"))),
         ).run(req())
         events = parse_bounded_transcript(out.transcript)
         self.assertEqual(out.outcome, "final")
@@ -106,32 +104,45 @@ class Tests(unittest.TestCase):
             "truncated",
             "oversized",
             "flood",
+            "unsupported_version",
         ):
             c = client(case)
             out = Orchestrator(c, provider()).run(req())
             self.assertEqual(out.outcome, "failed")
             self.assertIsNone(c.process)
 
+    def test_tools_list_pagination_is_bounded_and_complete(self):
+        c = client("paginated")
+        d = deadline(c)
+        surface = c.initialize_and_capture(d)
+        self.assertEqual(
+            tuple(tool.name for tool in surface.tools),
+            ("logs.search", "logs.count"),
+        )
+        self.assertEqual(c.next_id, 4)
+        c.close(d, suppress=True)
+
+    def test_open_output_schemas_are_rejected_at_discovery(self):
+        c = client("open_output_schema")
+        d = deadline(c)
+        with self.assertRaises(ProviderError):
+            c.initialize_and_capture(d)
+        c.close(d, suppress=True)
+
     def test_duplicate_completed_response_is_rejected(self):
         c = client("duplicate_completed")
         out = Orchestrator(
             c,
-            provider(
-                ProviderFinalMessage(ProviderMessage(MessageRole.ASSISTANT, "done"))
-            ),
+            provider(ProviderFinalMessage(ProviderMessage(MessageRole.ASSISTANT, "done"))),
         ).run(req())
         self.assertEqual(out.outcome, "failed")
         self.assertIsNone(c.process)
 
     def test_ignored_shutdown_is_killed_and_reaped(self):
-        c = client(
-            "ignore_shutdown", replace(DEFAULT_LIMITS, graceful_shutdown_timeout_ms=20)
-        )
+        c = client("ignore_shutdown", replace(DEFAULT_LIMITS, graceful_shutdown_timeout_ms=20))
         out = Orchestrator(
             c,
-            provider(
-                ProviderFinalMessage(ProviderMessage(MessageRole.ASSISTANT, "done"))
-            ),
+            provider(ProviderFinalMessage(ProviderMessage(MessageRole.ASSISTANT, "done"))),
             limits=c.limits,
         ).run(req())
         self.assertEqual(out.outcome, "final")
@@ -173,9 +184,9 @@ class Tests(unittest.TestCase):
 
     def test_failure_skips_later_and_reaps(self):
         c = client("exit")
-        out = Orchestrator(
-            c, provider((proposal("call-1", "a"), proposal("call-2", "b")))
-        ).run(req())
+        out = Orchestrator(c, provider((proposal("call-1", "a"), proposal("call-2", "b")))).run(
+            req()
+        )
         self.assertEqual(out.outcome, "failed")
         self.assertEqual(len(out.execution_order), 0)
         self.assertIn(b"skipped", out.transcript)
@@ -196,9 +207,9 @@ class Tests(unittest.TestCase):
     def test_provider_late_response_discarded(self):
         limits = replace(DEFAULT_LIMITS, orchestration_total_timeout_ms=50)
         c = client(limits=limits)
-        out = Orchestrator(
-            c, provider((proposal("call-1"),), delay_ms=80), limits=limits
-        ).run(req())
+        out = Orchestrator(c, provider((proposal("call-1"),), delay_ms=80), limits=limits).run(
+            req()
+        )
         self.assertIn(out.outcome, {"deadline", "failed"})
         self.assertEqual(len(out.evidence), 0)
 
@@ -215,9 +226,7 @@ class Tests(unittest.TestCase):
     def test_unbounded_provider_callback_is_not_supported(self):
         class Unbounded:
             def turn(self, *_args, **_kwargs):
-                return ProviderFinalMessage(
-                    ProviderMessage(MessageRole.ASSISTANT, "done")
-                )
+                return ProviderFinalMessage(ProviderMessage(MessageRole.ASSISTANT, "done"))
 
         with self.assertRaises(ProviderError):
             Orchestrator(client(), Unbounded())
@@ -229,9 +238,7 @@ class Tests(unittest.TestCase):
         a = (
             Orchestrator(
                 client(),
-                provider(
-                    ProviderFinalMessage(ProviderMessage(MessageRole.ASSISTANT, "done"))
-                ),
+                provider(ProviderFinalMessage(ProviderMessage(MessageRole.ASSISTANT, "done"))),
             )
             .run(req())
             .transcript
@@ -239,9 +246,7 @@ class Tests(unittest.TestCase):
         b = (
             Orchestrator(
                 client(),
-                provider(
-                    ProviderFinalMessage(ProviderMessage(MessageRole.ASSISTANT, "done"))
-                ),
+                provider(ProviderFinalMessage(ProviderMessage(MessageRole.ASSISTANT, "done"))),
             )
             .run(req())
             .transcript
@@ -453,9 +458,7 @@ class AuthorizationBoundaryTests(unittest.TestCase):
         d = deadline(c)
         c.initialize_and_capture(d)
         source = {"query": "original"}
-        action = c.authorize(
-            proposal("call-1").action_identity, "call-1", "logs.search", source
-        )
+        action = c.authorize(proposal("call-1").action_identity, "call-1", "logs.search", source)
         source["query"] = "mutated"
         response = c.execute(action, d)
         self.assertEqual(response.request_id, 3)
@@ -524,9 +527,9 @@ class AtMostOnceTests(unittest.TestCase):
         self,
     ):
         c = client()
-        out = Orchestrator(
-            c, provider((proposal("call-1", "a"), proposal("call-1", "b")))
-        ).run(req())
+        out = Orchestrator(c, provider((proposal("call-1", "a"), proposal("call-1", "b")))).run(
+            req()
+        )
         self.assertEqual(out.outcome, "duplicate")
         self.assertEqual(len(out.execution_order), 0)
         self.assertIn(b'"proposal_duplicate"', out.transcript)
@@ -534,18 +537,18 @@ class AtMostOnceTests(unittest.TestCase):
 
     def test_identical_content_under_different_call_ids_is_rejected_before_write(self):
         c = client()
-        out = Orchestrator(
-            c, provider((proposal("call-1", "a"), proposal("call-2", "a")))
-        ).run(req())
+        out = Orchestrator(c, provider((proposal("call-1", "a"), proposal("call-2", "a")))).run(
+            req()
+        )
         self.assertEqual(out.outcome, "duplicate")
         self.assertEqual(len(out.execution_order), 0)
         self.assertIsNone(c.process)
 
     def test_completed_call_id_replay_in_later_turn_is_rejected(self):
         c = client()
-        out = Orchestrator(
-            c, provider((proposal("call-1", "a"),), (proposal("call-1", "b"),))
-        ).run(req())
+        out = Orchestrator(c, provider((proposal("call-1", "a"),), (proposal("call-1", "b"),))).run(
+            req()
+        )
         self.assertEqual(out.outcome, "duplicate")
         self.assertEqual(len(out.execution_order), 1)
         self.assertIsNone(c.process)
@@ -564,13 +567,36 @@ class EvidenceAndTranscriptTests(unittest.TestCase):
             "result_oversized_text",
             "result_many_blocks",
             "result_structured",
+            "result_structured_extra",
+            "result_structured_wrong_type",
+            "result_large_structured_overflow",
+            "result_elf_sized_overflow",
+            "result_huge_integer",
         ):
             c = client(case)
-            out = Orchestrator(c, provider((proposal("call-1"),)), limits=c.limits).run(
-                req()
-            )
+            out = Orchestrator(c, provider((proposal("call-1"),)), limits=c.limits).run(req())
             self.assertEqual(out.outcome, "failed", case)
             self.assertIsNone(c.process)
+
+    def test_schema_bounded_structured_evidence_can_exceed_provider_collection_limit(self):
+        self.assertEqual(DEFAULT_LIMITS.object_array_items, 32)
+        for case, field, count in (
+            ("result_large_structured", "items", 50),
+            ("result_elf_sized", "segments", 64),
+        ):
+            c = client(case)
+            d = deadline(c)
+            c.initialize_and_capture(d)
+            action = c.authorize(
+                proposal("call-1").action_identity,
+                "call-1",
+                "logs.search",
+                {"query": "x"},
+            )
+            response = c.execute(action, d)
+            structured = response.result["structuredContent"]
+            self.assertEqual(len(structured[field]), count, case)
+            c.close(d, suppress=True)
 
     def test_serial_probe_reports_one_active_call_in_provider_order(self):
         c = client("serial_probe")
@@ -596,9 +622,7 @@ class EvidenceAndTranscriptTests(unittest.TestCase):
             ],
             "limited": True,
         }
-        limit = len(
-            json.dumps(terminal, sort_keys=True, separators=(",", ":")).encode()
-        )
+        limit = len(json.dumps(terminal, sort_keys=True, separators=(",", ":")).encode())
         transcript = BoundedTranscript(replace(DEFAULT_LIMITS, transcript_bytes=limit))
         transcript.add("process_start")
         prefix = transcript.to_json_bytes()
@@ -607,9 +631,7 @@ class EvidenceAndTranscriptTests(unittest.TestCase):
         self.assertIn(b'"process_start"', exhausted)
         self.assertEqual(exhausted.count(b'"transcript_limit"'), 1)
         self.assertLessEqual(len(exhausted), limit)
-        self.assertEqual(
-            parse_bounded_transcript(exhausted), parse_bounded_transcript(exhausted)
-        )
+        self.assertEqual(parse_bounded_transcript(exhausted), parse_bounded_transcript(exhausted))
         self.assertNotEqual(prefix, exhausted)
 
 

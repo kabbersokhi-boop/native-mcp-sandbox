@@ -225,7 +225,27 @@ class _FrozenDict(dict[str, Any]):
     __setitem__ = __delitem__ = clear = pop = popitem = setdefault = update = __ior__ = _immutable
 
 
-def _freeze_json(value: Any, *, depth: int = 0, limits: Limits = HARD_LIMITS) -> Any:
+def _json_string_limit(limits: Limits, string_bytes: int | None) -> int:
+    if string_bytes is None:
+        return max(limits.message_bytes, limits.tool_argument_bytes, limits.tool_definition_bytes)
+    if isinstance(string_bytes, bool) or not isinstance(string_bytes, int) or string_bytes <= 0:
+        raise ContractError(
+            failure(FailureClass.LOCAL_VALIDATION_FAILURE, "JSON string bound is invalid")
+        )
+    return string_bytes
+
+
+def _finite_number(value: Any) -> bool:
+    return (
+        not isinstance(value, bool)
+        and isinstance(value, (int, float))
+        and (isinstance(value, int) or math.isfinite(value))
+    )
+
+
+def _freeze_json(
+    value: Any, *, depth: int = 0, limits: Limits = HARD_LIMITS, string_bytes: int | None = None
+) -> Any:
     """Validate JSON and detach it from caller-owned containers."""
     if depth > limits.json_nesting_depth:
         raise ContractError(
@@ -242,14 +262,21 @@ def _freeze_json(value: Any, *, depth: int = 0, limits: Limits = HARD_LIMITS) ->
                 raise ContractError(
                     failure(FailureClass.LOCAL_VALIDATION_FAILURE, "JSON object key is invalid")
                 )
-            dict.__setitem__(result, key, _freeze_json(child, depth=depth + 1, limits=limits))
+            dict.__setitem__(
+                result,
+                key,
+                _freeze_json(child, depth=depth + 1, limits=limits, string_bytes=string_bytes),
+            )
         return result
     if isinstance(value, (list, tuple)):
         if len(value) > limits.object_array_items:
             raise ContractError(
                 failure(FailureClass.LOCAL_VALIDATION_FAILURE, "JSON array item limit exceeded")
             )
-        return tuple(_freeze_json(child, depth=depth + 1, limits=limits) for child in value)
+        return tuple(
+            _freeze_json(child, depth=depth + 1, limits=limits, string_bytes=string_bytes)
+            for child in value
+        )
     if isinstance(value, str):
         try:
             size = len(value.encode("utf-8"))
@@ -257,9 +284,7 @@ def _freeze_json(value: Any, *, depth: int = 0, limits: Limits = HARD_LIMITS) ->
             raise ContractError(
                 failure(FailureClass.LOCAL_VALIDATION_FAILURE, "JSON string is not valid UTF-8")
             ) from None
-        if size > max(
-            limits.message_bytes, limits.tool_argument_bytes, limits.tool_definition_bytes
-        ):
+        if size > _json_string_limit(limits, string_bytes):
             raise ContractError(
                 failure(FailureClass.LOCAL_VALIDATION_FAILURE, "JSON string exceeds byte limit")
             )
@@ -275,7 +300,9 @@ def _freeze_json(value: Any, *, depth: int = 0, limits: Limits = HARD_LIMITS) ->
     raise ContractError(failure(FailureClass.LOCAL_VALIDATION_FAILURE, "unsupported JSON value"))
 
 
-def _json_value(value: Any, *, depth: int = 0, limits: Limits = DEFAULT_LIMITS) -> None:
+def _json_value(
+    value: Any, *, depth: int = 0, limits: Limits = DEFAULT_LIMITS, string_bytes: int | None = None
+) -> None:
     if depth > limits.json_nesting_depth:
         raise ContractError(
             failure(FailureClass.LOCAL_VALIDATION_FAILURE, "JSON nesting depth exceeded")
@@ -290,19 +317,17 @@ def _json_value(value: Any, *, depth: int = 0, limits: Limits = DEFAULT_LIMITS) 
                 raise ContractError(
                     failure(FailureClass.LOCAL_VALIDATION_FAILURE, "JSON object key is invalid")
                 )
-            _json_value(child, depth=depth + 1, limits=limits)
+            _json_value(child, depth=depth + 1, limits=limits, string_bytes=string_bytes)
     elif isinstance(value, (list, tuple)):
         if len(value) > limits.object_array_items:
             raise ContractError(
                 failure(FailureClass.LOCAL_VALIDATION_FAILURE, "JSON array item limit exceeded")
             )
         for child in value:
-            _json_value(child, depth=depth + 1, limits=limits)
+            _json_value(child, depth=depth + 1, limits=limits, string_bytes=string_bytes)
     elif isinstance(value, str):
         try:
-            if len(value.encode("utf-8")) > max(
-                limits.message_bytes, limits.tool_argument_bytes, limits.tool_definition_bytes
-            ):
+            if len(value.encode("utf-8")) > _json_string_limit(limits, string_bytes):
                 raise ContractError(
                     failure(FailureClass.LOCAL_VALIDATION_FAILURE, "JSON string exceeds byte limit")
                 )
@@ -333,7 +358,11 @@ def _pairs_reject_duplicates(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
 
 
 def parse_closed_json(
-    raw: bytes | str, limits: Limits = DEFAULT_LIMITS, *, byte_limit: int | None = None
+    raw: bytes | str,
+    limits: Limits = DEFAULT_LIMITS,
+    *,
+    byte_limit: int | None = None,
+    string_bytes: int | None = None,
 ) -> Any:
     try:
         encoded = raw.encode("utf-8") if isinstance(raw, str) else raw
@@ -360,7 +389,7 @@ def parse_closed_json(
         raise ContractError(
             failure(FailureClass.MALFORMED_JSON, "JSON input is malformed")
         ) from None
-    _json_value(value, limits=limits)
+    _json_value(value, limits=limits, string_bytes=string_bytes)
     return value
 
 
@@ -445,12 +474,7 @@ class GenerationControls:
 
     def __post_init__(self) -> None:
         for value, label in ((self.temperature, "temperature"), (self.top_p, "top_p")):
-            if value is not None and (
-                isinstance(value, bool)
-                or not isinstance(value, (int, float))
-                or not math.isfinite(value)
-                or not 0.0 <= value <= 2.0
-            ):
+            if value is not None and (not _finite_number(value) or not 0.0 <= value <= 2.0):
                 raise ContractError(
                     failure(FailureClass.LOCAL_VALIDATION_FAILURE, f"{label} is invalid")
                 )
@@ -862,10 +886,7 @@ def _validate_schema_definition(schema: Any, limits: Limits, *, depth: int = 0) 
         raise _schema_error()
     for key in ("minimum", "maximum"):
         if key in schema and (
-            schema_type not in {"integer", "number"}
-            or isinstance(schema[key], bool)
-            or not isinstance(schema[key], (int, float))
-            or not math.isfinite(schema[key])
+            schema_type not in {"integer", "number"} or not _finite_number(schema[key])
         ):
             raise _schema_error()
     if "minimum" in schema and "maximum" in schema and schema["minimum"] > schema["maximum"]:
@@ -880,9 +901,7 @@ def _schema_value_matches(value: Any, schema_type: str) -> bool:
     if schema_type == "integer":
         return isinstance(value, int) and not isinstance(value, bool)
     if schema_type == "number":
-        return (
-            isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
-        )
+        return _finite_number(value)
     if schema_type == "object":
         return isinstance(value, Mapping)
     if schema_type == "array":
@@ -933,7 +952,7 @@ def _validate_schema(value: Any, schema: Mapping[str, Any], limits: Limits) -> N
             )
     elif schema_type in {"integer", "number"}:
         if (
-            not math.isfinite(value)
+            not _finite_number(value)
             or ("minimum" in schema and value < schema["minimum"])
             or ("maximum" in schema and value > schema["maximum"])
         ):

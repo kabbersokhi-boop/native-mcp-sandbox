@@ -10,8 +10,7 @@ static_assert(NLOHMANN_JSON_VERSION_MAJOR > 3 ||
               "Native MCP Sandbox requires nlohmann/json 3.11 or newer");
 
 bool is_valid_id(const Json& id) noexcept {
-  return id.is_null() || id.is_string() || id.is_number_integer() ||
-         id.is_number_unsigned();
+  return id.is_string() || id.is_number_integer() || id.is_number_unsigned();
 }
 
 Json make_result(const Json& id, Json result) {

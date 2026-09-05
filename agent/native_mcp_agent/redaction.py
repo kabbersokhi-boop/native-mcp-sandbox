@@ -171,7 +171,7 @@ def redact_json(value: Any, secrets: Sequence[str] = (), *, maximum: int = 4_096
             else:
                 output[str(key)] = redact_json(value[key], secrets, maximum=maximum)
         return output
-    if isinstance(value, list):
+    if isinstance(value, (list, tuple)):
         return [redact_json(item, secrets, maximum=maximum) for item in value[:128]]
     if isinstance(value, str):
         return redact_text(value, secrets, maximum=maximum)

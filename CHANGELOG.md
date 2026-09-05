@@ -4,6 +4,39 @@ This file records notable project changes.
 
 The project follows semantic versioning before 1.0 with the usual caveat that interfaces can still change.
 
+## Unreleased
+
+No changes yet.
+
+## 0.12.0
+
+Release tag: `v0.12.0`.
+
+### Added
+
+- Added deterministic native Linux packaging through CPack.
+- Added release assets for the native server and Python client, SPDX SBOMs, SHA-256 checksums,
+  and GitHub build-provenance attestations.
+- Added real-process contract coverage that drives the Python client against the C++ server.
+
+### Fixed
+
+- Aligned the external Python MCP client with revision `2025-11-25` used by the native server.
+- Accepted the native server's complete bounded tool metadata and successful `structuredContent` results while preserving closed validation.
+- Captured and validated advertised output schemas before admitting native tool evidence.
+- Made every advertised native output object schema explicitly closed, and reject
+  open output schemas before their results can become evidence.
+- Added bounded `tools/list` pagination support with cursor-cycle and empty-page
+  rejection.
+- Added a real-process contract check that drives the actual Python client against the actual C++ server and executes `logs.search`.
+- Negotiated the server-supported MCP revision during initialization and rejected null JSON-RPC request IDs.
+- Extended redaction through frozen tuple-backed arrays so nested structured evidence cannot bypass secret filtering.
+
+### Changed
+
+- Describe the project as a mixed-language security system: C++ implements the authority boundary;
+  Python implements external orchestration and adversarial assurance.
+
 ## 0.11.0
 
 ### Added
