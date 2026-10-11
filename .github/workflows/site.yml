@@ -27,7 +27,7 @@ jobs:
       - name: Check real browser behavior
         run: build/browser-env/bin/python tests/site_browser_tests.py
       - name: Retain verified Pages-ready files
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: verified-static-site
           path: |
@@ -38,7 +38,7 @@ jobs:
             site/data/
       - name: Retain browser proof
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: browser-verification
           path: build/site-verification/
