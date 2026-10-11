@@ -1,0 +1,51 @@
+test_changed_content_reusing_call_id_in_one_response_is_rejected_before_write (__main__.AtMostOnceTests.test_changed_content_reusing_call_id_in_one_response_is_rejected_before_write) ... ok
+test_completed_call_id_replay_in_later_turn_is_rejected (__main__.AtMostOnceTests.test_completed_call_id_replay_in_later_turn_is_rejected) ... ok
+test_identical_content_under_different_call_ids_is_rejected_before_write (__main__.AtMostOnceTests.test_identical_content_under_different_call_ids_is_rejected_before_write) ... ok
+test_authorized_snapshot_is_immutable_and_valid_action_writes_once (__main__.AuthorizationBoundaryTests.test_authorized_snapshot_is_immutable_and_valid_action_writes_once) ... ok
+test_every_invalid_final_action_does_not_write (__main__.AuthorizationBoundaryTests.test_every_invalid_final_action_does_not_write) ... ok
+test_cancellation_during_mcp_wait_skips_later_actions (__main__.CorrelationAndCancellationTests.test_cancellation_during_mcp_wait_skips_later_actions) ... ok
+test_cancellation_during_provider_reaps_child (__main__.CorrelationAndCancellationTests.test_cancellation_during_provider_reaps_child) ... ok
+test_duplicate_completed_response_fails_closed (__main__.CorrelationAndCancellationTests.test_duplicate_completed_response_fails_closed) ... ok
+test_future_response_fails_closed (__main__.CorrelationAndCancellationTests.test_future_response_fails_closed) ... ok
+test_unsolicited_response_fails_closed (__main__.CorrelationAndCancellationTests.test_unsolicited_response_fails_closed) ... ok
+test_initialize_and_tools_list_limits (__main__.DeadlineTests.test_initialize_and_tools_list_limits) ... ok
+test_provider_response_exact_and_one_over_bytes (__main__.DeadlineTests.test_provider_response_exact_and_one_over_bytes) ... ok
+test_startup_readiness_limit_and_overall_limit (__main__.DeadlineTests.test_startup_readiness_limit_and_overall_limit) ... /usr/lib/python3.14/subprocess.py:1139: ResourceWarning: subprocess 964102 is still running
+  _warn("subprocess %s is still running" % self.pid,
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+ok
+test_closed_result_variants_fail (__main__.EvidenceAndTranscriptTests.test_closed_result_variants_fail) ... ok
+test_five_native_calls_do_not_exhaust_provider_collection_limit (__main__.EvidenceAndTranscriptTests.test_five_native_calls_do_not_exhaust_provider_collection_limit) ... ok
+test_schema_bounded_structured_evidence_can_exceed_provider_collection_limit (__main__.EvidenceAndTranscriptTests.test_schema_bounded_structured_evidence_can_exceed_provider_collection_limit) ... ok
+test_serial_probe_reports_one_active_call_in_provider_order (__main__.EvidenceAndTranscriptTests.test_serial_probe_reports_one_active_call_in_provider_order) ... ok
+test_transcript_event_limit_reserves_terminal_and_rejects_overflow (__main__.EvidenceAndTranscriptTests.test_transcript_event_limit_reserves_terminal_and_rejects_overflow) ... ok
+test_transcript_reserves_terminal_without_erasing_prefix (__main__.EvidenceAndTranscriptTests.test_transcript_reserves_terminal_without_erasing_prefix) ... ok
+test_expired_deadline_kills_without_new_reap_wait_and_reports_unreaped (__main__.ShutdownBoundaryTests.test_expired_deadline_kills_without_new_reap_wait_and_reports_unreaped) ... ok
+test_graceful_shutdown_within_remaining_budget_reaps_and_clears_ownership (__main__.ShutdownBoundaryTests.test_graceful_shutdown_within_remaining_budget_reaps_and_clears_ownership) ... ok
+test_ignored_sigterm_fixture_uses_positive_remaining_budget_for_kill_reap (__main__.ShutdownBoundaryTests.test_ignored_sigterm_fixture_uses_positive_remaining_budget_for_kill_reap) ... ok
+test_bad_json_and_response_ids_fail_closed (__main__.Tests.test_bad_json_and_response_ids_fail_closed) ... ok
+test_changed_surface_and_final_boundary (__main__.Tests.test_changed_surface_and_final_boundary) ... ok
+test_deadline_no_evidence_after_expiry (__main__.Tests.test_deadline_no_evidence_after_expiry) ... /usr/lib/python3.14/subprocess.py:1139: ResourceWarning: subprocess 964199 is still running
+  _warn("subprocess %s is still running" % self.pid,
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+ok
+test_direct_forged_authorization_never_writes (__main__.Tests.test_direct_forged_authorization_never_writes) ... ok
+test_duplicate_completed_response_is_rejected (__main__.Tests.test_duplicate_completed_response_is_rejected) ... ok
+test_failure_skips_later_and_reaps (__main__.Tests.test_failure_skips_later_and_reaps) ... ok
+test_ignored_shutdown_is_killed_and_reaped (__main__.Tests.test_ignored_shutdown_is_killed_and_reaped) ... ok
+test_lifecycle_environment_and_cleanup (__main__.Tests.test_lifecycle_environment_and_cleanup) ... ok
+test_open_output_schemas_are_rejected_at_discovery (__main__.Tests.test_open_output_schemas_are_rejected_at_discovery) ... ok
+test_provider_late_response_discarded (__main__.Tests.test_provider_late_response_discarded) ... /usr/lib/python3.14/subprocess.py:1139: ResourceWarning: subprocess 964208 is still running
+  _warn("subprocess %s is still running" % self.pid,
+ResourceWarning: Enable tracemalloc to get the object allocation traceback
+ok
+test_result_contract_and_transcript_determinism (__main__.Tests.test_result_contract_and_transcript_determinism) ... ok
+test_scripted_provider_timeout_does_not_sleep_full_delay (__main__.Tests.test_scripted_provider_timeout_does_not_sleep_full_delay) ... ok
+test_serial_evidence_and_redaction (__main__.Tests.test_serial_evidence_and_redaction) ... ok
+test_tools_list_pagination_is_bounded_and_complete (__main__.Tests.test_tools_list_pagination_is_bounded_and_complete) ... ok
+test_unbounded_provider_callback_is_not_supported (__main__.Tests.test_unbounded_provider_callback_is_not_supported) ... ok
+
+----------------------------------------------------------------------
+Ran 37 tests in 2.466s
+
+OK

@@ -34,7 +34,7 @@ def fail(message: str) -> None:
 
 def check_relative_links() -> None:
     for document in ROOT.rglob("*.md"):
-        if "build" in document.relative_to(ROOT).parts:
+        if {"build", "node_modules", ".git"}.intersection(document.relative_to(ROOT).parts):
             continue
         text = document.read_text(encoding="utf-8")
         for match in MARKDOWN_LINK.finditer(text):

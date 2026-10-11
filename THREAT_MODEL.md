@@ -14,8 +14,8 @@ The hosted provider is never part of the native server's trusted computing base.
 The design must preserve these properties across every supported configuration:
 
 - no trusted runtime policy means no advertised host-evidence tools;
-- MCP clients select symbolic resources, never raw host paths or arbitrary PIDs;
-- the native server has no shell, provider credential, or network authority;
+- MCP clients select a root alias and relative path, or a process alias, never arbitrary absolute paths or PIDs;
+- the native server exposes no shell or networking tool and has no provider credential;
 - unvalidated provider output cannot become an executable MCP action or trusted evidence;
 - every admitted operation has explicit limits for input, output, work, state, and time;
 - cancellation, timeout, ambiguity, or replay cannot create additional execution authority.
@@ -24,6 +24,14 @@ A change that weakens an invariant requires an explicit threat-model and archite
 cannot be accepted as an undocumented compatibility tradeoff.
 
 ## Protected assets
+
+The native process retains the operating-system privileges of its launching user.
+These controls restrict the MCP interface. They do not confine a compromised process.
+The server does not install a kernel syscall or network policy.
+
+Protocol pipes use nonblocking I/O and a two-second write deadline. A transport failure
+closes admission and requests cancellation of pending work. These deadlines do not
+interrupt an arbitrary blocking filesystem or kernel operation.
 
 The project protects:
 

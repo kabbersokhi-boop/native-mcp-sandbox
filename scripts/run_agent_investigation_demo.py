@@ -17,7 +17,7 @@ import time
 from typing import Any
 
 
-VERSION = "0.12.1"
+VERSION = "0.13.0"
 CORRELATION_ID = "INC-042"
 EXPECTED_TOOLS = ["logs.search", "logs.tail", "elf.inspect", "proc.memory"]
 FIXTURE_SIZE_LIMIT = 64 * 1024

@@ -317,10 +317,12 @@ class SerializedProtocolWriter final {
       return false;
     }
     if (result.diagnostic.has_value()) {
-      diagnostics_ << "native-mcp-sandbox: " << *result.diagnostic << '\n';
+      const std::string message = "native-mcp-sandbox: " + *result.diagnostic + '\n';
+      diagnostics_.write(message.data(), static_cast<std::streamsize>(message.size()));
     }
     if (result.response.has_value()) {
-      output_ << *result.response << '\n';
+      const std::string message = *result.response + '\n';
+      output_.write(message.data(), static_cast<std::streamsize>(message.size()));
       output_.flush();
       if (!output_) {
         failed_.store(true, std::memory_order_release);
@@ -544,7 +546,8 @@ std::shared_ptr<ToolService> Server::tool_service() const noexcept {
 
 int run_stdio(std::istream& input, std::ostream& output,
               std::ostream& diagnostics, const ResourceBudget budget,
-              std::optional<ToolService> tools) {
+              std::optional<ToolService> tools,
+              std::function<bool()> transport_failed) {
   if (!is_budget_valid(budget)) {
     diagnostics << "native-mcp-sandbox: invalid resource budget\n";
     return 78;
@@ -561,10 +564,11 @@ int run_stdio(std::istream& input, std::ostream& output,
   if (shared_tools != nullptr) {
     scheduler = std::make_unique<ToolScheduler>(
         budget, shared_tools,
-        [&server, &writer](const Json& request_id,
+        [&server, &writer, &scheduler](const Json& request_id,
                            ToolExecutionResult execution) {
-          (void)writer.write(
-              server.format_tool_result(request_id, std::move(execution)));
+          if (!writer.write(server.format_tool_result(request_id, std::move(execution)))) {
+            scheduler->request_stop();
+          }
         });
   }
 
@@ -633,9 +637,13 @@ int run_stdio(std::istream& input, std::ostream& output,
 
   char character = '\0';
   while (input.get(character)) {
+    if (transport_failed && transport_failed()) {
+      break;
+    }
     if (character == '\n') {
       if (!process_current_line()) {
         if (scheduler != nullptr) {
+          scheduler->request_stop();
           scheduler->shutdown();
         }
         diagnostics << "native-mcp-sandbox: failed to write protocol response\n";
@@ -654,8 +662,9 @@ int run_stdio(std::istream& input, std::ostream& output,
     line.push_back(character);
   }
 
-  if (input.bad()) {
+  if (input.bad() || (transport_failed && transport_failed())) {
     if (scheduler != nullptr) {
+      scheduler->request_stop();
       scheduler->shutdown();
     }
     diagnostics << "native-mcp-sandbox: failed to read protocol input\n";
@@ -665,6 +674,7 @@ int run_stdio(std::istream& input, std::ostream& output,
   if (oversized || !line.empty()) {
     if (!process_current_line()) {
       if (scheduler != nullptr) {
+        scheduler->request_stop();
         scheduler->shutdown();
       }
       diagnostics << "native-mcp-sandbox: failed to write protocol response\n";

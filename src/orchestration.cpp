@@ -287,6 +287,23 @@ struct ToolScheduler::Impl final {
     return true;
   }
 
+  void request_stop() {
+    std::vector<std::shared_ptr<Control>> pending;
+    {
+      std::lock_guard lock{mutex};
+      pending.reserve(in_flight.size());
+      accepting = false;
+      for (const auto& [key, control] : in_flight) {
+        (void)key;
+        control->cancelled_by_client.store(true, std::memory_order_release);
+        pending.push_back(control);
+      }
+    }
+    for (const auto& control : pending) {
+      (void)control->stop_source.request_stop();
+    }
+  }
+
   [[nodiscard]] bool called_from_worker() const noexcept {
     const std::thread::id caller = std::this_thread::get_id();
     for (const std::thread& worker : workers) {
@@ -391,6 +408,8 @@ bool ToolScheduler::cancel(const Json& request_id) {
 }
 
 void ToolScheduler::shutdown() { impl_->shutdown(); }
+
+void ToolScheduler::request_stop() { impl_->request_stop(); }
 
 ToolSchedulerStats ToolScheduler::stats() const { return impl_->stats(); }
 

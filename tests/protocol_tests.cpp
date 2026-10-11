@@ -271,8 +271,8 @@ void test_lifecycle() {
          "initialize must negotiate the targeted protocol version");
   expect(response["result"]["capabilities"].contains("tools"),
          "initialize must advertise tool discovery capability");
-  expect(response["result"]["serverInfo"]["version"] == "0.12.1",
-         "initialize must report the planned v0.12.1 version");
+  expect(response["result"]["serverInfo"]["version"] == "0.13.0",
+         "initialize must report the planned v0.13.0 version");
   expect(server.state() == LifecycleState::kAwaitingInitializedNotification,
          "initialize response must advance to awaiting notification");
 
@@ -546,6 +546,42 @@ void test_request_size_error() {
          "oversized requests must return a structured size error");
 }
 
+void test_generated_lifecycle_sequences() {
+  const std::vector<std::string> noise{
+      R"({"jsonrpc":"2.0","method":"notifications/unknown"})",
+      R"({"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":999}})",
+      R"({"jsonrpc":"2.0","id":100,"method":"ping"})",
+      R"({"jsonrpc":"2.0","id":101,"method":"tools/list"})",
+      R"({"jsonrpc":"2.0","id":102,"method":"initialize","params":{}})",
+      R"({"jsonrpc":"2.0","id":103,"id":104,"method":"ping"})"};
+  for (unsigned seed = 1; seed <= 32; ++seed) {
+    Server server;
+    unsigned state = seed;
+    for (int phase = 0; phase < 3; ++phase) {
+      const auto expected_state = server.state();
+      for (int step = 0; step < 32; ++step) {
+        state = state * 1664525U + 1013904223U;
+        const auto result = server.process_line(noise[state % noise.size()]);
+        expect(server.state() == expected_state,
+               "generated invalid or unrelated input must not advance lifecycle");
+        if (result.response) {
+          const auto response = Json::parse(*result.response);
+          expect(response.contains("result") != response.contains("error"),
+                 "generated sequence responses must have exactly one outcome");
+        }
+      }
+      if (phase == 0) {
+        expect(initialize(server).contains("result"),
+               "valid initialization must survive generated pre-initialization noise");
+      } else if (phase == 1) {
+        become_ready(server);
+      }
+    }
+    expect(server.state() == LifecycleState::kReady,
+           "generated sequence must finish ready without lifecycle regression");
+  }
+}
+
 }  // namespace
 
 int main() {
@@ -559,6 +595,7 @@ int main() {
   test_response_limit_preserves_state();
   test_request_size_error();
   test_bounded_stdio_drains_oversized_lines();
+  test_generated_lifecycle_sequences();
   std::cout << "All protocol tests passed\n";
   return EXIT_SUCCESS;
 }

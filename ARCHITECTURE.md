@@ -23,7 +23,7 @@ Native C++ MCP server
 
 The native server remains stdio-only, network-free and credential-free. The optional OpenAI-compatible adapter exists only in the external Python agent. Provider output is untrusted and cannot directly execute a tool or become evidence.
 
-Project version `v0.12.1` includes the external agent and optional provider adapter. The
+Candidate version `v0.13.0` includes bounded descriptor transport and a reproducible investigation CLI. The
 native server authority remains unchanged.
 
 ## Trust boundaries
@@ -48,7 +48,7 @@ It does not own:
 
 ### Runtime policy
 
-The operator supplies a trusted policy that maps symbolic names to approved resources. The MCP client selects a symbolic name; it cannot choose an arbitrary absolute path or raw PID.
+The operator supplies a trusted policy that maps symbolic names to approved roots and processes. The MCP client selects a root alias and relative path for files, or a process alias. It cannot choose an arbitrary absolute path or raw PID.
 
 With no policy, the server advertises no host tools.
 
@@ -156,6 +156,18 @@ Matching work receives a cooperative stop request. The normal tool response is s
 Deadlines use `std::chrono::steady_clock`. Cancellation is cooperative; the project does not claim hard real-time interruption of arbitrary system calls.
 
 EOF closes admission. Accepted work drains before workers join. Shutdown has one join owner, and standard output remains complete protocol lines only.
+
+The executable uses nonblocking Linux descriptors for protocol input, output and diagnostics.
+Each output message has a two-second write deadline. Partial writes resume from the remaining
+bytes. A deadline, closed pipe or I/O error makes the entire connection terminal. No subsequent
+message follows a partially written message. The process returns exit status 74.
+
+The input reader polls at most every 50 milliseconds to observe an asynchronous output failure.
+Failure closes scheduler admission and requests cooperative cancellation of accepted work.
+Normal EOF still drains accepted calls. No transport thread or output queue is added.
+Filesystem system calls remain cooperatively bounded; this is not a hard real-time guarantee.
+The stream-based test API cannot impose deadlines on arbitrary caller-provided stream buffers.
+See [ADR 0015](docs/adr/0015-bounded-stdio-transport.md).
 
 ## Agent orchestration path
 

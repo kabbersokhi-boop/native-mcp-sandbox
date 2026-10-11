@@ -1,0 +1,461 @@
+{
+  "binarySha256": "a4f61f0b159a98addc92083bdfdfbcda9a7bec8c823b4b6fab5f9d55af13b7a9",
+  "cases": [
+    {
+      "actual": "allowed",
+      "arguments": {
+        "path": "application.log",
+        "query": "INC-042",
+        "root": "evidence"
+      },
+      "attackerControl": "Raw stdio JSON-RPC bytes; Python proposal validation bypassed",
+      "expected": "allowed",
+      "id": "allowed-log",
+      "layer": "native",
+      "passed": true,
+      "residualLimitation": "Finite regression coverage, not an exhaustive proof or kernel sandbox",
+      "response": null,
+      "source": "src/file_policy.cpp",
+      "tool": "logs.search"
+    },
+    {
+      "actual": "allowed",
+      "arguments": {
+        "path": "application.log",
+        "root": "evidence"
+      },
+      "attackerControl": "Raw stdio JSON-RPC bytes; Python proposal validation bypassed",
+      "expected": "allowed",
+      "id": "allowed-tail",
+      "layer": "native",
+      "passed": true,
+      "residualLimitation": "Finite regression coverage, not an exhaustive proof or kernel sandbox",
+      "response": null,
+      "source": "src/file_policy.cpp",
+      "tool": "logs.tail"
+    },
+    {
+      "actual": "allowed",
+      "arguments": {
+        "path": "sample.elf",
+        "root": "evidence"
+      },
+      "attackerControl": "Raw stdio JSON-RPC bytes; Python proposal validation bypassed",
+      "expected": "allowed",
+      "id": "allowed-elf",
+      "layer": "native",
+      "passed": true,
+      "residualLimitation": "Finite regression coverage, not an exhaustive proof or kernel sandbox",
+      "response": null,
+      "source": "src/tool_service.cpp",
+      "tool": "elf.inspect"
+    },
+    {
+      "actual": "allowed",
+      "arguments": {
+        "process": "server"
+      },
+      "attackerControl": "Raw stdio JSON-RPC bytes; Python proposal validation bypassed",
+      "expected": "allowed",
+      "id": "allowed-process",
+      "layer": "native",
+      "passed": true,
+      "residualLimitation": "Finite regression coverage, not an exhaustive proof or kernel sandbox",
+      "response": null,
+      "source": "src/tool_service.cpp",
+      "tool": "proc.memory"
+    },
+    {
+      "actual": "tool:invalid_relative_path",
+      "arguments": {
+        "path": "../outside.txt",
+        "query": "INC-042",
+        "root": "evidence"
+      },
+      "attackerControl": "Raw stdio JSON-RPC bytes; Python proposal validation bypassed",
+      "expected": "tool:invalid_relative_path",
+      "id": "parent-traversal",
+      "layer": "native",
+      "passed": true,
+      "residualLimitation": "Finite regression coverage, not an exhaustive proof or kernel sandbox",
+      "response": {
+        "id": 2,
+        "jsonrpc": "2.0",
+        "result": {
+          "content": [
+            {
+              "text": "{\"error\":{\"code\":\"invalid_relative_path\",\"message\":\"path contains an empty, dot, or parent component\"}}",
+              "type": "text"
+            }
+          ],
+          "isError": true
+        }
+      },
+      "source": "src/file_policy.cpp",
+      "tool": "logs.search"
+    },
+    {
+      "actual": "tool:invalid_relative_path",
+      "arguments": {
+        "path": "/etc/passwd",
+        "query": "INC-042",
+        "root": "evidence"
+      },
+      "attackerControl": "Raw stdio JSON-RPC bytes; Python proposal validation bypassed",
+      "expected": "tool:invalid_relative_path",
+      "id": "absolute-path",
+      "layer": "native",
+      "passed": true,
+      "residualLimitation": "Finite regression coverage, not an exhaustive proof or kernel sandbox",
+      "response": {
+        "id": 2,
+        "jsonrpc": "2.0",
+        "result": {
+          "content": [
+            {
+              "text": "{\"error\":{\"code\":\"invalid_relative_path\",\"message\":\"path must be a nonempty relative file path\"}}",
+              "type": "text"
+            }
+          ],
+          "isError": true
+        }
+      },
+      "source": "src/file_policy.cpp",
+      "tool": "logs.search"
+    },
+    {
+      "actual": "tool:resolution_denied",
+      "arguments": {
+        "path": "escape",
+        "query": "INC-042",
+        "root": "evidence"
+      },
+      "attackerControl": "Raw stdio JSON-RPC bytes; Python proposal validation bypassed",
+      "expected": "tool:resolution_denied",
+      "id": "symlink-escape",
+      "layer": "native",
+      "passed": true,
+      "residualLimitation": "Finite regression coverage, not an exhaustive proof or kernel sandbox",
+      "response": {
+        "id": 2,
+        "jsonrpc": "2.0",
+        "result": {
+          "content": [
+            {
+              "text": "{\"error\":{\"code\":\"resolution_denied\",\"message\":\"target is a symbolic or magic link\"}}",
+              "type": "text"
+            }
+          ],
+          "isError": true
+        }
+      },
+      "source": "src/file_policy.cpp",
+      "tool": "logs.search"
+    },
+    {
+      "actual": "tool:resolution_denied",
+      "arguments": {
+        "path": "magic",
+        "query": "INC-042",
+        "root": "evidence"
+      },
+      "attackerControl": "Raw stdio JSON-RPC bytes; Python proposal validation bypassed",
+      "expected": "tool:resolution_denied",
+      "id": "magic-link",
+      "layer": "native",
+      "passed": true,
+      "residualLimitation": "Finite regression coverage, not an exhaustive proof or kernel sandbox",
+      "response": {
+        "id": 2,
+        "jsonrpc": "2.0",
+        "result": {
+          "content": [
+            {
+              "text": "{\"error\":{\"code\":\"resolution_denied\",\"message\":\"target is a symbolic or magic link\"}}",
+              "type": "text"
+            }
+          ],
+          "isError": true
+        }
+      },
+      "source": "src/file_policy.cpp",
+      "tool": "logs.search"
+    },
+    {
+      "actual": "tool:unknown_root",
+      "arguments": {
+        "path": "application.log",
+        "query": "INC-042",
+        "root": "unapproved"
+      },
+      "attackerControl": "Raw stdio JSON-RPC bytes; Python proposal validation bypassed",
+      "expected": "tool:unknown_root",
+      "id": "unknown-root",
+      "layer": "native",
+      "passed": true,
+      "residualLimitation": "Finite regression coverage, not an exhaustive proof or kernel sandbox",
+      "response": {
+        "id": 2,
+        "jsonrpc": "2.0",
+        "result": {
+          "content": [
+            {
+              "text": "{\"error\":{\"code\":\"unknown_root\",\"message\":\"requested root is not configured\"}}",
+              "type": "text"
+            }
+          ],
+          "isError": true
+        }
+      },
+      "source": "src/file_policy.cpp",
+      "tool": "logs.search"
+    },
+    {
+      "actual": "tool:unknown_process",
+      "arguments": {
+        "process": "unapproved"
+      },
+      "attackerControl": "Raw stdio JSON-RPC bytes; Python proposal validation bypassed",
+      "expected": "tool:unknown_process",
+      "id": "unknown-process",
+      "layer": "native",
+      "passed": true,
+      "residualLimitation": "Finite regression coverage, not an exhaustive proof or kernel sandbox",
+      "response": {
+        "id": 2,
+        "jsonrpc": "2.0",
+        "result": {
+          "content": [
+            {
+              "text": "{\"error\":{\"code\":\"unknown_process\",\"message\":\"requested process is not configured\"}}",
+              "type": "text"
+            }
+          ],
+          "isError": true
+        }
+      },
+      "source": "src/tool_service.cpp",
+      "tool": "proc.memory"
+    },
+    {
+      "actual": "tool:invalid_arguments",
+      "arguments": {
+        "pid": 1,
+        "process": "server"
+      },
+      "attackerControl": "Raw stdio JSON-RPC bytes; Python proposal validation bypassed",
+      "expected": "tool:invalid_arguments",
+      "id": "raw-pid",
+      "layer": "native",
+      "passed": true,
+      "residualLimitation": "Finite regression coverage, not an exhaustive proof or kernel sandbox",
+      "response": {
+        "id": 2,
+        "jsonrpc": "2.0",
+        "result": {
+          "content": [
+            {
+              "text": "{\"error\":{\"code\":\"invalid_arguments\",\"message\":\"proc.memory arguments must match the closed schema\"}}",
+              "type": "text"
+            }
+          ],
+          "isError": true
+        }
+      },
+      "source": "src/tool_service.cpp",
+      "tool": "proc.memory"
+    },
+    {
+      "actual": "tool:invalid_arguments",
+      "arguments": {
+        "path": "application.log",
+        "query": "INC-042",
+        "recursive": true,
+        "root": "evidence"
+      },
+      "attackerControl": "Raw stdio JSON-RPC bytes; Python proposal validation bypassed",
+      "expected": "tool:invalid_arguments",
+      "id": "unknown-field",
+      "layer": "native",
+      "passed": true,
+      "residualLimitation": "Finite regression coverage, not an exhaustive proof or kernel sandbox",
+      "response": {
+        "id": 2,
+        "jsonrpc": "2.0",
+        "result": {
+          "content": [
+            {
+              "text": "{\"error\":{\"code\":\"invalid_arguments\",\"message\":\"logs.search arguments must match the closed schema\"}}",
+              "type": "text"
+            }
+          ],
+          "isError": true
+        }
+      },
+      "source": "src/file_policy.cpp",
+      "tool": "logs.search"
+    },
+    {
+      "actual": "rpc:-32602",
+      "arguments": {
+        "command": "echo denied"
+      },
+      "attackerControl": "Raw stdio JSON-RPC bytes; Python proposal validation bypassed",
+      "expected": "rpc:-32602",
+      "id": "invented-shell",
+      "layer": "native",
+      "passed": true,
+      "residualLimitation": "Finite regression coverage, not an exhaustive proof or kernel sandbox",
+      "response": {
+        "error": {
+          "code": -32602,
+          "message": "Unknown tool"
+        },
+        "id": 2,
+        "jsonrpc": "2.0"
+      },
+      "source": "src/tool_service.cpp",
+      "tool": "shell.exec"
+    },
+    {
+      "actual": "rpc:-32600",
+      "attackerControl": "Raw stdio JSON-RPC bytes; Python proposal validation bypassed",
+      "expected": "rpc:-32600",
+      "id": "duplicate-json-key",
+      "layer": "native protocol",
+      "passed": true,
+      "residualLimitation": "Finite regression coverage, not an exhaustive proof or kernel sandbox",
+      "source": "src/server.cpp"
+    },
+    {
+      "actual": "rpc:-32600",
+      "attackerControl": "Raw stdio JSON-RPC bytes; Python proposal validation bypassed",
+      "expected": "rpc:-32600",
+      "id": "null-request-id",
+      "layer": "native protocol",
+      "passed": true,
+      "residualLimitation": "Finite regression coverage, not an exhaustive proof or kernel sandbox",
+      "source": "src/server.cpp"
+    },
+    {
+      "actual": "rpc:-32001",
+      "attackerControl": "Raw stdio JSON-RPC bytes; Python proposal validation bypassed",
+      "expected": "rpc:-32001",
+      "id": "oversized-request",
+      "layer": "native protocol",
+      "passed": true,
+      "residualLimitation": "Finite regression coverage, not an exhaustive proof or kernel sandbox",
+      "source": "src/server.cpp"
+    },
+    {
+      "actual": "boundary-held",
+      "artifact": "hostile/report.json",
+      "attackerControl": "Synthetic proposal and evidence text",
+      "expected": "boundary-held",
+      "id": "hostile-proposals",
+      "layer": "native + Python (separate decisions)",
+      "passed": true,
+      "residualLimitation": "Scripted proposal enforcement, not live-model injection susceptibility",
+      "source": "agent/native_mcp_agent/mcp_orchestrator.py"
+    },
+    {
+      "actual": "exit:0",
+      "artifact": "suites/protocol-sequences.txt",
+      "attackerControl": "Regression-specific inputs and scheduling; inspect the named suite",
+      "expected": "exit:0",
+      "id": "protocol-sequences",
+      "layer": "named regression suite",
+      "passed": true,
+      "residualLimitation": "Finite regression coverage, not an exhaustive proof or kernel sandbox",
+      "sha256": "35977f37a9aa08b685044578a66eaeba0ad6f6ca13e172d6306685ef1fc858e4"
+    },
+    {
+      "actual": "exit:0",
+      "artifact": "suites/scheduler-unit.txt",
+      "attackerControl": "Regression-specific inputs and scheduling; inspect the named suite",
+      "expected": "exit:0",
+      "id": "scheduler-unit",
+      "layer": "named regression suite",
+      "passed": true,
+      "residualLimitation": "Finite regression coverage, not an exhaustive proof or kernel sandbox",
+      "sha256": "744b6250faea11b669482fc9267026223abaf8d0bb3c72b70d2a29bf553e514f"
+    },
+    {
+      "actual": "exit:0",
+      "artifact": "suites/scheduler-stress.txt",
+      "attackerControl": "Regression-specific inputs and scheduling; inspect the named suite",
+      "expected": "exit:0",
+      "id": "scheduler-stress",
+      "layer": "named regression suite",
+      "passed": true,
+      "residualLimitation": "Finite regression coverage, not an exhaustive proof or kernel sandbox",
+      "sha256": "bff4318058760ca1bc5ddaa85a1646faeccfc2178f06fdf9eee271ce5c4d8131"
+    },
+    {
+      "actual": "exit:0",
+      "artifact": "suites/native-security.txt",
+      "attackerControl": "Regression-specific inputs and scheduling; inspect the named suite",
+      "expected": "exit:0",
+      "id": "native-security",
+      "layer": "named regression suite",
+      "passed": true,
+      "residualLimitation": "Finite regression coverage, not an exhaustive proof or kernel sandbox",
+      "sha256": "53462ad2b8f7bf94589aff73ae931018f797ea9960a89e09434d09efeeefef8f"
+    },
+    {
+      "actual": "exit:0",
+      "artifact": "suites/replay-and-correlation.txt",
+      "attackerControl": "Regression-specific inputs and scheduling; inspect the named suite",
+      "expected": "exit:0",
+      "id": "replay-and-correlation",
+      "layer": "named regression suite",
+      "passed": true,
+      "residualLimitation": "Finite regression coverage, not an exhaustive proof or kernel sandbox",
+      "sha256": "e5ad830981c00c364177e9fba1e95eb36bc033910ea745d321c552dc7c10eebb"
+    },
+    {
+      "actual": "exit:0",
+      "artifact": "suites/transcript-and-fabrication.txt",
+      "attackerControl": "Regression-specific inputs and scheduling; inspect the named suite",
+      "expected": "exit:0",
+      "id": "transcript-and-fabrication",
+      "layer": "named regression suite",
+      "passed": true,
+      "residualLimitation": "Finite regression coverage, not an exhaustive proof or kernel sandbox",
+      "sha256": "e79f3cdbf30c43db891963d0724f74b00190842003811c5637265bf94e98e08d"
+    },
+    {
+      "actual": "exit:0",
+      "artifact": "suites/transport-liveness.txt",
+      "attackerControl": "Regression-specific inputs and scheduling; inspect the named suite",
+      "expected": "exit:0",
+      "id": "transport-liveness",
+      "layer": "named regression suite",
+      "passed": true,
+      "residualLimitation": "Finite regression coverage, not an exhaustive proof or kernel sandbox",
+      "sha256": "f160311754888f69b4623dbbecd3a24a875b1b947b2ec52c78808cd0af1cc620"
+    },
+    {
+      "actual": "exit:0",
+      "artifact": "suites/unavailable-controls.txt",
+      "attackerControl": "Regression-specific inputs and scheduling; inspect the named suite",
+      "expected": "exit:0",
+      "id": "unavailable-controls",
+      "layer": "named regression suite",
+      "passed": true,
+      "residualLimitation": "Finite regression coverage, not an exhaustive proof or kernel sandbox",
+      "sha256": "62df2979e5e3dc37609231d21884c9bc4c2d388c3ef23c3394cc685d70f5a5ad"
+    }
+  ],
+  "environment": {
+    "architecture": "x86_64",
+    "kernel": "7.2.4-arch1-2"
+  },
+  "limits": [
+    "Synthetic boundary cases; not a universal prompt-injection score.",
+    "Named suites aggregate their own assertions; a suite is not counted as one attack.",
+    "No unavailable control is silently classified as a successful rejection."
+  ],
+  "passed": true,
+  "schemaVersion": 1
+}

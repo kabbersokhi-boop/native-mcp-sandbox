@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from .contracts import (
@@ -484,8 +484,9 @@ class BoundedTranscript:
         candidate = self._events + [{"event": event, "metadata": values}]
         # Reserve terminal-event space before accepting ordinary control data.
         if (
-            event == "transcript_limit"
-            or len(_transcript_bytes(candidate + [self._terminal], True))
+            event != "transcript_limit"
+            and len(candidate) < self._limits.transcript_event_count
+            and len(_transcript_bytes(candidate + [self._terminal], True))
             <= self._limits.transcript_bytes
         ):
             self._events = candidate
@@ -514,13 +515,17 @@ def _transcript_bytes(events: list[dict[str, Any]], limited: bool) -> bytes:
 def parse_bounded_transcript(
     raw: bytes | str, limits: Limits = DEFAULT_LIMITS
 ) -> tuple[Mapping[str, Any], ...]:
-    value = parse_closed_json(raw, limits, byte_limit=limits.transcript_bytes)
+    control_limits = replace(
+        limits, object_array_items=max(limits.object_array_items, limits.transcript_event_count)
+    )
+    value = parse_closed_json(raw, control_limits, byte_limit=limits.transcript_bytes)
     if (
         not isinstance(value, dict)
         or set(value) != {"schemaVersion", "events", "limited"}
         or value["schemaVersion"] != 2
         or type(value["limited"]) is not bool
         or not isinstance(value["events"], list)
+        or len(value["events"]) > limits.transcript_event_count
     ):
         raise ProviderError(
             failure(FailureClass.LOCAL_VALIDATION_FAILURE, "control transcript is not closed")

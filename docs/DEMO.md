@@ -1,6 +1,44 @@
 # Demonstrations
 
-Native MCP Sandbox includes two different demonstrations. They serve different purposes and have different trust boundaries.
+Native MCP Sandbox includes an installed investigation demo, a fixed protocol regression demo
+and an optional hosted adapter smoke. They serve different purposes.
+
+The [silent end-to-end film](../site/assets/portfolio-demo.mp4) shows the installed investigation
+command, recovery and inconclusive outcomes, native and client-side denials, evidence references,
+and the measurement and engineering views. The [trace viewer](../site/index.html) replays the
+recorded native runs. All incident inputs are synthetic.
+
+## Installed investigation demo
+
+After building the native server, install the agent package and run:
+
+```bash
+python3 -m venv build/demo-venv
+build/demo-venv/bin/pip install ./agent
+build/demo-venv/bin/native-mcp-agent demo --server ./build/dev/native-mcp-sandbox --output build/flagship-demo
+```
+
+The demo uses the real `Orchestrator` and `McpStdioClient` with deterministic scripted proposals.
+It runs all four native tools in each scenario:
+
+| Scenario | Evidence | Result |
+| --- | --- | --- |
+| `recovered` | Complete synthetic incident log and matching ELF header | Log-reported recovery |
+| `inconclusive` | Match-capped search, no recovery record and mismatched ELF architecture | Explicit uncertainty; no unsupported recovery claim |
+| `hostile` | Hostile log text, traversal proposal and invented shell tool | C++ rejects traversal; Python rejects the invented tool |
+
+Reports derive conclusions from validated results. Changing the fixture changes the conclusion.
+Every fact and inference references an evidence item with its action and native response IDs.
+The process observation describes the demo server. It is not evidence of the synthetic
+application's memory use or the cause of its failure.
+
+Each scenario produces a canonical JSON report, a Markdown report, the bounded control transcript
+and separate local run metadata. The report excludes volatile process values. Run metadata retains
+redacted process observations, paths, timing and hashes. A hash is not proof of authenticity.
+
+Strict kernel controls are required. Failure produces a nonzero exit; no legacy mode is enabled.
+The hostile proposals are intentionally scripted, independently of the log contents. This is a
+test of enforcement boundaries, not a measurement of live-model behavior.
 
 ## 1. Deterministic offline investigation
 

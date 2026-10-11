@@ -1,0 +1,44 @@
+name: Static evidence site
+
+on:
+  pull_request:
+    paths: ['site/**', 'tests/site_browser_tests.py', '.github/workflows/site.yml']
+  push:
+    branches: [main]
+    paths: ['site/**', 'tests/site_browser_tests.py', '.github/workflows/site.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Check data integrity and viewer contracts
+        run: npm --prefix site test
+      - name: Install isolated browser test dependencies
+        run: |
+          python3 -m venv build/browser-env
+          build/browser-env/bin/pip install playwright==1.55.0
+          build/browser-env/bin/playwright install --with-deps chromium
+      - name: Check real browser behavior
+        run: build/browser-env/bin/python tests/site_browser_tests.py
+      - name: Retain verified Pages-ready files
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: verified-static-site
+          path: |
+            site/index.html
+            site/*.css
+            site/*.js
+            site/assets/
+            site/data/
+      - name: Retain browser proof
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: browser-verification
+          path: build/site-verification/

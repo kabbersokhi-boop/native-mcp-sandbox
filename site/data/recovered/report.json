@@ -1,0 +1,371 @@
+{
+  "deploymentTarget": "x86-64 (ELF machine 62)",
+  "evidence": [
+    {
+      "actionId": "c4c82ff1da69fd1e3bc48d24667b4996",
+      "arguments": {
+        "maxMatches": 10,
+        "path": "application.log",
+        "query": "INC-042",
+        "root": "evidence"
+      },
+      "id": "e1",
+      "isError": false,
+      "responseId": 3,
+      "structured": {
+        "bytesScanned": 201,
+        "caseSensitive": true,
+        "fileChangedDuringRead": false,
+        "linesScanned": 4,
+        "matchLimitReached": false,
+        "matches": [
+          {
+            "byteOffset": 14,
+            "line": 1,
+            "preview": "{\"incident\": \"INC-042\", \"event\": \"deployment_started\"}",
+            "previewTruncatedEnd": false,
+            "previewTruncatedStart": false
+          },
+          {
+            "byteOffset": 69,
+            "line": 2,
+            "preview": "{\"incident\": \"INC-042\", \"event\": \"authentication_failed\"}",
+            "previewTruncatedEnd": false,
+            "previewTruncatedStart": false
+          },
+          {
+            "byteOffset": 127,
+            "line": 3,
+            "preview": "{\"incident\": \"INC-042\", \"event\": \"retry\"}",
+            "previewTruncatedEnd": false,
+            "previewTruncatedStart": false
+          },
+          {
+            "byteOffset": 169,
+            "line": 4,
+            "preview": "{\"incident\": \"INC-042\", \"event\": \"recovered\"}",
+            "previewTruncatedEnd": false,
+            "previewTruncatedStart": false
+          }
+        ],
+        "path": "<redacted>",
+        "root": "evidence"
+      },
+      "tool": "logs.search"
+    },
+    {
+      "actionId": "274c23127eee9a18ca6075cd33c43d40",
+      "arguments": {
+        "maxLines": 2,
+        "path": "application.log",
+        "root": "evidence"
+      },
+      "id": "e2",
+      "isError": false,
+      "responseId": 4,
+      "structured": {
+        "bytesScanned": 201,
+        "fileChangedDuringRead": false,
+        "lines": [
+          {
+            "byteOffset": 113,
+            "line": 3,
+            "preview": "{\"incident\": \"INC-042\", \"event\": \"retry\"}",
+            "previewTruncatedStart": false
+          },
+          {
+            "byteOffset": 155,
+            "line": 4,
+            "preview": "{\"incident\": \"INC-042\", \"event\": \"recovered\"}",
+            "previewTruncatedStart": false
+          }
+        ],
+        "linesScanned": 4,
+        "path": "<redacted>",
+        "root": "evidence"
+      },
+      "tool": "logs.tail"
+    },
+    {
+      "actionId": "e0387164e4ab51e0fe5e4ef8ca6bc37d",
+      "arguments": {
+        "path": "deployment.elf",
+        "root": "evidence"
+      },
+      "id": "e3",
+      "isError": false,
+      "responseId": 5,
+      "structured": {
+        "buildId": null,
+        "class": "ELF64",
+        "endianness": "little",
+        "entryPoint": "0x0",
+        "fileChangedDuringRead": false,
+        "fileType": "executable",
+        "fileTypeNumber": 2,
+        "interpreter": null,
+        "machine": "x86_64",
+        "machineNumber": 62,
+        "metadataBytesRead": 80,
+        "neededLibraries": [],
+        "neededLibrariesTruncated": false,
+        "osAbi": "linux",
+        "osAbiNumber": 3,
+        "path": "<redacted>",
+        "pieExecutable": false,
+        "positionIndependent": false,
+        "programHeaderCount": 0,
+        "relro": "none",
+        "root": "evidence",
+        "segmentSummariesTruncated": false,
+        "segments": [],
+        "stackPolicy": "unspecified",
+        "writableExecutableLoadSegment": false
+      },
+      "tool": "elf.inspect"
+    },
+    {
+      "actionId": "6ac509b7821d9e4d4ba4e949e2a1f171",
+      "arguments": {
+        "process": "server"
+      },
+      "id": "e4",
+      "isError": false,
+      "responseId": 6,
+      "structured": {
+        "pidfdPinned": true,
+        "process": "server"
+      },
+      "tool": "proc.memory"
+    }
+  ],
+  "facts": [
+    {
+      "claim": "The bounded search returned 4 incident lines.",
+      "evidence": [
+        "e1"
+      ],
+      "id": "f1"
+    },
+    {
+      "claim": "The ELF header declares machine number 62.",
+      "evidence": [
+        "e3"
+      ],
+      "id": "f2"
+    },
+    {
+      "claim": "The named server was observed with strict pidfd identity pinning.",
+      "evidence": [
+        "e4"
+      ],
+      "id": "f3"
+    }
+  ],
+  "inferences": [
+    {
+      "claim": "The available incident log reports recovery after retries.",
+      "evidence": [
+        "e1",
+        "e2"
+      ]
+    }
+  ],
+  "limitations": [
+    "Hostile proposals are scripted independently of log text. This tests enforcement, not model susceptibility.",
+    "Each evidence item projects a validated MCP result. Volatile process values are retained in run.json.",
+    "Transcript correlation does not authenticate a report rewritten by an attacker."
+  ],
+  "provider": "deterministic scripted proposals; no live model",
+  "rejections": [],
+  "result": "recovery-observed",
+  "scenario": "recovered",
+  "schemaVersion": 1,
+  "scope": "Recorded native execution on synthetic evidence; not a browser sandbox.",
+  "trace": [
+    {
+      "event": "process_start",
+      "metadata": {}
+    },
+    {
+      "event": "initialize_request",
+      "metadata": {}
+    },
+    {
+      "event": "initialize_response",
+      "metadata": {
+        "response": "1"
+      }
+    },
+    {
+      "event": "initialized_notification",
+      "metadata": {}
+    },
+    {
+      "event": "tools_list_request",
+      "metadata": {}
+    },
+    {
+      "event": "tools_list_response",
+      "metadata": {
+        "response": "2"
+      }
+    },
+    {
+      "event": "surface_captured",
+      "metadata": {
+        "surface": "8406973addbedfa9de655769ca4e9cb0c4361ec131932338a679bd2d15ffb612"
+      }
+    },
+    {
+      "event": "provider_turn_start",
+      "metadata": {
+        "bytes": "2321",
+        "turn": "0"
+      }
+    },
+    {
+      "event": "provider_turn_response",
+      "metadata": {
+        "bytes": "550",
+        "turn": "0"
+      }
+    },
+    {
+      "event": "authorized",
+      "metadata": {
+        "action": "c4c82ff1da69fd1e3bc48d24667b4996",
+        "proposal": "call-2419329067823cab5b4e5ac5dd18a6ab"
+      }
+    },
+    {
+      "event": "mcp_request",
+      "metadata": {
+        "action": "c4c82ff1da69fd1e3bc48d24667b4996",
+        "response": "3"
+      }
+    },
+    {
+      "event": "mcp_response",
+      "metadata": {
+        "action": "c4c82ff1da69fd1e3bc48d24667b4996",
+        "response": "3"
+      }
+    },
+    {
+      "event": "evidence_validated",
+      "metadata": {
+        "action": "c4c82ff1da69fd1e3bc48d24667b4996",
+        "response": "3"
+      }
+    },
+    {
+      "event": "authorized",
+      "metadata": {
+        "action": "274c23127eee9a18ca6075cd33c43d40",
+        "proposal": "call-0c62f876ef1dea830de9f32c2f4b46dd"
+      }
+    },
+    {
+      "event": "mcp_request",
+      "metadata": {
+        "action": "274c23127eee9a18ca6075cd33c43d40",
+        "response": "4"
+      }
+    },
+    {
+      "event": "mcp_response",
+      "metadata": {
+        "action": "274c23127eee9a18ca6075cd33c43d40",
+        "response": "4"
+      }
+    },
+    {
+      "event": "evidence_validated",
+      "metadata": {
+        "action": "274c23127eee9a18ca6075cd33c43d40",
+        "response": "4"
+      }
+    },
+    {
+      "event": "authorized",
+      "metadata": {
+        "action": "e0387164e4ab51e0fe5e4ef8ca6bc37d",
+        "proposal": "call-780d84b20d7ae7e6292919399348bdbf"
+      }
+    },
+    {
+      "event": "mcp_request",
+      "metadata": {
+        "action": "e0387164e4ab51e0fe5e4ef8ca6bc37d",
+        "response": "5"
+      }
+    },
+    {
+      "event": "mcp_response",
+      "metadata": {
+        "action": "e0387164e4ab51e0fe5e4ef8ca6bc37d",
+        "response": "5"
+      }
+    },
+    {
+      "event": "evidence_validated",
+      "metadata": {
+        "action": "e0387164e4ab51e0fe5e4ef8ca6bc37d",
+        "response": "5"
+      }
+    },
+    {
+      "event": "authorized",
+      "metadata": {
+        "action": "6ac509b7821d9e4d4ba4e949e2a1f171",
+        "proposal": "call-c064fbca9d9de8dd9bb0624984403b28"
+      }
+    },
+    {
+      "event": "mcp_request",
+      "metadata": {
+        "action": "6ac509b7821d9e4d4ba4e949e2a1f171",
+        "response": "6"
+      }
+    },
+    {
+      "event": "mcp_response",
+      "metadata": {
+        "action": "6ac509b7821d9e4d4ba4e949e2a1f171",
+        "response": "6"
+      }
+    },
+    {
+      "event": "evidence_validated",
+      "metadata": {
+        "action": "6ac509b7821d9e4d4ba4e949e2a1f171",
+        "response": "6"
+      }
+    },
+    {
+      "event": "provider_turn_start",
+      "metadata": {
+        "bytes": "2321",
+        "turn": "1"
+      }
+    },
+    {
+      "event": "provider_turn_response",
+      "metadata": {
+        "bytes": "57",
+        "turn": "1"
+      }
+    },
+    {
+      "event": "outcome",
+      "metadata": {
+        "outcome": "final"
+      }
+    }
+  ],
+  "unresolved": [
+    "The process counters describe this demo server, not the incident application.",
+    "Synthetic logs are observations, not proof of the real cause of an outage."
+  ]
+}

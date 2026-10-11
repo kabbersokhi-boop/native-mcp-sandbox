@@ -4,7 +4,7 @@ This guide is a short path from the public design to the implementation and test
 
 ## 1. Threat-boundary design
 
-The native server exposes a deliberately small, read-only evidence surface over stdio. A trusted operator policy maps symbolic aliases to resources; an MCP client never supplies a raw host path or PID. The separate Python agent may ask an optional hosted provider for guidance, but provider output is untrusted and cannot invoke an MCP method directly.
+The native server exposes a deliberately small, read-only evidence surface over stdio. A trusted operator policy maps aliases to roots and processes. An MCP client supplies a root alias and relative file path, or a process alias, never an arbitrary absolute path or PID. The separate Python agent may ask an optional hosted provider for guidance, but provider output is untrusted and cannot invoke an MCP method directly.
 
 Start with [`ARCHITECTURE.md`](../ARCHITECTURE.md), [`THREAT_MODEL.md`](../THREAT_MODEL.md), and [ADR 0013](adr/0013-external-model-client-boundary.md).
 

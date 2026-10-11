@@ -1,0 +1,2 @@
+PASS openat2: strict startup rejects; explicit compatibility warns
+PASS pidfd_open: strict startup rejects; explicit compatibility warns

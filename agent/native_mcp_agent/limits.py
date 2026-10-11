@@ -20,6 +20,7 @@ class Limits:
     proposed_tool_call_count: int = 4
     tool_argument_bytes: int = 4 * 1024
     transcript_bytes: int = 32 * 1024
+    transcript_event_count: int = 128
     provider_connect_timeout_ms: int = 500
     provider_read_inactivity_timeout_ms: int = 1_000
     provider_total_timeout_ms: int = 5_000
@@ -54,6 +55,7 @@ class Limits:
         "proposed_tool_call_count": 16,
         "tool_argument_bytes": 16 * 1024,
         "transcript_bytes": 128 * 1024,
+        "transcript_event_count": 128,
         "provider_connect_timeout_ms": 5_000,
         "provider_read_inactivity_timeout_ms": 10_000,
         "provider_total_timeout_ms": 30_000,

@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="A C++20 runtime for bounded AI-agent evidence tools. Explore real native traces, policy rejections and reproducible measurements.">
+  <meta name="theme-color" content="#111b27">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; media-src 'self'; object-src 'none'; base-uri 'none'">
+  <meta property="og:title" content="Native MCP Sandbox — the boundary is native">
+  <meta property="og:description" content="Four read-only tools. A bounded C++20 runtime. Evidence you can reproduce.">
+  <meta property="og:image" content="assets/social-preview.png">
+  <title>Native MCP Sandbox · The boundary is native</title>
+  <link rel="stylesheet" href="styles.css">
+  <script type="module" src="app.js"></script>
+</head>
+<body>
+  <a class="skip" href="#main">Skip to investigation</a>
+  <header class="topbar">
+    <a class="brand" href="#"><span class="mark" aria-hidden="true">N/</span> Native MCP Sandbox</a>
+    <nav aria-label="Main"><a href="#investigation">Investigation</a><a href="#measurements">Measurements</a><a href="#engineering">Engineering</a><a href="https://github.com/kabbersokhi-boop/native-mcp-sandbox">Source ↗</a></nav>
+  </header>
+  <main id="main">
+    <section class="hero">
+      <div>
+        <p class="eyebrow">C++20 / LINUX / AI INFRASTRUCTURE</p>
+        <h1>Give agents evidence.<br><span>Keep the boundary native.</span></h1>
+        <p class="lead">An agent can propose a tool call. The C++ runtime decides what it can read, how much work it can do, and when the connection must stop.</p>
+        <div class="actions"><a class="button" href="#investigation">Inspect a real trace <span aria-hidden="true">↓</span></a><a href="#reproduce">Run it yourself ↗</a></div>
+        <p class="small">Read-only evidence tools. No shell. No provider key needed for this demo.</p>
+      </div>
+      <aside class="boundary" aria-label="Native authority boundary">
+        <div class="window-bar"><span>native-mcp-sandbox</span><span class="live-dot">stdio</span></div>
+        <div class="boundary-flow"><span class="flow-node">Agent proposal</span><span class="flow-arrow">↓ JSON-RPC</span><div class="native-node"><span class="eyebrow">C++ AUTHORITY BOUNDARY</span><strong>Validate → Admit → Inspect</strong><span>openat2 · pidfd · RAII · stop tokens</span></div><span class="flow-arrow">↓ bounded result</span><span class="flow-node">Evidence, with provenance</span></div>
+        <div class="boundary-stats"><div><strong>4</strong><span>read-only tools</span></div><div><strong>2</strong><span>native workers</span></div><div><strong>16</strong><span>unfinished-call cap</span></div></div>
+      </aside>
+    </section>
+
+    <div class="scope-banner"><strong>What this is:</strong> a capability-bounded evidence server. It is not a container or kernel sandbox. This page replays recorded native executions; it does not run Linux controls in your browser.</div>
+
+    <section id="investigation" class="section">
+      <div class="section-heading"><div><p class="eyebrow">01 / FOLLOW THE EVIDENCE</p><h2>One incident. Three outcomes.</h2></div><p>Success matters. So does refusing an unsupported conclusion—and rejecting a request that crosses the boundary.</p></div>
+      <div class="scenario-tabs" role="group" aria-label="Choose an investigation">
+        <button type="button" data-scenario="recovered" aria-pressed="true"><span>01</span> Recovery observed</button>
+        <button type="button" data-scenario="inconclusive" aria-pressed="false"><span>02</span> Evidence incomplete</button>
+        <button type="button" data-scenario="hostile" aria-pressed="false"><span>03</span> Hostile proposals</button>
+      </div>
+      <p id="load-status" class="small" role="status" aria-live="polite">Loading recorded evidence…</p>
+      <div class="investigation-grid">
+        <article class="report-card"><div class="card-heading"><span class="eyebrow">INVESTIGATION REPORT</span><span id="outcome" class="badge">Loading</span></div><h3 id="scenario-title">Synthetic incident INC-042</h3><p id="scenario-description" class="muted"></p><h4>Observed facts</h4><div id="facts"></div><h4>Supported inferences</h4><div id="inferences"></div><h4>Unresolved</h4><ul id="unresolved"></ul><div id="rejections"></div></article>
+        <aside class="trace-card"><div class="card-heading"><span class="eyebrow">NATIVE RESPONSE INSPECTOR</span><a id="download" href="data/recovered/report.json">Raw JSON ↗</a></div><div id="evidence-buttons" class="evidence-buttons"></div><div id="evidence-detail" tabindex="-1"><p class="small">Choose an evidence reference to inspect its validated result.</p></div></aside>
+      </div>
+      <details class="control-trace"><summary>Expand the orchestration control trace <span>proposals · authorization · native responses</span></summary><ol id="trace"></ol></details>
+      <p class="footnote">The provider is deterministic and scripted. Hostile proposals are supplied independently of the log text. These runs test enforcement, not a live model’s susceptibility to prompt injection.</p>
+    </section>
+
+    <section id="measurements" class="section">
+      <div class="section-heading"><div><p class="eyebrow">02 / MEASURE THE COST</p><h2>Native, with receipts.</h2></div><p>Raw samples, fixture hashes and build context. No language speedup claim. No filtered-out slow runs.</p></div>
+      <div class="measurement-grid"><div class="chart-card"><img src="data/latency.svg" alt="Measured native scan and tail latency by fixture size. The adjacent raw study contains exact values." loading="lazy"></div><div class="measurement-copy"><h3>Bounds before bravado.</h3><p>The study measures strict file opens and native analyzers separately from complete stdio scenarios. It also checks scheduler saturation, cancellation, descriptor stability and thread cleanup.</p><dl id="measurement-summary"></dl><a href="data/study.json">Inspect every sample ↗</a><p class="small">RSS belongs to the native measurement harness, including its result storage. It is not a server-only memory claim. Cancellation measurements use cooperative synthetic work.</p></div></div>
+    </section>
+
+    <section id="engineering" class="section">
+      <div class="section-heading"><div><p class="eyebrow">03 / READ THE ENGINEERING</p><h2>The difficult parts are below the API.</h2></div><p>Start with the mechanisms, then inspect the tests that challenge them.</p></div>
+      <div class="engineering-grid">
+        <article><span class="number">01</span><h3>Authority follows a descriptor.</h3><p>Root aliases and relative paths are resolved beneath an approved directory. Strict openat2 constraints and RAII keep reads attached to the validated object.</p><a href="https://github.com/kabbersokhi-boop/native-mcp-sandbox/blob/main/src/file_policy.cpp">Read the file policy ↗</a></article>
+        <article><span class="number">02</span><h3>A slow reader is a failure mode.</h3><p>The review reproduced four blocked-peer hangs. Nonblocking writes, a two-second deadline and terminal connection failure now prevent those pipe stalls from lasting indefinitely.</p><a href="https://github.com/kabbersokhi-boop/native-mcp-sandbox/blob/main/docs/adr/0015-bounded-stdio-transport.md">Read the transport decision ↗</a></article>
+        <article><span class="number">03</span><h3>Concurrency has an owner.</h3><p>Two workers, a fixed admission cap and cooperative stop tokens. Failed transports stop admission; normal EOF drains accepted work. Worker lifetime ends with one join owner.</p><a href="https://github.com/kabbersokhi-boop/native-mcp-sandbox/blob/main/src/orchestration.cpp">Inspect the scheduler ↗</a></article>
+      </div>
+      <p class="footnote">The evidence manifest records the exact source fingerprint for the measured native run.</p>
+    </section>
+
+    <section id="reproduce" class="reproduce section">
+      <div><p class="eyebrow">04 / YOUR MACHINE, YOUR VERIFICATION</p><h2>Run the same investigation.</h2><p>Linux with strict openat2 and pidfd support. Build the native runtime, install the small external client, and inspect the reports.</p><a href="https://github.com/kabbersokhi-boop/native-mcp-sandbox#build-and-test">Build prerequisites ↗</a></div>
+      <pre><code>cmake --preset release
+cmake --build --preset release
+python3 -m venv build/demo-venv
+build/demo-venv/bin/pip install ./agent
+build/demo-venv/bin/native-mcp-agent demo \
+  --server ./build/release/native-mcp-sandbox \
+  --output ./build/demo</code></pre>
+    </section>
+  </main>
+  <footer><span>Built by Kabir Sokhi · C++ systems engineering for AI infrastructure</span><div><a href="data/manifest.json">Evidence manifest</a><a href="data/evaluation.json">Boundary evaluation</a><a href="https://github.com/kabbersokhi-boop/native-mcp-sandbox">Apache-2.0 · Source ↗</a></div></footer>
+</body>
+</html>

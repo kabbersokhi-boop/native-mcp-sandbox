@@ -1,0 +1,11 @@
+{
+  "name": "native-mcp-independent-client-check",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test client.test.mjs"
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/sdk": "1.30.0"
+  }
+}

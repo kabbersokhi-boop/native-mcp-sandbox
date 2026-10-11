@@ -18,6 +18,27 @@ The agent:
 python -m pip install ./agent
 ```
 
+## Run the native investigation demo
+
+Install or build the native server, then run:
+
+```bash
+native-mcp-agent demo --server /path/to/native-mcp-sandbox --output demo-output
+```
+
+The default runs three synthetic scenarios: recovery, incomplete evidence and hostile proposals.
+Each uses the real C++ tools through the shipped Python orchestrator. No provider key or network
+connection is required. Use `--scenario recovered`, `inconclusive` or `hostile` for one scenario.
+
+Each scenario writes `report.json`, `report.md`, `transcript.json` and `run.json`.
+The report separates observed facts, inferences, unresolved questions and boundary decisions.
+The hostile case distinguishes a native traversal rejection from a Python unknown-tool rejection.
+Proposals are scripted. This tests enforcement, not live-model susceptibility to prompt injection.
+
+`run.json` contains local paths, timing and redacted process observations. Publish the canonical
+report, not local run metadata. The demo requires strict `openat2` and pidfd support and never
+enables compatibility flags automatically.
+
 The package has no runtime dependency on a provider SDK. The OpenAI-compatible adapter uses the
 Python standard library and is opt-in. Deterministic tests use a loopback fake provider and require
 no credential.

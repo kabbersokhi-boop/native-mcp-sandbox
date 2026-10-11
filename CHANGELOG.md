@@ -6,7 +6,18 @@ The project follows semantic versioning before 1.0 with the usual caveat that in
 
 ## Unreleased
 
-No changes yet.
+## 0.13.0 candidate
+
+Candidate version: `v0.13.0`. Not yet tagged or published.
+
+- Bound native stdio writes with nonblocking descriptors and terminal failure semantics.
+- Stop admission and cooperatively cancel pending calls after transport failure.
+- Add supervised stalled-peer regressions and injected unavailable-kernel-control tests.
+- Separate transcript event budgets from provider collection limits.
+- Ship an installed, credential-free three-scenario investigation demo through the real native tools.
+- Add direct boundary evaluation, pinned official MCP SDK interoperability and native resource studies.
+- Add a static evidence viewer, replay recording, raw measurements and source fingerprints.
+- Verify extracted native packages and installed Python wheels together before release publication.
 
 ## 0.12.1
 

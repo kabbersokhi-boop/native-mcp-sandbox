@@ -6,6 +6,11 @@ This document explains how that claim is tested, what evidence is available, and
 
 ## Current release evidence
 
+Development candidate `v0.13.0` adds the transport, demo, independent-client and measurement work
+described in the [implementation record](FLAGSHIP_PROGRESS.md). Its public candidate artifacts are
+indexed by [source and binary hashes](../site/data/manifest.json). These are local observations,
+not GitHub CI results or published-release attestations. Historical release evidence follows.
+
 Project version `v0.12.1` binds the C++ authority boundary and Python orchestration client to MCP
 revision `2025-11-25`. It adds real-process interoperability coverage, bounded pagination, closed
 output-schema enforcement, structured-evidence limits, and release artifacts with SBOMs,
@@ -20,7 +25,8 @@ The earlier OpenAI-compatible adapter exact-head run, `31915393822`, completed s
 | Claim | Mechanism | Evidence |
 | --- | --- | --- |
 | Native server has no networking surface | Stdio-only native architecture; provider adapter is external | [`ARCHITECTURE.md`](../ARCHITECTURE.md), [ADR 0013](adr/0013-external-model-client-boundary.md), source review of `src/` |
-| Client cannot select raw file paths or PIDs | Operator policy maps aliases to roots and processes | [`tests/file_policy_tests.cpp`](../tests/file_policy_tests.cpp), [`tests/process_memory_tests.cpp`](../tests/process_memory_tests.cpp) |
+| Client cannot select arbitrary absolute paths or PIDs | Operator policy maps root aliases to approved roots; relative paths remain client input; process aliases select approved PIDs | [`tests/file_policy_tests.cpp`](../tests/file_policy_tests.cpp), [`tests/process_memory_tests.cpp`](../tests/process_memory_tests.cpp) |
+| Unread protocol pipes cannot block writes indefinitely | Nonblocking descriptors, write deadlines, terminal failure and cooperative scheduler stop | [`tests/transport_liveness_tests.py`](../tests/transport_liveness_tests.py), [`docs/adr/0015-bounded-stdio-transport.md`](adr/0015-bounded-stdio-transport.md) |
 | Strict file access is contained below a root | `openat2` resolve restrictions and retained descriptors | [`src/file_policy.cpp`](../src/file_policy.cpp), [`tests/security_regression_tests.cpp`](../tests/security_regression_tests.cpp) |
 | Strict process identity is pinned | Same-UID checks, retained proc directory, start-time validation and pidfd | [`src/process_memory.cpp`](../src/process_memory.cpp), [`tests/process_memory_tests.cpp`](../tests/process_memory_tests.cpp) |
 | Protocol parsing and work admission are bounded | Byte/token/depth limits, duplicate-key rejection and closed schemas | [`src/json_safety.cpp`](../src/json_safety.cpp), [`tests/protocol_tests.cpp`](../tests/protocol_tests.cpp), [`fuzz/`](../fuzz/) |

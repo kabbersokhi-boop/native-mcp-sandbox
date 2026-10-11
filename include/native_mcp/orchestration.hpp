@@ -63,6 +63,7 @@ class ToolScheduler final {
 
   [[nodiscard]] ToolSubmitStatus submit(ScheduledToolCall call);
   [[nodiscard]] bool cancel(const nlohmann::json& request_id);
+  void request_stop();
   // A completion callback may call shutdown(). On a worker this closes
   // admission and returns without waiting or joining. A later non-worker
   // shutdown (including normal destruction) drains accepted work and joins

@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="640" viewBox="0 0 1280 640" role="img" aria-labelledby="title">
+<title id="title">Native MCP Sandbox: C++ infrastructure for bounded AI-agent tools</title>
+<rect width="1280" height="640" fill="#111b27"/><path d="M0 570H1280M1060 0V640" stroke="#314352"/>
+<g font-family="sans-serif" fill="#edf3f7"><text x="80" y="110" font-size="20" fill="#6fe2b9" letter-spacing="4">C++20 / LINUX / AI INFRASTRUCTURE</text><text x="80" y="245" font-size="68" font-weight="650">Give agents evidence.</text><text x="80" y="330" font-size="68" font-weight="650" fill="#6fe2b9">Keep the boundary native.</text><text x="84" y="410" font-size="25" fill="#b9cad8">Four read-only tools. Bounded work. Reproducible proof.</text><text x="84" y="525" font-size="28">Native MCP Sandbox</text><text x="84" y="610" font-size="18" fill="#b9cad8">Kabir Sokhi · openat2 · pidfd · RAII · C++20 coroutines</text></g>
+</svg>

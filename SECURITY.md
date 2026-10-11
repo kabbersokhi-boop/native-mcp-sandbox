@@ -7,7 +7,7 @@ Native MCP Sandbox is before version 1.0. Security corrections target:
 - the latest tagged release; and
 - the default branch, `main`.
 
-The current project version is `v0.12.1`. A published release tag identifies its exact release commit; release tags are never rewritten.
+The development candidate is `v0.13.0`; the latest published release remains `v0.12.1` until release approval. A published release tag identifies its exact release commit; release tags are never rewritten.
 
 Version `v0.12.1` includes the external agent and optional OpenAI-compatible adapter. The
 native C++ server remains stdio-only, network-free, credential-free, and exposes no new MCP tool.
