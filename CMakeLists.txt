@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.20)
 
 project(
   native_mcp_sandbox
-  VERSION 0.12.1
+  VERSION 0.13.0
   DESCRIPTION "A security-first, resource-bounded C++20 server for local MCP evidence tools"
   LANGUAGES CXX
 )
@@ -152,6 +152,7 @@ add_library(native_mcp_protocol STATIC
   src/json_rpc.cpp
   src/server.cpp
   src/orchestration.cpp
+  src/stdio_transport.cpp
 )
 add_library(native_mcp::protocol ALIAS native_mcp_protocol)
 target_compile_features(native_mcp_protocol PUBLIC cxx_std_20)
@@ -188,9 +189,17 @@ if(NMS_BUILD_BENCHMARKS)
   target_compile_features(native_mcp_bench PRIVATE cxx_std_20)
   nms_set_project_warnings(native_mcp_bench)
   nms_enable_runtime_checks(native_mcp_bench)
+  add_executable(native_mcp_runtime_study benchmarks/runtime_study.cpp)
+  target_link_libraries(native_mcp_runtime_study PRIVATE native_mcp::protocol)
+  target_compile_features(native_mcp_runtime_study PRIVATE cxx_std_20)
+  nms_set_project_warnings(native_mcp_runtime_study)
+  nms_enable_runtime_checks(native_mcp_runtime_study)
 endif()
 
 if(BUILD_TESTING)
+  add_executable(native_mcp_unavailable_control tests/unavailable_control.cpp)
+  target_compile_features(native_mcp_unavailable_control PRIVATE cxx_std_20)
+  nms_set_project_warnings(native_mcp_unavailable_control)
   add_executable(native_mcp_foundation_tests tests/foundation_tests.cpp)
   target_link_libraries(native_mcp_foundation_tests PRIVATE native_mcp::foundation)
   target_compile_features(native_mcp_foundation_tests PRIVATE cxx_std_20)
@@ -335,6 +344,27 @@ if(BUILD_TESTING)
             --server $<TARGET_FILE:native-mcp-sandbox>
   )
   set_tests_properties(agent.investigation_demo PROPERTIES TIMEOUT 90)
+  add_test(
+    NAME protocol.transport_liveness
+    COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/transport_liveness_tests.py
+            --server $<TARGET_FILE:native-mcp-sandbox>
+  )
+  set_tests_properties(protocol.transport_liveness PROPERTIES TIMEOUT 60)
+  add_test(
+    NAME agent.flagship_demo
+    COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/flagship_demo_tests.py
+            --server $<TARGET_FILE:native-mcp-sandbox>
+  )
+  set_tests_properties(agent.flagship_demo PROPERTIES TIMEOUT 60)
+  add_test(
+    NAME policy.unavailable_controls
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/strict_control_tests.py
+            --server $<TARGET_FILE:native-mcp-sandbox>
+            --helper $<TARGET_FILE:native_mcp_unavailable_control>
+  )
+  set_tests_properties(policy.unavailable_controls PROPERTIES TIMEOUT 30)
   add_test(
     NAME agent.provider_contracts
     COMMAND ${Python3_EXECUTABLE}

@@ -287,15 +287,18 @@ class MultipleCallStopTests(unittest.TestCase):
             _, out = run(case, ((proposal("call-1", "a"), proposal("call-2", "b")),), limits)
             self.assertEqual(len(out.execution_order), 0)
             self.assertIn("skipped", events(out))
-        token = CancellationToken()
-        t = threading.Thread(target=lambda: (time.sleep(0.08), token.cancel()))
-        t.start()
-        _, out = run(
-            "delay",
-            ((proposal("call-1", "a"), proposal("call-2", "b")),),
-            cancellation=token,
-        )
-        t.join()
+        active_client = client("delay")
+
+        class CancelAfterToolWrite(CancellationToken):
+            def is_set(self):
+                return active_client.next_id >= 4
+
+        out = Orchestrator(
+            active_client,
+            ScriptedProvider(((proposal("call-1", "a"), proposal("call-2", "b")),)),
+            cancellation=CancelAfterToolWrite(),
+        ).run(req())
+        self.assertEqual(active_client.next_id, 4)
         self.assertEqual(out.outcome, "cancelled")
         self.assertIn("skipped", events(out))
 

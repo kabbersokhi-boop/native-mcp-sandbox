@@ -73,6 +73,13 @@ jobs:
           uv build --project agent --out-dir dist
           git archive HEAD | tar -x -C stage/source
 
+      - name: Verify installed native and agent packages together
+        run: >-
+          python3 scripts/verify_packages.py
+          --native-package dist/native-mcp-sandbox-*-linux-x86_64.tar.gz
+          --wheel dist/native_mcp_agent-*-py3-none-any.whl
+          --output dist/package-verification.json
+
       - name: Generate native SPDX SBOM
         uses: anchore/sbom-action@006b7ce8314066bdf1765b4500370d40fa6917a3 # v0.24.2
         with:

@@ -109,6 +109,35 @@ jobs:
       - name: Verify public documentation integrity
         run: python3 tests/docs_integrity_tests.py
 
+      - name: Generate direct native boundary evidence
+        run: python3 scripts/evaluate_boundaries.py --server ./build/native-mcp-sandbox --extended
+
+      - name: Native runtime measurement smoke
+        run: >-
+          python3 scripts/run_runtime_study.py --server ./build/native-mcp-sandbox
+          --benchmark ./build/native_mcp_runtime_study --mode smoke
+
+      - name: Install pinned independent MCP client
+        if: matrix.compiler == 'gcc'
+        working-directory: tests/interop
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Verify official SDK interoperability
+        if: matrix.compiler == 'gcc'
+        working-directory: tests/interop
+        run: NMS_SERVER="$GITHUB_WORKSPACE/build/native-mcp-sandbox" npm test
+
+      - name: Retain generated engineering evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: engineering-evidence-${{ matrix.compiler }}
+          path: |
+            build/boundary-evaluation/evaluation.*
+            build/boundary-evaluation/hostile/report.*
+            build/boundary-evaluation/suites/*
+            build/runtime-study/study.*
+            build/runtime-study/latency.svg
+
   sanitizers:
     name: ASan + UBSan + deterministic fuzz smoke
     runs-on: ubuntu-24.04

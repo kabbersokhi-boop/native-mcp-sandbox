@@ -1,0 +1,25 @@
+#reel-caption { position:fixed; z-index:1000; left:0; right:0; bottom:0;
+  min-height:116px; padding:21px 62px 23px; color:#f7faf9; background:#101b27;
+  box-shadow:0 -8px 40px #0b172633; font:16px/1.45 system-ui,sans-serif; }
+#reel-caption .reel-kicker { display:block; color:#70e3b8; font:700 11px/1.6 ui-monospace,monospace;
+  letter-spacing:2px; margin-bottom:7px; }
+#reel-caption .reel-title { display:block; font-size:22px; font-weight:700; letter-spacing:-.3px; }
+#reel-caption .reel-detail { display:block; color:#bdcbd4; font-size:14px; margin-top:3px; }
+#reel-cover { position:fixed; z-index:1100; inset:0; display:flex; flex-direction:column;
+  justify-content:center; padding:95px 120px; color:#eef6f5;
+  background:radial-gradient(circle at 83% 26%,#1b6050 0,#132a32 35%,#0c1724 76%);
+  font-family:system-ui,sans-serif; }
+#reel-cover .reel-brand {color:#70e3b8; letter-spacing:2px; font:700 15px ui-monospace,monospace}
+#reel-cover h1 {color:#f1f8f5; font-size:66px; line-height:1.04; max-width:1230px;
+  margin:40px 0 24px; letter-spacing:-3px;}
+#reel-cover p {color:#c2d7d3; font-size:25px; max-width:1100px; line-height:1.45;}
+#reel-cover .reel-rule {background:#70e3b8; width:100px; height:5px; margin-top:28px;}
+#reel-terminal {position:fixed; z-index:1100; inset:0; background:#0c1724; color:#e9f2ee;
+  padding:56px 88px; font-family:ui-monospace,SFMono-Regular,Consolas,monospace;}
+#reel-terminal .term-head {display:flex; justify-content:space-between; color:#86a9a8;
+  font-size:14px; border-bottom:1px solid #385052; padding-bottom:22px;}
+#reel-terminal h2 {font:700 28px system-ui,sans-serif; margin:31px 0 22px;color:#f4f9f7}
+#reel-terminal pre {background:#142733; color:#e3f1ea; font-size:20px; line-height:1.6;
+  max-height:none; overflow:visible; padding:30px 36px; border:1px solid #355555;}
+#reel-terminal .note {color:#a7c2bc; font:16px system-ui,sans-serif; margin-top:22px;}
+#reel-cover[hidden], #reel-terminal[hidden], #reel-caption[hidden] {display:none!important;}

@@ -3,6 +3,7 @@
 #include "native_mcp/process_memory.hpp"
 #include "native_mcp/runtime_config.hpp"
 #include "native_mcp/server.hpp"
+#include "native_mcp/stdio_transport.hpp"
 #include "native_mcp/tool_service.hpp"
 
 #include <fcntl.h>
@@ -169,7 +170,7 @@ void print_usage(std::ostream& output) {
 
 int main(int argc, char* argv[]) {
   if (argc == 1) {
-    return native_mcp::run_stdio(std::cin, std::cout, std::cerr);
+    return native_mcp::run_native_stdio();
   }
 
   if (argc == 2) {
@@ -220,7 +221,6 @@ int main(int argc, char* argv[]) {
         << "native-mcp-sandbox: warning: legacy process identity checks enabled; "
            "pidfd pinning is unavailable\n";
   }
-  return native_mcp::run_stdio(std::cin, std::cout, std::cerr,
-                               native_mcp::conservative_budget(),
-                               std::move(loaded.tools));
+  return native_mcp::run_native_stdio(native_mcp::conservative_budget(),
+                                      std::move(loaded.tools));
 }

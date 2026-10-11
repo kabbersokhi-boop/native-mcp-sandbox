@@ -504,19 +504,20 @@ class CorrelationAndCancellationTests(unittest.TestCase):
         self.assertIn(b'"cancelled"', out.transcript)
 
     def test_cancellation_during_mcp_wait_skips_later_actions(self):
-        import threading
-
-        token = CancellationToken()
         c = client("delay")
-        trigger = threading.Thread(target=lambda: (time.sleep(0.05), token.cancel()))
-        trigger.start()
+
+        class CancelAfterToolWrite(CancellationToken):
+            def is_set(self):
+                return c.next_id >= 4
+
+        token = CancelAfterToolWrite()
         out = Orchestrator(
             c,
             provider((proposal("call-1", "a"), proposal("call-2", "b"))),
             cancellation=token,
         ).run(req())
-        trigger.join()
         self.assertEqual(out.outcome, "cancelled")
+        self.assertEqual(c.next_id, 4)
         self.assertEqual(len(out.execution_order), 0)
         self.assertIn(b'"skipped"', out.transcript)
         self.assertIsNone(c.process)
@@ -610,6 +611,31 @@ class EvidenceAndTranscriptTests(unittest.TestCase):
         self.assertEqual(len(out.execution_order), 2)
         self.assertNotEqual(out.execution_order[0], out.execution_order[1])
         self.assertIn("maxActive=1", str(out.evidence))
+
+    def test_five_native_calls_do_not_exhaust_provider_collection_limit(self):
+        calls = tuple(proposal(f"call-{index}", str(index)) for index in range(5))
+        outcome = Orchestrator(client(), provider(
+            calls[:4], calls[4:],
+            ProviderFinalMessage(ProviderMessage(MessageRole.ASSISTANT, "done")),
+        )).run(req())
+        self.assertEqual(outcome.outcome, "final")
+        self.assertEqual(len(outcome.evidence), 5)
+        events = parse_bounded_transcript(outcome.transcript)
+        self.assertGreater(len(events), DEFAULT_LIMITS.object_array_items)
+
+    def test_transcript_event_limit_reserves_terminal_and_rejects_overflow(self):
+        limits = replace(DEFAULT_LIMITS, transcript_event_count=3)
+        transcript = BoundedTranscript(limits)
+        transcript.add("process_start")
+        transcript.add("initialize_request")
+        transcript.add("initialized_notification")
+        exhausted = transcript.to_json_bytes()
+        self.assertEqual(len(parse_bounded_transcript(exhausted, limits)), 3)
+        self.assertIn(b'"transcript_limit"', exhausted)
+        transcript.add("process_start")
+        self.assertEqual(transcript.to_json_bytes(), exhausted)
+        with self.assertRaises(ProviderError):
+            parse_bounded_transcript(exhausted, replace(limits, transcript_event_count=2))
 
     def test_transcript_reserves_terminal_without_erasing_prefix(self):
         import json

@@ -1,8 +1,44 @@
 # Native MCP Sandbox
 
-**Security-first AI infrastructure with a C++20 authority boundary. It exposes narrow, read-only
-Linux evidence through explicit operator policy while a separate Python client handles bounded
-investigation orchestration.**
+**Inspect Linux evidence without giving an AI a shell.**
+
+This C++20 MCP server lets an agent propose an investigation. The native runtime enforces file and process access,
+limits unfinished work, and terminates stalled protocol connections. Four read-only tools;
+no shell and no provider credentials in the native process.
+
+[Watch the end-to-end demo](site/assets/portfolio-demo.mp4) ·
+[Inspect the hostile run](site/data/hostile/report.md) ·
+[Read the engineering case study](docs/CASE_STUDY.md)
+
+[![Video preview: the C++ server denies an out-of-scope path during the hostile investigation](site/assets/demo-preview.png)](site/assets/portfolio-demo.mp4)
+
+The silent [portfolio film](site/assets/portfolio-demo.mp4) follows a fresh local
+run through the native C++ server and its real Python MCP client, then opens
+the matching recorded evidence in the trace viewer:
+
+1. An operator-approved synthetic log, ELF header and named process define the scope.
+2. The client calls `logs.search`, `logs.tail`, `elf.inspect` and `proc.memory` over stdio.
+3. Complete log evidence supports a narrow recovery observation.
+4. A capped search and mismatched ELF header leave the second case inconclusive.
+5. A traversal request is denied by C++; an invented shell tool is denied by client validation.
+6. The viewer links each claim to native response IDs and shows raw measurements and source.
+
+These are scripted proposals against synthetic evidence. The hostile run demonstrates
+enforcement at the named layers; it does not measure how a live model reacts to prompt injection.
+
+```bash
+python3 -m pip install ./agent
+native-mcp-agent demo --server ./build/release/native-mcp-sandbox --output build/demo
+```
+
+Build the native executable first using the [instructions below](#build-and-test).
+The demo runs recovery, incomplete-evidence and hostile-proposal scenarios without an API key.
+To explore the recorded evidence interactively, serve [the static trace viewer](site/index.html)
+with `python3 -m http.server 8080 --bind 127.0.0.1 --directory site`, then open
+`http://127.0.0.1:8080`.
+
+The demo and its measurements belong to source version `v0.13.0`. The latest tagged
+release is `v0.12.1`; its verification record is separate from the demo's evidence manifest.
 
 [![CI](https://github.com/kabbersokhi-boop/native-mcp-sandbox/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/kabbersokhi-boop/native-mcp-sandbox/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/kabbersokhi-boop/native-mcp-sandbox)](https://github.com/kabbersokhi-boop/native-mcp-sandbox/releases/latest)
@@ -30,8 +66,9 @@ native server?
 
 This project answers with a small MCP tool surface:
 
-- the operator maps symbolic names to approved files and processes;
-- the client selects a symbolic name, never a raw path or PID;
+- the operator maps symbolic names to approved roots and processes;
+- the client selects a root alias and a relative file path, or a process alias;
+- the client cannot select an arbitrary absolute path or raw PID;
 - the server bounds input, output, work, memory, and time;
 - strict Linux modes use descriptor-based containment and pinned process identity;
 - the native process communicates only through JSON-RPC over standard input and output;
@@ -69,7 +106,7 @@ SBOMs, checksums, and GitHub build-provenance attestations.
 
 | Tool | Purpose | Boundary |
 | --- | --- | --- |
-| `logs.search` | Search one approved log for literal text | No recursive search or client path |
+| `logs.search` | Search one approved log for literal text | Relative paths within an approved root; no recursive search |
 | `logs.tail` | Read bounded previews of final log lines | No watch mode or unbounded output |
 | `elf.inspect` | Parse selected ELF32/ELF64 metadata | Never executes or loads the target |
 | `proc.memory` | Read aggregate counters for one named process | No raw memory, maps, command line, environment, or discovery |

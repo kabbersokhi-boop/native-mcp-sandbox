@@ -350,6 +350,40 @@ void test_shutdown_from_completion_does_not_self_join() {
          "self-shutdown must preserve completed work accounting");
 }
 
+void test_transport_stop_cancels_running_and_queued_work() {
+  std::atomic<int> started{0};
+  std::atomic<int> completions{0};
+  ToolScheduler scheduler{
+      budget(3U, 1U),
+      [&](std::string_view, const Json&, const OperationContext& context) {
+        started.fetch_add(1);
+        while (!context.should_stop()) {
+          std::this_thread::sleep_for(1ms);
+        }
+        return success("stopped");
+      },
+      [&](const Json&, ToolExecutionResult) { completions.fetch_add(1); }};
+  for (int request = 0; request < 3; ++request) {
+    expect(scheduler.submit({request, "test", Json::object()}) ==
+               ToolSubmitStatus::kAccepted,
+           "stop test must admit running and queued calls");
+  }
+  const auto deadline = std::chrono::steady_clock::now() + 500ms;
+  while (started.load() == 0 && std::chrono::steady_clock::now() < deadline) {
+    std::this_thread::sleep_for(1ms);
+  }
+  expect(started.load() == 1, "one call must start before transport failure");
+  scheduler.request_stop();
+  scheduler.request_stop();
+  expect(scheduler.submit({4, "test", Json::object()}) == ToolSubmitStatus::kStopped,
+         "transport failure must close admission");
+  scheduler.shutdown();
+  expect(started.load() == 1 && completions.load() == 0,
+         "queued calls must not execute or emit a response after stop");
+  expect(scheduler.stats().cancelled == 3U && scheduler.stats().outstanding == 0U,
+         "transport stop must account for every accepted call");
+}
+
 }  // namespace
 
 int main() {
@@ -362,6 +396,7 @@ int main() {
   test_null_tool_service_returns_bounded_error();
   test_concurrent_shutdown_is_idempotent();
   test_shutdown_from_completion_does_not_self_join();
+  test_transport_stop_cancels_running_and_queued_work();
   std::cout << "All orchestration tests passed\n";
   return EXIT_SUCCESS;
 }

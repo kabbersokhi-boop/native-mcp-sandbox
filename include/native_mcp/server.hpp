@@ -6,6 +6,7 @@
 #include <nlohmann/json.hpp>
 
 #include <iosfwd>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
@@ -66,6 +67,7 @@ class Server final {
 [[nodiscard]] int run_stdio(
     std::istream& input, std::ostream& output, std::ostream& diagnostics,
     ResourceBudget budget = conservative_budget(),
-    std::optional<ToolService> tools = std::nullopt);
+    std::optional<ToolService> tools = std::nullopt,
+    std::function<bool()> transport_failed = {});
 
 }  // namespace native_mcp
