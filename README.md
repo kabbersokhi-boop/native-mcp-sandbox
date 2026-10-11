@@ -27,8 +27,9 @@ These are scripted proposals against synthetic evidence. The hostile run demonst
 enforcement at the named layers; it does not measure how a live model reacts to prompt injection.
 
 ```bash
-python3 -m pip install ./agent
-native-mcp-agent demo --server ./build/release/native-mcp-sandbox --output build/demo
+python3 -m venv build/demo-venv
+build/demo-venv/bin/pip install ./agent
+build/demo-venv/bin/native-mcp-agent demo --server ./build/dev/native-mcp-sandbox --output build/demo
 ```
 
 Build the native executable first using the [instructions below](#build-and-test).
@@ -123,7 +124,7 @@ nlohmann/json 3.11 or newer.
 
 ```bash
 sudo apt-get update
-sudo apt-get install --yes build-essential cmake ninja-build nlohmann-json3-dev python3
+sudo apt-get install --yes build-essential cmake ninja-build nlohmann-json3-dev python3 python3-venv
 
 git clone https://github.com/kabbersokhi-boop/native-mcp-sandbox.git
 cd native-mcp-sandbox

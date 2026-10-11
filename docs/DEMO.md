@@ -13,8 +13,9 @@ recorded native runs. All incident inputs are synthetic.
 After building the native server, install the agent package and run:
 
 ```bash
-python3 -m pip install ./agent
-native-mcp-agent demo --server ./build/dev/native-mcp-sandbox --output build/flagship-demo
+python3 -m venv build/demo-venv
+build/demo-venv/bin/pip install ./agent
+build/demo-venv/bin/native-mcp-agent demo --server ./build/dev/native-mcp-sandbox --output build/flagship-demo
 ```
 
 The demo uses the real `Orchestrator` and `McpStdioClient` with deterministic scripted proposals.

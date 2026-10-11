@@ -72,8 +72,9 @@
       <div><p class="eyebrow">04 / YOUR MACHINE, YOUR VERIFICATION</p><h2>Run the same investigation.</h2><p>Linux with strict openat2 and pidfd support. Build the native runtime, install the small external client, and inspect the reports.</p><a href="https://github.com/kabbersokhi-boop/native-mcp-sandbox#build-and-test">Build prerequisites ↗</a></div>
       <pre><code>cmake --preset release
 cmake --build --preset release
-python3 -m pip install ./agent
-native-mcp-agent demo \
+python3 -m venv build/demo-venv
+build/demo-venv/bin/pip install ./agent
+build/demo-venv/bin/native-mcp-agent demo \
   --server ./build/release/native-mcp-sandbox \
   --output ./build/demo</code></pre>
     </section>
