@@ -1,5 +1,5 @@
 test_budget_exact_one_over_and_lifecycle_edges_fail_closed (__main__.BudgetDeadlineLifecycleTests.test_budget_exact_one_over_and_lifecycle_edges_fail_closed) ... ok
-test_expiry_cancellation_and_shutdown_have_no_later_authority (__main__.BudgetDeadlineLifecycleTests.test_expiry_cancellation_and_shutdown_have_no_later_authority) ... /usr/lib/python3.14/subprocess.py:1139: ResourceWarning: subprocess 961148 is still running
+test_expiry_cancellation_and_shutdown_have_no_later_authority (__main__.BudgetDeadlineLifecycleTests.test_expiry_cancellation_and_shutdown_have_no_later_authority) ... /usr/lib/python3.14/subprocess.py:1139: ResourceWarning: subprocess 964237 is still running
   _warn("subprocess %s is still running" % self.pid,
 ResourceWarning: Enable tracemalloc to get the object allocation traceback
 ok
@@ -37,6 +37,6 @@ test_transcript_exact_prefix_terminal_immutability_serialized_append_and_repeat_
 test_transcript_unknown_event_metadata_schema_version_limited_and_object_tampering_fail_closed (__main__.TranscriptTamperTests.test_transcript_unknown_event_metadata_schema_version_limited_and_object_tampering_fail_closed) ... ok
 
 ----------------------------------------------------------------------
-Ran 34 tests in 1.307s
+Ran 34 tests in 1.333s
 
 OK

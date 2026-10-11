@@ -10,7 +10,7 @@ test_future_response_fails_closed (__main__.CorrelationAndCancellationTests.test
 test_unsolicited_response_fails_closed (__main__.CorrelationAndCancellationTests.test_unsolicited_response_fails_closed) ... ok
 test_initialize_and_tools_list_limits (__main__.DeadlineTests.test_initialize_and_tools_list_limits) ... ok
 test_provider_response_exact_and_one_over_bytes (__main__.DeadlineTests.test_provider_response_exact_and_one_over_bytes) ... ok
-test_startup_readiness_limit_and_overall_limit (__main__.DeadlineTests.test_startup_readiness_limit_and_overall_limit) ... /usr/lib/python3.14/subprocess.py:1139: ResourceWarning: subprocess 961049 is still running
+test_startup_readiness_limit_and_overall_limit (__main__.DeadlineTests.test_startup_readiness_limit_and_overall_limit) ... /usr/lib/python3.14/subprocess.py:1139: ResourceWarning: subprocess 964102 is still running
   _warn("subprocess %s is still running" % self.pid,
 ResourceWarning: Enable tracemalloc to get the object allocation traceback
 ok
@@ -25,7 +25,7 @@ test_graceful_shutdown_within_remaining_budget_reaps_and_clears_ownership (__mai
 test_ignored_sigterm_fixture_uses_positive_remaining_budget_for_kill_reap (__main__.ShutdownBoundaryTests.test_ignored_sigterm_fixture_uses_positive_remaining_budget_for_kill_reap) ... ok
 test_bad_json_and_response_ids_fail_closed (__main__.Tests.test_bad_json_and_response_ids_fail_closed) ... ok
 test_changed_surface_and_final_boundary (__main__.Tests.test_changed_surface_and_final_boundary) ... ok
-test_deadline_no_evidence_after_expiry (__main__.Tests.test_deadline_no_evidence_after_expiry) ... /usr/lib/python3.14/subprocess.py:1139: ResourceWarning: subprocess 961129 is still running
+test_deadline_no_evidence_after_expiry (__main__.Tests.test_deadline_no_evidence_after_expiry) ... /usr/lib/python3.14/subprocess.py:1139: ResourceWarning: subprocess 964199 is still running
   _warn("subprocess %s is still running" % self.pid,
 ResourceWarning: Enable tracemalloc to get the object allocation traceback
 ok
@@ -35,7 +35,7 @@ test_failure_skips_later_and_reaps (__main__.Tests.test_failure_skips_later_and_
 test_ignored_shutdown_is_killed_and_reaped (__main__.Tests.test_ignored_shutdown_is_killed_and_reaped) ... ok
 test_lifecycle_environment_and_cleanup (__main__.Tests.test_lifecycle_environment_and_cleanup) ... ok
 test_open_output_schemas_are_rejected_at_discovery (__main__.Tests.test_open_output_schemas_are_rejected_at_discovery) ... ok
-test_provider_late_response_discarded (__main__.Tests.test_provider_late_response_discarded) ... /usr/lib/python3.14/subprocess.py:1139: ResourceWarning: subprocess 961136 is still running
+test_provider_late_response_discarded (__main__.Tests.test_provider_late_response_discarded) ... /usr/lib/python3.14/subprocess.py:1139: ResourceWarning: subprocess 964208 is still running
   _warn("subprocess %s is still running" % self.pid,
 ResourceWarning: Enable tracemalloc to get the object allocation traceback
 ok
@@ -46,6 +46,6 @@ test_tools_list_pagination_is_bounded_and_complete (__main__.Tests.test_tools_li
 test_unbounded_provider_callback_is_not_supported (__main__.Tests.test_unbounded_provider_callback_is_not_supported) ... ok
 
 ----------------------------------------------------------------------
-Ran 37 tests in 2.005s
+Ran 37 tests in 2.466s
 
 OK
