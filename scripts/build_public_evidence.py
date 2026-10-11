@@ -20,6 +20,7 @@ from native_mcp_agent.demo import SCENARIOS, run_demo
 
 
 def build(server: Path, study: Path, destination: Path) -> None:
+    source = source_metadata()
     observed = json.loads((study / "study.json").read_text())
     if observed["serverSha256"] != hashlib.sha256(server.read_bytes()).hexdigest():
         raise RuntimeError("study was measured with a different native executable")
@@ -47,7 +48,7 @@ def build(server: Path, study: Path, destination: Path) -> None:
     assets = {str(path.relative_to(destination)): hashlib.sha256(path.read_bytes()).hexdigest()
               for path in sorted(destination.rglob("*")) if path.is_file() and path.name != "manifest.json"}
     manifest = {"schemaVersion": 1, "publication": "source v0.13.0 evidence; not a tagged release",
-                "source": source_metadata(), "serverSha256": observed["serverSha256"],
+                "source": source, "serverSha256": observed["serverSha256"],
                 "artifacts": assets,
                 "limits": ["Recorded synthetic runs; no browser-hosted Linux sandbox.",
                            "Report hashes detect changes; they do not authenticate an attacker-rewritten manifest.",
